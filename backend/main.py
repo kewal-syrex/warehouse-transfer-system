@@ -12,6 +12,10 @@ from pathlib import Path
 import pymysql
 import io
 from datetime import datetime
+import logging
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 # Import our modules
 try:
@@ -20,7 +24,11 @@ try:
     from . import calculations
     from . import import_export
 except ImportError:
-    # For direct execution
+    # For direct execution - add current directory to path
+    import sys
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import database
     import models
     import calculations
@@ -339,6 +347,13 @@ async def get_dashboard_metrics():
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Dashboard query failed: {str(e)}")
+
+# Test POST endpoint to debug endpoint registration issue
+@app.post("/api/debug-test", 
+          summary="Debug Test Endpoint",
+          description="Test endpoint to debug endpoint registration issues")
+async def debug_test():
+    return {"message": "Debug test endpoint working", "method": "POST"}
 
 @app.get("/api/transfer-recommendations",
          summary="Generate Transfer Recommendations", 
@@ -810,6 +825,153 @@ async def export_inventory_status_excel():
         raise HTTPException(
             status_code=500,
             detail=f"Inventory export failed: {str(e)}"
+        )
+
+# =============================================================================
+# SKU MANAGEMENT ENDPOINTS
+# =============================================================================
+
+@app.post("/api/skus/{sku_id}/delete",
+           summary="Delete SKU with Cascade",
+           description="Permanently delete a SKU and all associated data",
+           tags=["SKU Management"],
+           responses={
+               200: {"description": "SKU deleted successfully"},
+               404: {"description": "SKU not found"},
+               500: {"description": "Deletion failed due to database error"}
+           })
+async def delete_sku(sku_id: str):
+    """
+    Delete a SKU with cascade deletion of all related records
+    
+    Cascade Deletion Order:
+    1. monthly_sales records (historical sales data)
+    2. inventory_current records (current stock levels)
+    3. skus record (master SKU data)
+    
+    Parameters:
+        sku_id (str): The SKU identifier to delete
+        
+    Returns:
+        dict: Simple deletion confirmation
+            
+    Raises:
+        HTTPException: 404 if SKU not found, 500 for database errors
+    """
+    try:
+        logger.info(f"DELETE SKU REQUEST: Starting deletion for SKU {sku_id}")
+        db = database.get_database_connection()
+        logger.info(f"DELETE SKU REQUEST: Database connection established")
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+        
+        # Start transaction for atomic deletion
+        db.begin()
+        logger.info(f"DELETE SKU REQUEST: Transaction started")
+        
+        # First verify SKU exists
+        cursor.execute("SELECT sku_id, description FROM skus WHERE sku_id = %s", (sku_id,))
+        sku_data = cursor.fetchone()
+        logger.info(f"DELETE SKU REQUEST: SKU lookup result: {sku_data}")
+        
+        if not sku_data:
+            db.rollback()
+            logger.warning(f"DELETE SKU REQUEST: SKU {sku_id} not found")
+            raise HTTPException(status_code=404, detail=f"SKU {sku_id} not found")
+        
+        # Delete related records in proper order
+        cursor.execute("DELETE FROM monthly_sales WHERE sku_id = %s", (sku_id,))
+        cursor.execute("DELETE FROM inventory_current WHERE sku_id = %s", (sku_id,))
+        cursor.execute("DELETE FROM skus WHERE sku_id = %s", (sku_id,))
+        
+        # Commit transaction
+        db.commit()
+        
+        cursor.close()
+        db.close()
+        
+        return {
+            "success": True,
+            "message": f"SKU {sku_id} deleted successfully",
+            "sku_id": sku_data["sku_id"],
+            "description": sku_data["description"]
+        }
+        
+    except HTTPException:
+        if 'db' in locals():
+            db.rollback()
+        raise
+    except Exception as e:
+        if 'db' in locals():
+            db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"SKU deletion failed: {str(e)}"
+        )
+
+@app.post("/api/skus/bulk-delete",
+          summary="Bulk Delete Test SKUs",
+          description="Delete multiple SKUs matching test patterns (TEST-, DEMO-, SAMPLE-)",
+          tags=["SKU Management"],
+          responses={
+              200: {"description": "Bulk deletion completed"},
+              400: {"description": "No matching SKUs found"},
+              500: {"description": "Bulk deletion failed"}
+          })
+async def bulk_delete_test_skus():
+    """
+    Bulk delete SKUs matching test patterns for development cleanup
+    
+    Patterns: TEST-%, DEMO-%, SAMPLE-%
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+        
+        # Find test SKUs
+        patterns = ['TEST-%', 'DEMO-%', 'SAMPLE-%']
+        pattern_conditions = " OR ".join(["sku_id LIKE %s" for _ in patterns])
+        find_query = f"SELECT sku_id, description FROM skus WHERE {pattern_conditions}"
+        
+        cursor.execute(find_query, patterns)
+        matching_skus = cursor.fetchall()
+        
+        if not matching_skus:
+            raise HTTPException(status_code=400, detail="No test SKUs found")
+        
+        # Start transaction for bulk deletion
+        db.begin()
+        
+        # Delete each matching SKU with cascade
+        deleted_count = 0
+        for sku in matching_skus:
+            sku_id = sku['sku_id']
+            cursor.execute("DELETE FROM monthly_sales WHERE sku_id = %s", (sku_id,))
+            cursor.execute("DELETE FROM inventory_current WHERE sku_id = %s", (sku_id,))
+            cursor.execute("DELETE FROM skus WHERE sku_id = %s", (sku_id,))
+            deleted_count += 1
+        
+        # Commit all deletions
+        db.commit()
+        
+        cursor.close()
+        db.close()
+        
+        return {
+            "success": True,
+            "message": f"Deleted {deleted_count} test SKUs",
+            "deleted_count": deleted_count
+        }
+        
+    except HTTPException:
+        if 'db' in locals():
+            db.rollback()
+        raise
+    except Exception as e:
+        if 'db' in locals():
+            db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Bulk deletion failed: {str(e)}"
         )
 
 # Serve the main dashboard

@@ -243,6 +243,9 @@
                         <button class="btn btn-outline-secondary" id="clearFilters">
                             <i class="fas fa-times me-1"></i> Clear
                         </button>
+                        <button class="btn btn-outline-danger ms-2" id="bulkDeleteBtn" data-bs-toggle="modal" data-bs-target="#bulkDeleteModal">
+                            <i class="fas fa-trash me-1"></i> Delete Test SKUs
+                        </button>
                     </div>
                 </div>
             </div>
@@ -272,17 +275,106 @@
                                 <th>Total Value</th>
                                 <th>ABC/XYZ</th>
                                 <th>Last Sale</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody id="skuTableBody">
                             <tr>
-                                <td colspan="10" class="text-center py-4">
+                                <td colspan="11" class="text-center py-4">
                                     <span class="loading-spinner me-2"></span>
                                     Loading SKU data...
                                 </td>
                             </tr>
                         </tbody>
                     </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div class="modal fade" id="deleteSkuModal" tabindex="-1" aria-labelledby="deleteSkuModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="deleteSkuModalLabel">
+                        <i class="fas fa-exclamation-triangle text-warning me-2"></i>
+                        Delete SKU Confirmation
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        <strong>Warning:</strong> You are about to permanently delete this SKU and all related data.
+                    </div>
+
+                    <!-- SKU Information -->
+                    <div class="mb-3">
+                        <h6>SKU to be deleted:</h6>
+                        <div class="p-3 bg-light rounded">
+                            <strong id="deleteSku"></strong> - <span id="deleteDescription"></span>
+                        </div>
+                    </div>
+
+                    <!-- What will be deleted -->
+                    <div class="mb-3">
+                        <h6>What will be deleted:</h6>
+                        <ul class="list-unstyled">
+                            <li><i class="fas fa-database text-primary me-2"></i>SKU master record</li>
+                            <li><i class="fas fa-chart-line text-info me-2"></i>All historical sales data</li>
+                            <li><i class="fas fa-boxes text-success me-2"></i>Current inventory records</li>
+                        </ul>
+                    </div>
+
+                    <div class="text-danger small">
+                        <i class="fas fa-exclamation-circle me-1"></i>
+                        <strong>This action cannot be undone.</strong>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-danger" id="confirmDeleteBtn">
+                        <i class="fas fa-trash me-1"></i>Delete SKU
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bulk Delete Test SKUs Modal -->
+    <div class="modal fade" id="bulkDeleteModal" tabindex="-1" aria-labelledby="bulkDeleteModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="bulkDeleteModalLabel">
+                        <i class="fas fa-trash me-2"></i>Bulk Delete Test SKUs
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        <strong>Warning:</strong> This will permanently delete all test SKUs and their related data.
+                    </div>
+                    
+                    <p>This will delete all SKUs matching these patterns:</p>
+                    <ul>
+                        <li><code>TEST-*</code> - Test SKUs for development</li>
+                        <li><code>DEMO-*</code> - Demonstration SKUs</li>
+                        <li><code>SAMPLE-*</code> - Sample SKUs for documentation</li>
+                    </ul>
+                    
+                    <div class="text-danger small">
+                        <i class="fas fa-exclamation-circle me-1"></i>
+                        <strong>This action cannot be undone.</strong>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-danger" id="confirmBulkDelete">
+                        <i class="fas fa-trash me-1"></i>Delete All Test SKUs
+                    </button>
                 </div>
             </div>
         </div>
@@ -319,7 +411,7 @@
                 console.error('Error loading SKU data:', error);
                 $('#skuTableBody').html(`
                     <tr>
-                        <td colspan="10" class="text-center py-4 text-danger">
+                        <td colspan="11" class="text-center py-4 text-danger">
                             <i class="fas fa-exclamation-triangle me-2"></i>
                             Failed to load SKU data. Please refresh the page.
                         </td>
@@ -338,7 +430,7 @@
             if (skus.length === 0) {
                 tbody.html(`
                     <tr>
-                        <td colspan="10" class="text-center py-4">
+                        <td colspan="11" class="text-center py-4">
                             <i class="fas fa-search me-2"></i>
                             No SKUs found matching current filters.
                         </td>
@@ -369,6 +461,14 @@
                             ${getAbcBadge(sku.abc_code)}${getXyzBadge(sku.xyz_code)}
                         </td>
                         <td>${formatDate(sku.last_sale_date || 'N/A')}</td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-danger delete-sku-btn" 
+                                    data-sku-id="${sku.sku_id}"
+                                    data-description="${sku.description || 'N/A'}"
+                                    title="Delete SKU">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </td>
                     </tr>
                 `;
             });
@@ -482,6 +582,153 @@
             displaySkus(allSkus);
             updateSummaryMetrics(allSkus);
         }
+
+        // =============================================================================
+        // SKU DELETION FUNCTIONALITY - SIMPLIFIED
+        // =============================================================================
+
+        let currentSkuToDelete = null;
+
+        /**
+         * Initialize delete button event handlers
+         */
+        function initializeDeleteHandlers() {
+            // Handle delete button clicks
+            $(document).on('click', '.delete-sku-btn', function() {
+                const skuId = $(this).data('sku-id');
+                const description = $(this).data('description');
+                showDeleteConfirmation(skuId, description);
+            });
+            
+            // Handle actual deletion
+            $('#confirmDeleteBtn').on('click', performSkuDeletion);
+
+            // Handle bulk delete
+            $('#confirmBulkDelete').on('click', performBulkDeletion);
+        }
+
+        /**
+         * Show simple delete confirmation modal
+         */
+        function showDeleteConfirmation(skuId, description) {
+            currentSkuToDelete = skuId;
+            
+            // Update modal with SKU info
+            $('#deleteSku').text(skuId);
+            $('#deleteDescription').text(description);
+            
+            // Show modal
+            const modal = new bootstrap.Modal(document.getElementById('deleteSkuModal'));
+            modal.show();
+        }
+
+        /**
+         * Perform SKU deletion
+         */
+        async function performSkuDeletion() {
+            if (!currentSkuToDelete) {
+                return;
+            }
+
+            try {
+                // Show loading state
+                $('#confirmDeleteBtn').html(`
+                    <i class="fas fa-spinner fa-spin me-1"></i>Deleting...
+                `).prop('disabled', true);
+
+                // Call the deletion API
+                const response = await fetch(`/api/skus/${currentSkuToDelete}/delete`, {
+                    method: 'POST'
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'Deletion failed');
+                }
+
+                const result = await response.json();
+
+                // Show success message
+                alert(`SKU ${result.sku_id} deleted successfully!`);
+
+                // Close modal
+                const modal = bootstrap.Modal.getInstance(document.getElementById('deleteSkuModal'));
+                modal.hide();
+
+                // Reset button and clear current SKU
+                resetDeleteButton();
+                currentSkuToDelete = null;
+
+                // Refresh the SKU list
+                await loadSkuData();
+
+            } catch (error) {
+                console.error('Error deleting SKU:', error);
+                alert(`Failed to delete SKU: ${error.message}`);
+                resetDeleteButton();
+            }
+        }
+
+        /**
+         * Reset delete button to normal state
+         */
+        function resetDeleteButton() {
+            $('#confirmDeleteBtn').html(`
+                <i class="fas fa-trash me-1"></i>Delete SKU
+            `).prop('disabled', false);
+        }
+
+        /**
+         * Perform bulk deletion of test SKUs
+         */
+        async function performBulkDeletion() {
+            if (!confirm('Are you sure you want to delete ALL test SKUs? This action cannot be undone.')) {
+                return;
+            }
+
+            try {
+                // Show loading state
+                $('#confirmBulkDelete').html(`
+                    <i class="fas fa-spinner fa-spin me-1"></i>Deleting...
+                `).prop('disabled', true);
+
+                // Call bulk deletion API
+                const response = await fetch('/api/skus/bulk-delete', {
+                    method: 'POST'
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'Bulk deletion failed');
+                }
+
+                const result = await response.json();
+
+                // Show success message
+                alert(`Successfully deleted ${result.deleted_count} test SKUs!`);
+
+                // Close modal
+                const modal = bootstrap.Modal.getInstance(document.getElementById('bulkDeleteModal'));
+                modal.hide();
+
+                // Refresh the SKU list
+                await loadSkuData();
+
+            } catch (error) {
+                console.error('Error performing bulk deletion:', error);
+                alert(`Bulk deletion failed: ${error.message}`);
+            } finally {
+                // Reset button state
+                $('#confirmBulkDelete').html(`
+                    <i class="fas fa-trash me-1"></i>Delete All Test SKUs
+                `).prop('disabled', false);
+            }
+        }
+
+        // Initialize delete handlers when DOM is ready
+        $(document).ready(function() {
+            initializeDeleteHandlers();
+        });
     </script>
 </body>
 </html>
