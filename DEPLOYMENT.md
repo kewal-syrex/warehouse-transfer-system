@@ -1,6 +1,6 @@
-# Warehouse Transfer System - Server Deployment Guide
+# Warehouse Transfer System - Internal Server Deployment Guide
 
-## 🚀 Complete Installation Instructions for Your Developer
+## 🚀 Complete Installation Instructions for Internal Company Server
 
 ### Prerequisites Required
 - **Python 3.9+** with pip installed
@@ -82,32 +82,43 @@ DATABASE_PASSWORD=secure_password_here
 
 ### Step 6: Start the Application
 
-#### For Development/Testing:
+#### For Internal Company Use (RECOMMENDED):
 ```bash
+# This allows access from all company computers
+uvicorn backend.main:app --host 0.0.0.0 --port 8000
+```
+
+#### For Development/Testing Only:
+```bash
+# This only allows localhost access
 uvicorn backend.main:app --reload --port 8000
 ```
 
-#### For Production:
+#### For Production with Multiple Users:
 ```bash
-# Install Gunicorn
+# Install Gunicorn for better performance
 pip install gunicorn
 
-# Start with multiple workers
+# Start with multiple workers (handles more concurrent users)
 gunicorn backend.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
 ```
 
 ### Step 7: Access the Application
 
-Open your browser and navigate to:
-- **Dashboard**: http://your-server-ip:8000/static/index.html
-- **Transfer Planning**: http://your-server-ip:8000/static/transfer-planning.html
-- **Data Management**: http://your-server-ip:8000/static/data-management.html
-- **API Documentation**: http://your-server-ip:8000/api/docs
+**From any computer on your company network:**
+- **Dashboard**: http://[server-ip]:8000/static/index.html
+- **Transfer Planning**: http://[server-ip]:8000/static/transfer-planning.html
+- **Data Management**: http://[server-ip]:8000/static/data-management.html
+- **API Documentation**: http://[server-ip]:8000/api/docs
+
+**Examples:**
+- `http://192.168.1.100:8000/static/index.html` (if server IP is 192.168.1.100)
+- `http://company-server:8000/static/index.html` (if server hostname is company-server)
 
 ### Step 8: Verify Installation
 
 #### 8.1 Check System Health
-Visit: `http://your-server-ip:8000/health`
+Visit: `http://[server-ip]:8000/health`
 Should return: `{"status": "healthy", "database": "connected"}`
 
 #### 8.2 Run Performance Test
@@ -125,60 +136,6 @@ Excel Export: ✓ 3.67s
 Concurrent Users (5): ✓ 4.12s
 Memory Usage: 245MB ✓
 All tests passed!
-```
-
-## 🔧 Production Configuration
-
-### Reverse Proxy Setup (Nginx)
-Create `/etc/nginx/sites-available/warehouse-transfer`:
-```nginx
-server {
-    listen 80;
-    server_name your-domain.com;
-
-    location /static/ {
-        alias /path/to/warehouse-transfer-system/frontend/;
-        expires 1d;
-    }
-
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-```
-
-### SSL Certificate (Let's Encrypt)
-```bash
-sudo apt install certbot python3-certbot-nginx
-sudo certbot --nginx -d your-domain.com
-```
-
-### Systemd Service (Linux)
-Create `/etc/systemd/system/warehouse-transfer.service`:
-```ini
-[Unit]
-Description=Warehouse Transfer System
-After=network.target
-
-[Service]
-Type=exec
-User=warehouse-app
-Group=warehouse-app
-WorkingDirectory=/opt/warehouse-transfer-system
-Environment=PATH=/opt/warehouse-transfer-system/venv/bin
-ExecStart=/opt/warehouse-transfer-system/venv/bin/gunicorn backend.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 127.0.0.1:8000
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start:
-```bash
-sudo systemctl enable warehouse-transfer
-sudo systemctl start warehouse-transfer
 ```
 
 ## 📊 Data Import Instructions
@@ -204,39 +161,72 @@ sudo systemctl start warehouse-transfer
 4. Review validation results
 5. Confirm import
 
+## 🔧 Optional: Running as Windows Service
+
+If you want the system to start automatically when the server boots:
+
+### Using NSSM (Windows):
+```bash
+# Download NSSM (Non-Sucking Service Manager)
+# Install your service
+nssm install WarehouseTransfer "C:\path\to\warehouse-transfer-system\venv\Scripts\python.exe"
+nssm set WarehouseTransfer Arguments "-m uvicorn backend.main:app --host 0.0.0.0 --port 8000"
+nssm set WarehouseTransfer AppDirectory "C:\path\to\warehouse-transfer-system"
+nssm start WarehouseTransfer
+```
+
+### Using Systemd (Linux):
+Create `/etc/systemd/system/warehouse-transfer.service`:
+```ini
+[Unit]
+Description=Warehouse Transfer System
+After=network.target
+
+[Service]
+Type=exec
+User=warehouse-app
+Group=warehouse-app
+WorkingDirectory=/opt/warehouse-transfer-system
+Environment=PATH=/opt/warehouse-transfer-system/venv/bin
+ExecStart=/opt/warehouse-transfer-system/venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start:
+```bash
+sudo systemctl enable warehouse-transfer
+sudo systemctl start warehouse-transfer
+```
+
 ## 🔍 Troubleshooting
 
 ### Common Issues:
 
 #### "Database connection failed"
-- Check MySQL service is running: `sudo systemctl status mysql`
+- Check MySQL service is running: 
+  - Windows: Check Services panel
+  - Linux: `sudo systemctl status mysql`
 - Verify credentials in `.env` file
 - Test connection: `mysql -u warehouse_user -p warehouse_transfer`
 
 #### "Port 8000 already in use"
-- Kill existing process: `sudo lsof -t -i tcp:8000 | xargs kill`
-- Or use different port: `uvicorn backend.main:app --port 8001`
+- Kill existing process:
+  - Windows: `netstat -ano | findstr :8000` then `taskkill /PID [PID] /F`
+  - Linux: `sudo lsof -t -i tcp:8000 | xargs kill`
+- Or use different port: `uvicorn backend.main:app --host 0.0.0.0 --port 8001`
 
-#### "Permission denied" errors
-- Ensure proper file permissions: `chmod -R 755 warehouse-transfer-system/`
-- Check user ownership: `chown -R warehouse-app:warehouse-app /opt/warehouse-transfer-system/`
+#### "Can't access from other computers"
+- Make sure you're using `--host 0.0.0.0` not just `--host localhost`
+- Check Windows Firewall / Linux iptables allows port 8000
+- Verify company network allows internal server access
 
-#### Performance issues
+#### Performance issues with many users
+- Use Gunicorn with multiple workers: `gunicorn backend.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000`
 - Increase MySQL memory settings
-- Add database indexes if processing 10,000+ SKUs
-- Monitor with: `htop` and `mysql processlist`
-
-### Logs and Monitoring:
-```bash
-# View application logs
-journalctl -u warehouse-transfer -f
-
-# View MySQL slow query log
-sudo tail -f /var/log/mysql/mysql-slow.log
-
-# Monitor system resources
-htop
-```
+- Monitor with Task Manager (Windows) or `htop` (Linux)
 
 ## 📞 Support Information
 
@@ -246,6 +236,7 @@ htop
 - **Database**: MySQL 8.0+
 - **Frontend**: Bootstrap 5 + DataTables
 - **Performance**: Tested with 4,000+ SKUs
+- **Network**: Designed for internal company networks (HTTP, no SSL required)
 
 ### Feature Set:
 - ✅ Stockout-corrected demand forecasting
@@ -261,6 +252,7 @@ htop
 - SQL injection protection (SQLAlchemy ORM)
 - File upload validation
 - Error handling without data exposure
+- **Note**: Designed for internal company networks - no SSL/HTTPS required
 
 ---
 
@@ -271,8 +263,11 @@ htop
 git clone https://github.com/arjayp-mv/warehouse-transfer-system.git
 cd warehouse-transfer-system
 python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# venv\Scripts\activate   # Windows
+
+# Windows activation:
+venv\Scripts\activate
+# Linux/Mac activation:
+source venv/bin/activate
 
 # 2. Install and configure
 pip install -r requirements.txt
@@ -283,10 +278,19 @@ cp .env.example .env
 mysql -u root -p < database/schema.sql
 mysql -u root -p < database/sample_data.sql
 
-# 4. Start application
-uvicorn backend.main:app --reload --port 8000
+# 4. Start application for company network access
+uvicorn backend.main:app --host 0.0.0.0 --port 8000
 
-# 5. Access at: http://localhost:8000/static/index.html
+# 5. Access from any company computer at: 
+# http://[server-ip]:8000/static/index.html
 ```
 
-**The system is production-ready and fully tested. Contact support if you encounter any issues during deployment.**
+## ⚠️ Important Notes for Internal Company Deployment
+
+1. **No SSL/HTTPS Required** - The system works perfectly with HTTP for internal company networks
+2. **Firewall Configuration** - Ensure your server firewall allows port 8000 for internal network access  
+3. **Use `--host 0.0.0.0`** - This is critical for allowing access from other company computers
+4. **Static IP Recommended** - Give your server a static IP so users always know how to access it
+5. **Bookmark the Dashboard** - Have users bookmark `http://[server-ip]:8000/static/index.html`
+
+**The system is production-ready for internal company networks and fully tested. No external internet access or SSL certificates required.**
