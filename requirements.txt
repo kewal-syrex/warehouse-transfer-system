@@ -1,0 +1,22 @@
+# Warehouse Transfer Planning Tool - Python Dependencies
+
+# Web Framework
+fastapi
+uvicorn[standard]
+
+# Database
+sqlalchemy
+pymysql
+
+# Data Processing
+pandas
+numpy
+openpyxl
+
+# Utilities
+python-multipart
+python-dotenv
+
+# Development/Testing
+pytest
+pytest-asyncio

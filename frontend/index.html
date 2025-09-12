@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<!-- 
+Warehouse Transfer Planning Tool - Main Dashboard
+====================================================
+Purpose: Primary dashboard interface for inventory managers
+Features: Real-time metrics, system alerts, quick navigation
+Business Impact: Provides at-a-glance view of critical inventory status
+Performance: Optimized for fast loading with API-driven data updates
+-->
+<html lang="en">
+<head>
+    <!-- Meta Configuration -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warehouse Transfer Planning Tool - Dashboard</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome for icons -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Custom Styles for Dashboard Components -->
+    <style>
+        /* Metric Cards - Display key inventory KPIs */
+        .metric-card {
+            border-left: 4px solid #007bff;  /* Blue accent for visual hierarchy */
+            transition: transform 0.2s;      /* Smooth hover animation */
+        }
+        .metric-card:hover {
+            transform: translateY(-2px);
+        }
+        
+        /* Metric Display Styling - Large numbers with labels */
+        .metric-value {
+            font-size: 2.5rem;           /* Large font for quick scanning */
+            font-weight: bold;
+            color: #333;
+        }
+        .metric-label {
+            color: #666;                 /* Subdued color for labels */
+            font-size: 0.9rem;
+            text-transform: uppercase;   /* Professional appearance */
+            letter-spacing: 0.5px;
+        }
+        
+        /* Alert Badge - Shows count of active alerts */
+        .alert-count {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            background: #dc3545;        /* Red background for urgency */
+            color: white;
+            border-radius: 50%;         /* Circular badge design */
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-connected { background-color: #28a745; }
+        .status-warning { background-color: #ffc107; }
+        .status-error { background-color: #dc3545; }
+        
+        .action-btn {
+            border-radius: 8px;
+            padding: 12px 24px;
+            font-weight: 500;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.2s;
+        }
+        .action-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .data-timestamp {
+            font-size: 0.85rem;
+            color: #666;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <!-- 
+    =================================================================
+    MAIN NAVIGATION BAR
+    =================================================================
+    Purpose: Primary navigation with system status and refresh controls
+    Features: Branding, connection status indicator, manual refresh
+    Business Value: Quick access to system health and data refresh
+    -->
+    <nav class="navbar navbar-dark bg-primary">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1">
+                <i class="fas fa-warehouse me-2"></i>
+                Warehouse Transfer Planning Tool
+            </span>
+            <div class="d-flex align-items-center">
+                <span class="status-indicator status-connected"></span>
+                <small class="text-light me-3">System Online</small>
+                <button class="btn btn-outline-light btn-sm" onclick="refreshData()">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 
+    =================================================================
+    MAIN DASHBOARD CONTENT AREA
+    =================================================================
+    Purpose: Container for all dashboard widgets and metrics
+    Layout: Responsive grid system with metric cards and action panels
+    -->
+    <div class="container-fluid mt-4">
+        <!-- 
+        Loading Indicator - Shown during API data fetching
+        Provides user feedback during dashboard initialization
+        -->
+        <div id="loading" class="loading">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">Loading dashboard data...</p>
+        </div>
+
+        <!-- 
+        =================================================================
+        DASHBOARD HEADER SECTION
+        =================================================================
+        Purpose: Page title, subtitle, and alert notification center
+        Components: Main heading, data timestamp, alert button with badge
+        Business Impact: Provides context and immediate access to urgent issues
+        -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h1 class="h2 mb-1">Transfer Planning Dashboard</h1>
+                        <p class="text-muted mb-0">Burnaby → Kentucky Warehouse Optimization</p>
+                        <small id="data-timestamp" class="data-timestamp">Data as of: Loading...</small>
+                    </div>
+                    <div class="position-relative">
+                        <button id="alertsBtn" class="btn btn-outline-danger position-relative">
+                            <i class="fas fa-bell"></i> Alerts
+                            <span id="alert-count" class="alert-count" style="display: none;">0</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 
+        =================================================================
+        KEY METRICS CARDS SECTION
+        =================================================================
+        Purpose: Display critical inventory KPIs at-a-glance
+        Metrics: Out of stock, Low stock, Inventory value, Sales, Stockouts, Total SKUs
+        Business Impact: Immediate visibility into inventory health and urgency
+        Data Source: /api/dashboard endpoint, refreshed via JavaScript
+        Performance: Real-time updates without page refresh
+        -->
+        <div class="row mb-4">
+            <!-- Critical Stock Alert - Red priority indicator -->
+            <div class="col-md-2">
+                <div class="card metric-card h-100">
+                    <div class="card-body text-center">
+                        <i class="fas fa-exclamation-triangle text-danger mb-2" style="font-size: 1.5rem;"></i>
+                        <div id="out-of-stock" class="metric-value text-danger">--</div>
+                        <div class="metric-label">Out of Stock</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Low Stock Warning - Yellow priority indicator -->
+            <div class="col-md-2">
+                <div class="card metric-card h-100">
+                    <div class="card-body text-center">
+                        <i class="fas fa-exclamation-circle text-warning mb-2" style="font-size: 1.5rem;"></i>
+                        <div id="low-stock" class="metric-value text-warning">--</div>
+                        <div class="metric-label">Low Stock</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-2">
+                <div class="card metric-card h-100">
+                    <div class="card-body text-center">
+                        <i class="fas fa-dollar-sign text-success mb-2" style="font-size: 1.5rem;"></i>
+                        <div id="inventory-value" class="metric-value text-success">--</div>
+                        <div class="metric-label">Inventory Value</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-2">
+                <div class="card metric-card h-100">
+                    <div class="card-body text-center">
+                        <i class="fas fa-chart-line text-info mb-2" style="font-size: 1.5rem;"></i>
+                        <div id="current-sales" class="metric-value text-info">--</div>
+                        <div class="metric-label">Monthly Sales</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-2">
+                <div class="card metric-card h-100">
+                    <div class="card-body text-center">
+                        <i class="fas fa-times-circle text-danger mb-2" style="font-size: 1.5rem;"></i>
+                        <div id="stockout-skus" class="metric-value text-secondary">--</div>
+                        <div class="metric-label">Stockout Affected</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-2">
+                <div class="card metric-card h-100">
+                    <div class="card-body text-center">
+                        <i class="fas fa-database text-primary mb-2" style="font-size: 1.5rem;"></i>
+                        <div id="total-skus" class="metric-value text-primary">--</div>
+                        <div class="metric-label">Total SKUs</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Quick Actions</h5>
+                        <div class="d-flex flex-wrap gap-3">
+                            <a href="transfer-planning.html" class="btn btn-primary action-btn">
+                                <i class="fas fa-truck me-2"></i>Plan Transfers
+                            </a>
+                            <a href="data-management.html" class="btn btn-success action-btn">
+                                <i class="fas fa-database me-2"></i>Data Management
+                            </a>
+                            <button class="btn btn-outline-success action-btn" onclick="window.open('/static/sku-listing.html', '_blank')">
+                                <i class="fas fa-list me-2"></i>View All SKUs
+                            </button>
+                            <button class="btn btn-outline-info action-btn" onclick="window.open('/api/transfer-recommendations', '_blank')">
+                                <i class="fas fa-download me-2"></i>Download Recommendations
+                            </button>
+                            <button class="btn btn-outline-secondary action-btn" onclick="window.open('/api/docs', '_blank')">
+                                <i class="fas fa-code me-2"></i>API Documentation
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Alerts Section -->
+        <div id="alerts-section" class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">
+                            <i class="fas fa-bell text-warning me-2"></i>System Alerts
+                        </h5>
+                        <div id="alerts-container">
+                            <div class="text-center text-muted">
+                                <div class="spinner-border spinner-border-sm" role="status">
+                                    <span class="visually-hidden">Loading alerts...</span>
+                                </div>
+                                <span class="ms-2">Loading alerts...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="text-center text-muted py-3">
+            <small>
+                Warehouse Transfer Planning Tool v1.0.0 | 
+                <a href="/health" target="_blank">System Health</a> | 
+                Backend API: <span id="api-status" class="text-success">Connected</span>
+            </small>
+        </footer>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- 
+    =================================================================
+    DASHBOARD JAVASCRIPT - DATA MANAGEMENT & UI INTERACTIONS
+    =================================================================
+    Purpose: Handle API communication, data updates, and user interactions
+    Architecture: Vanilla JavaScript with async/await for API calls
+    Performance: Optimized for fast updates without full page refresh
+    Error Handling: Comprehensive try/catch with user-friendly messages
+    -->
+    <script>
+        /**
+         * Global Variables
+         * ===============
+         * Store dashboard state and configuration
+         */
+        
+        /** @type {Object|null} Cached dashboard data from API */
+        let dashboardData = null;
+
+        /**
+         * Initialize Dashboard
+         * ===================
+         * Set up event listeners and load initial data when DOM is ready
+         * Called automatically when page loads
+         */
+        document.addEventListener('DOMContentLoaded', function() {
+            loadDashboardData();
+        });
+
+        /**
+         * Load Dashboard Data from Backend API
+         * ====================================
+         * Fetches real-time metrics from the warehouse system
+         * Updates all dashboard components with current data
+         * Handles errors gracefully with user feedback
+         * 
+         * @async
+         * @function loadDashboardData
+         * @description Main data loading function for dashboard initialization
+         * @returns {Promise<void>} Resolves when data is loaded and UI updated
+         * @throws {Error} Network errors, API errors, or data parsing errors
+         * 
+         * Business Logic:
+         * - Fetches key inventory metrics (out of stock, low stock, etc.)
+         * - Gets current inventory valuation
+         * - Updates alert notifications for urgent items
+         * - Provides real-time system status feedback
+         * 
+         * API Endpoints Used:
+         * - GET /api/dashboard - Core metrics and alerts
+         * - GET /api/skus - Total SKU count for context
+         */
+        async function loadDashboardData() {
+            try {
+                showLoading(true);
+                
+                // Fetch core dashboard metrics from backend
+                const response = await fetch('/api/dashboard');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                // Parse and cache the dashboard data
+                dashboardData = await response.json();
+                
+                // Update all dashboard components
+                updateMetrics(dashboardData.metrics);
+                updateAlerts(dashboardData.alerts);
+                updateTimestamp(dashboardData.timestamp || new Date().toISOString());
+                
+                // Fetch supplementary SKU count data
+                const skusResponse = await fetch('/api/skus');
+                if (skusResponse.ok) {
+                    const skusData = await skusResponse.json();
+                    document.getElementById('total-skus').textContent = skusData.count;
+                }
+                
+            } catch (error) {
+                console.error('Dashboard data loading failed:', error);
+                showError('Failed to load dashboard data. Please check your connection and try again.');
+                updateApiStatus(false);
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        /**
+         * Update Dashboard Metric Cards
+         * =============================
+         * Updates the visual metric displays with current data
+         * Formats numbers for readability (commas, currency symbols)
+         * 
+         * @function updateMetrics
+         * @param {Object} metrics - Metrics object from API response
+         * @param {number} metrics.out_of_stock - Count of SKUs with 0 inventory
+         * @param {number} metrics.low_stock - Count of SKUs below threshold
+         * @param {number} metrics.total_inventory_value - Dollar value of inventory
+         * @param {number} metrics.current_month_sales - Units sold this month
+         * @param {number} metrics.stockout_affected_skus - SKUs with recent stockouts
+         * 
+         * UI Updates:
+         * - Formats inventory value as currency ($XX,XXX)
+         * - Displays counts with fallback to 0 if missing
+         * - Uses locale string formatting for large numbers
+         */
+        function updateMetrics(metrics) {
+            document.getElementById('out-of-stock').textContent = metrics.out_of_stock || 0;
+            document.getElementById('low-stock').textContent = metrics.low_stock || 0;
+            document.getElementById('inventory-value').textContent = '$' + (metrics.total_inventory_value || 0).toLocaleString();
+            document.getElementById('current-sales').textContent = metrics.current_month_sales || 0;
+            document.getElementById('stockout-skus').textContent = metrics.stockout_affected_skus || 0;
+        }
+
+        // Update alerts section
+        function updateAlerts(alerts) {
+            const alertsContainer = document.getElementById('alerts-container');
+            const alertCount = document.getElementById('alert-count');
+            
+            // Filter out null alerts
+            const validAlerts = alerts.filter(alert => alert !== null);
+            
+            if (validAlerts.length === 0) {
+                alertsContainer.innerHTML = '<div class="text-muted"><i class="fas fa-check-circle text-success me-2"></i>No active alerts</div>';
+                alertCount.style.display = 'none';
+            } else {
+                let alertsHtml = '';
+                validAlerts.forEach(alert => {
+                    const alertClass = getAlertClass(alert.type);
+                    const iconClass = getAlertIcon(alert.type);
+                    alertsHtml += `
+                        <div class="alert ${alertClass} alert-dismissible fade show mb-2" role="alert">
+                            <i class="${iconClass} me-2"></i>
+                            ${alert.message}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    `;
+                });
+                alertsContainer.innerHTML = alertsHtml;
+                alertCount.textContent = validAlerts.length;
+                alertCount.style.display = 'flex';
+            }
+        }
+
+        // Update data timestamp
+        function updateTimestamp(timestamp) {
+            const formatted = new Date(timestamp).toLocaleString();
+            document.getElementById('data-timestamp').textContent = `Data as of: ${formatted}`;
+        }
+
+        // Helper functions
+        function getAlertClass(type) {
+            switch(type) {
+                case 'danger': return 'alert-danger';
+                case 'warning': return 'alert-warning';
+                case 'info': return 'alert-info';
+                default: return 'alert-secondary';
+            }
+        }
+
+        function getAlertIcon(type) {
+            switch(type) {
+                case 'danger': return 'fas fa-exclamation-triangle';
+                case 'warning': return 'fas fa-exclamation-circle';
+                case 'info': return 'fas fa-info-circle';
+                default: return 'fas fa-bell';
+            }
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+        }
+
+        function showError(message) {
+            const alertsContainer = document.getElementById('alerts-container');
+            alertsContainer.innerHTML = `
+                <div class="alert alert-danger" role="alert">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    ${message}
+                </div>
+            `;
+        }
+
+        function updateApiStatus(connected) {
+            const status = document.getElementById('api-status');
+            if (connected) {
+                status.textContent = 'Connected';
+                status.className = 'text-success';
+            } else {
+                status.textContent = 'Disconnected';
+                status.className = 'text-danger';
+            }
+        }
+
+        // Refresh data function
+        async function refreshData() {
+            const btn = event.target;
+            const originalHtml = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-spin fa-sync-alt"></i> Refreshing...';
+            btn.disabled = true;
+            
+            await loadDashboardData();
+            
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
+        }
+
+        // Test API connectivity on error
+        async function testApiConnection() {
+            try {
+                const response = await fetch('/health');
+                updateApiStatus(response.ok);
+                return response.ok;
+            } catch (error) {
+                updateApiStatus(false);
+                return false;
+            }
+        }
+    </script>
+</body>
+</html>

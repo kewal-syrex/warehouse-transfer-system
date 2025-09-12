@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transfer Planning - Warehouse Transfer Tool</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <!-- DataTables CSS -->
+    <link href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+    <link href="https://cdn.datatables.net/buttons/2.4.1/css/buttons.bootstrap5.min.css" rel="stylesheet">
+    
+    <style>
+        /* Priority color coding */
+        .priority-critical {
+            background-color: #dc3545 !important;
+            color: white !important;
+            font-weight: bold;
+        }
+        .priority-high {
+            background-color: #fd7e14 !important;
+            color: white !important;
+            font-weight: bold;
+        }
+        .priority-medium {
+            background-color: #ffc107 !important;
+            color: black !important;
+        }
+        .priority-low {
+            background-color: #28a745 !important;
+            color: white !important;
+        }
+        
+        /* Stockout indicators */
+        .stockout-badge {
+            background-color: #6f42c1;
+            color: white;
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+        
+        /* Custom table styling */
+        .table th {
+            background-color: #f8f9fa;
+            border-top: 2px solid #dee2e6;
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+        
+        .editable-qty {
+            width: 80px;
+            padding: 4px 8px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            text-align: center;
+        }
+        
+        .editable-qty:focus {
+            border-color: #80bdff;
+            box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+            outline: 0;
+        }
+        
+        /* Loading states */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+        
+        .loading-content {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        /* Action buttons */
+        .action-btn-group {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        
+        .btn-sm {
+            padding: 0.25rem 0.75rem;
+            font-size: 0.875rem;
+        }
+        
+        /* Custom filters */
+        .filters-section {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        /* Summary stats */
+        .summary-card {
+            border: none;
+            background: linear-gradient(135deg, #007bff, #0056b3);
+            color: white;
+        }
+        
+        .summary-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+        
+        .summary-label {
+            font-size: 0.85rem;
+            opacity: 0.9;
+        }
+        
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .action-btn-group {
+                justify-content: center;
+            }
+            
+            .table-responsive {
+                font-size: 0.85rem;
+            }
+            
+            .editable-qty {
+                width: 60px;
+            }
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay" style="display: none;">
+        <div class="loading-content">
+            <div class="spinner-border text-primary mb-3" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <h5>Loading Transfer Recommendations...</h5>
+            <p class="text-muted mb-0">Analyzing stockout data and calculating optimal quantities</p>
+        </div>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="navbar navbar-dark bg-primary">
+        <div class="container-fluid">
+            <div class="d-flex align-items-center">
+                <a href="index.html" class="btn btn-outline-light me-3">
+                    <i class="fas fa-arrow-left"></i> Dashboard
+                </a>
+                <span class="navbar-brand mb-0 h1">
+                    <i class="fas fa-truck me-2"></i>Transfer Planning
+                </span>
+            </div>
+            <div class="d-flex align-items-center">
+                <button class="btn btn-outline-light btn-sm me-2" onclick="refreshRecommendations()">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+                <div class="dropdown">
+                    <button class="btn btn-success btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                        <i class="fas fa-download"></i> Export
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="#" onclick="exportTransferOrderExcel()">
+                            <i class="fas fa-file-excel text-success"></i> Excel Format
+                        </a></li>
+                        <li><a class="dropdown-item" href="#" onclick="exportTransferOrder()">
+                            <i class="fas fa-file-csv text-info"></i> CSV Format  
+                        </a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="data-management.html">
+                            <i class="fas fa-database text-primary"></i> Data Management
+                        </a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="container-fluid mt-4">
+        <!-- Summary Cards -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card summary-card">
+                    <div class="card-body text-center">
+                        <div id="total-recommendations" class="summary-value">--</div>
+                        <div class="summary-label">Total Recommendations</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-danger text-white">
+                    <div class="card-body text-center">
+                        <div id="critical-count" class="summary-value">--</div>
+                        <div class="summary-label">Critical Priority</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-success text-white">
+                    <div class="card-body text-center">
+                        <div id="total-transfer-qty" class="summary-value">--</div>
+                        <div class="summary-label">Total Transfer Qty</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-info text-white">
+                    <div class="card-body text-center">
+                        <div id="avg-coverage" class="summary-value">--</div>
+                        <div class="summary-label">Avg Coverage (Months)</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filters Section -->
+        <div class="filters-section">
+            <h6 class="mb-3"><i class="fas fa-filter me-2"></i>Filters & Actions</h6>
+            <div class="row align-items-end">
+                <div class="col-md-2">
+                    <label class="form-label">Priority</label>
+                    <select id="priority-filter" class="form-select form-select-sm">
+                        <option value="">All Priorities</option>
+                        <option value="CRITICAL">Critical</option>
+                        <option value="HIGH">High</option>
+                        <option value="MEDIUM">Medium</option>
+                        <option value="LOW">Low</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">ABC Class</label>
+                    <select id="abc-filter" class="form-select form-select-sm">
+                        <option value="">All Classes</option>
+                        <option value="A">A Items</option>
+                        <option value="B">B Items</option>
+                        <option value="C">C Items</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Min Transfer Qty</label>
+                    <input type="number" id="min-qty-filter" class="form-control form-control-sm" placeholder="0" min="0">
+                </div>
+                <div class="col-md-6">
+                    <div class="action-btn-group">
+                        <button class="btn btn-primary btn-sm" onclick="applyFilters()">
+                            <i class="fas fa-search"></i> Apply Filters
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="clearFilters()">
+                            <i class="fas fa-times"></i> Clear
+                        </button>
+                        <button class="btn btn-outline-warning btn-sm" onclick="selectHighPriority()">
+                            <i class="fas fa-exclamation-triangle"></i> Select High Priority
+                        </button>
+                        <button class="btn btn-outline-info btn-sm" onclick="bulkEditSelected()">
+                            <i class="fas fa-edit"></i> Bulk Edit
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Transfer Recommendations Table -->
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-table me-2"></i>Transfer Recommendations
+                    <small class="text-muted" id="last-updated">Last updated: Loading...</small>
+                </h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table id="recommendations-table" class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th><input type="checkbox" id="select-all"></th>
+                                <th>SKU</th>
+                                <th>Description</th>
+                                <th>Priority</th>
+                                <th>Current KY</th>
+                                <th>Available CA</th>
+                                <th>Monthly Demand</th>
+                                <th>Coverage</th>
+                                <th>Transfer Qty</th>
+                                <th>ABC/XYZ</th>
+                                <th>Reason</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Data will be loaded here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="text-center text-muted py-4 mt-4">
+            <small>Transfer recommendations based on stockout-corrected demand | Generated: <span id="generation-time">--</span></small>
+        </footer>
+    </div>
+
+    <!-- SKU Detail Modal -->
+    <div class="modal fade" id="sku-detail-modal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">SKU Details</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="sku-detail-content">
+                        <div class="text-center">
+                            <div class="spinner-border" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.1/js/dataTables.buttons.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.bootstrap5.min.js"></script>
+
+    <script>
+        // Global variables
+        let recommendationsData = [];
+        let dataTable;
+
+        // Initialize when DOM is ready
+        $(document).ready(function() {
+            initializeTable();
+            loadRecommendations();
+        });
+
+        // Initialize DataTable
+        function initializeTable() {
+            dataTable = $('#recommendations-table').DataTable({
+                "pageLength": 25,
+                "order": [[3, "asc"]], // Sort by priority
+                "columnDefs": [
+                    { "orderable": false, "targets": [0, 11] }, // Checkbox and actions
+                    { "searchable": false, "targets": [0, 11] },
+                    { "className": "text-center", "targets": [0, 3, 4, 5, 6, 7, 8, 9] }
+                ],
+                "dom": '<"row"<"col-sm-6"l><"col-sm-6"f>>rtip',
+                "language": {
+                    "search": "Search SKUs:",
+                    "lengthMenu": "Show _MENU_ recommendations",
+                    "info": "Showing _START_ to _END_ of _TOTAL_ recommendations"
+                }
+            });
+        }
+
+        // Load recommendations from API
+        async function loadRecommendations() {
+            showLoading(true);
+            
+            try {
+                const response = await fetch('/api/transfer-recommendations');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                recommendationsData = data.recommendations || [];
+                
+                updateSummaryStats();
+                populateTable();
+                updateTimestamp(data.generated_at);
+                
+            } catch (error) {
+                console.error('Error loading recommendations:', error);
+                showError('Failed to load transfer recommendations. Please check your connection.');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        // Update summary statistics
+        function updateSummaryStats() {
+            const total = recommendationsData.length;
+            const critical = recommendationsData.filter(r => r.priority === 'CRITICAL').length;
+            const totalQty = recommendationsData.reduce((sum, r) => sum + r.recommended_transfer_qty, 0);
+            const avgCoverage = recommendationsData.reduce((sum, r) => sum + (r.coverage_months || 0), 0) / total;
+            
+            document.getElementById('total-recommendations').textContent = total;
+            document.getElementById('critical-count').textContent = critical;
+            document.getElementById('total-transfer-qty').textContent = totalQty.toLocaleString();
+            document.getElementById('avg-coverage').textContent = avgCoverage ? avgCoverage.toFixed(1) : '0.0';
+        }
+
+        // Populate DataTable with recommendations
+        function populateTable() {
+            dataTable.clear();
+            
+            recommendationsData.forEach(rec => {
+                const row = createTableRow(rec);
+                dataTable.row.add($(row));
+            });
+            
+            dataTable.draw();
+        }
+
+        // Create table row HTML
+        function createTableRow(rec) {
+            const priorityClass = `priority-${rec.priority.toLowerCase()}`;
+            const stockoutBadge = rec.stockout_days > 0 ? `<span class="stockout-badge">SO:${rec.stockout_days}d</span>` : '';
+            const coverageColor = rec.coverage_months < 1 ? 'text-danger' : rec.coverage_months < 2 ? 'text-warning' : 'text-success';
+            
+            return `
+                <tr data-sku="${rec.sku_id}">
+                    <td><input type="checkbox" class="row-select" value="${rec.sku_id}"></td>
+                    <td><strong>${rec.sku_id}</strong></td>
+                    <td>
+                        <span class="text-truncate d-inline-block" style="max-width: 200px;" title="${rec.description}">
+                            ${rec.description}
+                        </span>
+                    </td>
+                    <td><span class="badge ${priorityClass}">${rec.priority}</span></td>
+                    <td>${rec.current_kentucky_qty}</td>
+                    <td>${rec.current_burnaby_qty}</td>
+                    <td>
+                        ${rec.corrected_monthly_demand.toFixed(0)}
+                        ${stockoutBadge}
+                    </td>
+                    <td><span class="${coverageColor}">${rec.coverage_months.toFixed(1)}m</span></td>
+                    <td>
+                        <input type="number" 
+                               class="editable-qty" 
+                               value="${rec.recommended_transfer_qty}" 
+                               min="0" 
+                               step="${rec.transfer_multiple}"
+                               data-sku="${rec.sku_id}"
+                               onchange="updateTransferQty('${rec.sku_id}', this.value)">
+                    </td>
+                    <td>${rec.abc_class}${rec.xyz_class}</td>
+                    <td>
+                        <span class="text-truncate d-inline-block" style="max-width: 200px;" title="${rec.reason}">
+                            ${rec.reason}
+                        </span>
+                    </td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary" onclick="showSkuDetails('${rec.sku_id}')">
+                            <i class="fas fa-info-circle"></i>
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }
+
+        // Update transfer quantity
+        function updateTransferQty(skuId, newQty) {
+            const qty = parseInt(newQty);
+            if (isNaN(qty) || qty < 0) {
+                alert('Please enter a valid quantity (0 or higher)');
+                return;
+            }
+            
+            // Find and update the recommendation
+            const rec = recommendationsData.find(r => r.sku_id === skuId);
+            if (rec) {
+                rec.recommended_transfer_qty = qty;
+                updateSummaryStats();
+                console.log(`Updated ${skuId} transfer qty to ${qty}`);
+            }
+        }
+
+        // Show SKU details in modal
+        async function showSkuDetails(skuId) {
+            const modal = new bootstrap.Modal(document.getElementById('sku-detail-modal'));
+            
+            // Set loading state
+            document.getElementById('sku-detail-content').innerHTML = `
+                <div class="text-center">
+                    <div class="spinner-border" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">Loading SKU details...</p>
+                </div>
+            `;
+            
+            modal.show();
+            
+            try {
+                const response = await fetch(`/api/sku/${skuId}`);
+                if (!response.ok) throw new Error('Failed to load SKU details');
+                
+                const skuData = await response.json();
+                displaySkuDetails(skuData);
+                
+            } catch (error) {
+                document.getElementById('sku-detail-content').innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        Failed to load SKU details: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // Display SKU details in modal
+        function displaySkuDetails(skuData) {
+            const content = `
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>Basic Information</h6>
+                        <table class="table table-sm">
+                            <tr><th>SKU ID:</th><td>${skuData.sku.sku_id}</td></tr>
+                            <tr><th>Description:</th><td>${skuData.sku.description}</td></tr>
+                            <tr><th>Supplier:</th><td>${skuData.sku.supplier || 'N/A'}</td></tr>
+                            <tr><th>ABC/XYZ:</th><td>${skuData.sku.abc_code}${skuData.sku.xyz_code}</td></tr>
+                            <tr><th>Transfer Multiple:</th><td>${skuData.sku.transfer_multiple}</td></tr>
+                        </table>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Current Inventory</h6>
+                        <table class="table table-sm">
+                            <tr><th>Burnaby:</th><td>${skuData.sku.burnaby_qty || 0}</td></tr>
+                            <tr><th>Kentucky:</th><td>${skuData.sku.kentucky_qty || 0}</td></tr>
+                            <tr><th>Last Updated:</th><td>${skuData.sku.last_updated || 'N/A'}</td></tr>
+                        </table>
+                    </div>
+                </div>
+                
+                <h6 class="mt-3">Sales History</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Month</th>
+                                <th>CA Sales</th>
+                                <th>US Sales</th>
+                                <th>Stockout Days</th>
+                                <th>Corrected Demand</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${skuData.sales_history.map(s => `
+                                <tr>
+                                    <td>${s.year_month}</td>
+                                    <td>${s.burnaby_sales}</td>
+                                    <td>${s.kentucky_sales}</td>
+                                    <td>${s.kentucky_stockout_days}</td>
+                                    <td>${s.corrected_demand_kentucky || 'N/A'}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+                
+                ${skuData.pending_inventory.length > 0 ? `
+                    <h6 class="mt-3">Pending Inventory</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr><th>Quantity</th><th>Destination</th><th>Order Date</th><th>Expected</th><th>Status</th></tr>
+                            </thead>
+                            <tbody>
+                                ${skuData.pending_inventory.map(p => `
+                                    <tr>
+                                        <td>${p.quantity}</td>
+                                        <td>${p.destination}</td>
+                                        <td>${p.order_date}</td>
+                                        <td>${p.expected_arrival}</td>
+                                        <td>${p.status}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                ` : ''}
+            `;
+            
+            document.getElementById('sku-detail-content').innerHTML = content;
+        }
+
+        // Filter and action functions
+        function applyFilters() {
+            const priority = document.getElementById('priority-filter').value;
+            const abc = document.getElementById('abc-filter').value;
+            const minQty = parseInt(document.getElementById('min-qty-filter').value) || 0;
+            
+            let filteredData = recommendationsData;
+            
+            if (priority) {
+                filteredData = filteredData.filter(r => r.priority === priority);
+            }
+            
+            if (abc) {
+                filteredData = filteredData.filter(r => r.abc_class === abc);
+            }
+            
+            if (minQty > 0) {
+                filteredData = filteredData.filter(r => r.recommended_transfer_qty >= minQty);
+            }
+            
+            // Update table with filtered data
+            dataTable.clear();
+            filteredData.forEach(rec => {
+                const row = createTableRow(rec);
+                dataTable.row.add($(row));
+            });
+            dataTable.draw();
+        }
+
+        function clearFilters() {
+            document.getElementById('priority-filter').value = '';
+            document.getElementById('abc-filter').value = '';
+            document.getElementById('min-qty-filter').value = '';
+            populateTable();
+        }
+
+        function selectHighPriority() {
+            // Uncheck all first
+            document.querySelectorAll('.row-select').forEach(cb => cb.checked = false);
+            
+            // Check high priority items
+            recommendationsData.forEach(rec => {
+                if (rec.priority === 'CRITICAL' || rec.priority === 'HIGH') {
+                    const checkbox = document.querySelector(`.row-select[value="${rec.sku_id}"]`);
+                    if (checkbox) checkbox.checked = true;
+                }
+            });
+        }
+
+        function bulkEditSelected() {
+            const selected = Array.from(document.querySelectorAll('.row-select:checked')).map(cb => cb.value);
+            if (selected.length === 0) {
+                alert('Please select at least one item to edit.');
+                return;
+            }
+            
+            const adjustment = prompt(`Enter adjustment for ${selected.length} selected items:\n• Enter a number to set exact quantity\n• Enter +N or -N to adjust by amount`);
+            if (!adjustment) return;
+            
+            selected.forEach(skuId => {
+                const input = document.querySelector(`.editable-qty[data-sku="${skuId}"]`);
+                if (input) {
+                    let newValue;
+                    if (adjustment.startsWith('+') || adjustment.startsWith('-')) {
+                        newValue = parseInt(input.value) + parseInt(adjustment);
+                    } else {
+                        newValue = parseInt(adjustment);
+                    }
+                    
+                    if (newValue >= 0) {
+                        input.value = newValue;
+                        updateTransferQty(skuId, newValue);
+                    }
+                }
+            });
+        }
+
+        // Export functions
+        async function exportTransferOrderExcel() {
+            showLoading(true, 'Generating Excel File', 'Creating professional Excel export with formatting...');
+            
+            try {
+                const response = await fetch('/api/export/excel/transfer-orders');
+                
+                if (!response.ok) {
+                    throw new Error(`Export failed: ${response.statusText}`);
+                }
+
+                // Get filename from response headers
+                const contentDisposition = response.headers.get('content-disposition');
+                const filename = contentDisposition 
+                    ? contentDisposition.split('filename=')[1].replace(/"/g, '')
+                    : `transfer-orders-${new Date().toISOString().split('T')[0]}.xlsx`;
+
+                // Download file
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+
+                // Show success message
+                setTimeout(() => {
+                    alert(`Excel file exported successfully: ${filename}\n\nThe file includes:\n• Transfer recommendations with color coding\n• Summary statistics\n• Current inventory status`);
+                }, 500);
+
+            } catch (error) {
+                console.error('Excel export error:', error);
+                alert(`Excel export failed: ${error.message}`);
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function exportTransferOrder() {
+            const selectedItems = recommendationsData.filter(rec => rec.recommended_transfer_qty > 0);
+            
+            if (selectedItems.length === 0) {
+                alert('No items with transfer quantities to export.');
+                return;
+            }
+            
+            // Create CSV content
+            const headers = ['SKU', 'Description', 'Transfer Qty', 'Priority', 'Reason'];
+            const rows = selectedItems.map(item => [
+                item.sku_id,
+                `"${item.description}"`,
+                item.recommended_transfer_qty,
+                item.priority,
+                `"${item.reason}"`
+            ]);
+            
+            const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n');
+            
+            // Download file
+            const blob = new Blob([csvContent], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `transfer-order-${new Date().toISOString().split('T')[0]}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+        }
+
+        // Utility functions
+        function showLoading(show, title = 'Loading Transfer Recommendations...', message = 'Analyzing stockout data and calculating optimal quantities') {
+            const overlay = document.getElementById('loading-overlay');
+            if (show) {
+                // Update loading text if title/message provided
+                const titleEl = overlay.querySelector('h5');
+                const messageEl = overlay.querySelector('p');
+                if (titleEl && title) titleEl.textContent = title;
+                if (messageEl && message) messageEl.textContent = message;
+                overlay.style.display = 'flex';
+            } else {
+                overlay.style.display = 'none';
+                // Reset to default text
+                const titleEl = overlay.querySelector('h5');
+                const messageEl = overlay.querySelector('p');
+                if (titleEl) titleEl.textContent = 'Loading Transfer Recommendations...';
+                if (messageEl) messageEl.textContent = 'Analyzing stockout data and calculating optimal quantities';
+            }
+        }
+
+        function showError(message) {
+            alert(message);
+        }
+
+        function updateTimestamp(timestamp) {
+            const formatted = new Date(timestamp).toLocaleString();
+            document.getElementById('last-updated').textContent = `Last updated: ${formatted}`;
+            document.getElementById('generation-time').textContent = formatted;
+        }
+
+        async function refreshRecommendations() {
+            await loadRecommendations();
+        }
+
+        // Handle select all checkbox
+        document.getElementById('select-all').addEventListener('change', function() {
+            const isChecked = this.checked;
+            document.querySelectorAll('.row-select').forEach(cb => {
+                cb.checked = isChecked;
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Management - Warehouse Transfer Tool</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <style>
+        /* File upload styling */
+        .upload-area {
+            border: 2px dashed #dee2e6;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            background: #f8f9fa;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .upload-area:hover, .upload-area.dragover {
+            border-color: #007bff;
+            background: #e7f3ff;
+        }
+        
+        .upload-area.dragover {
+            transform: scale(1.02);
+        }
+        
+        .upload-icon {
+            font-size: 3rem;
+            color: #6c757d;
+            margin-bottom: 1rem;
+        }
+        
+        .upload-area.dragover .upload-icon {
+            color: #007bff;
+        }
+        
+        /* Progress bars */
+        .upload-progress {
+            display: none;
+            margin-top: 1rem;
+        }
+        
+        /* Import results */
+        .import-results {
+            display: none;
+            margin-top: 1rem;
+        }
+        
+        .validation-error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+        }
+        
+        .validation-warning {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+        }
+        
+        .validation-success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+        }
+        
+        /* Export sections */
+        .export-card {
+            transition: transform 0.2s ease;
+        }
+        
+        .export-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        
+        .export-icon {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        /* Loading states */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+        
+        .loading-content {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            text-align: center;
+            max-width: 400px;
+        }
+        
+        /* File info display */
+        .file-info {
+            background: #f8f9fa;
+            border-radius: 6px;
+            padding: 15px;
+            margin: 10px 0;
+            display: none;
+        }
+        
+        .file-preview {
+            max-height: 300px;
+            overflow-y: auto;
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            margin-top: 10px;
+        }
+        
+        /* Summary statistics */
+        .summary-stat {
+            text-align: center;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 10px 0;
+        }
+        
+        .stat-number {
+            font-size: 2rem;
+            font-weight: bold;
+            display: block;
+        }
+        
+        .stat-label {
+            font-size: 0.9rem;
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay" style="display: none;">
+        <div class="loading-content">
+            <div class="spinner-border text-primary mb-3" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <h5 id="loading-title">Processing...</h5>
+            <p id="loading-message" class="text-muted mb-0">Please wait while we process your request</p>
+        </div>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="navbar navbar-dark bg-primary">
+        <div class="container-fluid">
+            <div class="d-flex align-items-center">
+                <a href="index.html" class="btn btn-outline-light me-3">
+                    <i class="fas fa-arrow-left"></i> Dashboard
+                </a>
+                <span class="navbar-brand mb-0 h1">
+                    <i class="fas fa-database me-2"></i>Data Management
+                </span>
+            </div>
+            <div class="d-flex align-items-center">
+                <a href="transfer-planning.html" class="btn btn-outline-light btn-sm">
+                    <i class="fas fa-truck"></i> Transfer Planning
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="container-fluid mt-4">
+        <div class="row">
+            <!-- Import Section -->
+            <div class="col-lg-6">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-upload me-2"></i>Import Data
+                            <small class="text-muted">Upload Excel or CSV files</small>
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <!-- File Upload Area -->
+                        <div id="upload-area" class="upload-area" onclick="document.getElementById('file-input').click()">
+                            <i class="fas fa-cloud-upload-alt upload-icon"></i>
+                            <h5>Drop files here or click to browse</h5>
+                            <p class="text-muted mb-0">
+                                Supported formats: Excel (.xlsx, .xls), CSV (.csv)<br>
+                                <small>Maximum file size: 50MB</small>
+                            </p>
+                            <input type="file" id="file-input" class="d-none" accept=".xlsx,.xls,.csv" multiple>
+                        </div>
+                        
+                        <!-- Upload Progress -->
+                        <div id="upload-progress" class="upload-progress">
+                            <div class="progress mb-2">
+                                <div id="progress-bar" class="progress-bar" role="progressbar" style="width: 0%">0%</div>
+                            </div>
+                            <div id="upload-status" class="text-muted">Preparing upload...</div>
+                        </div>
+                        
+                        <!-- File Information -->
+                        <div id="file-info" class="file-info">
+                            <h6>Selected Files:</h6>
+                            <div id="file-list"></div>
+                        </div>
+                        
+                        <!-- Import Results -->
+                        <div id="import-results" class="import-results">
+                            <h6>Import Results:</h6>
+                            <div id="import-summary" class="row"></div>
+                            <div id="import-messages"></div>
+                        </div>
+                        
+                        <!-- Import Instructions -->
+                        <div class="mt-3">
+                            <h6>Import Instructions:</h6>
+                            <div class="accordion" id="import-instructions">
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#inventory-format">
+                                            Inventory Data Format
+                                        </button>
+                                    </h2>
+                                    <div id="inventory-format" class="accordion-collapse collapse" data-bs-parent="#import-instructions">
+                                        <div class="accordion-body">
+                                            <strong>Required columns:</strong> sku_id, burnaby_qty, kentucky_qty<br>
+                                            <strong>Example:</strong><br>
+                                            <code>
+                                            sku_id | burnaby_qty | kentucky_qty<br>
+                                            CHG-001 | 500 | 0<br>
+                                            CAB-002 | 200 | 150
+                                            </code>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sales-format">
+                                            Sales Data Format
+                                        </button>
+                                    </h2>
+                                    <div id="sales-format" class="accordion-collapse collapse" data-bs-parent="#import-instructions">
+                                        <div class="accordion-body">
+                                            <strong>Required columns:</strong> sku_id, year_month, burnaby_sales, kentucky_sales, kentucky_stockout_days<br>
+                                            <strong>Example:</strong><br>
+                                            <code>
+                                            sku_id | year_month | burnaby_sales | kentucky_sales | kentucky_stockout_days<br>
+                                            CHG-001 | 2024-03 | 50 | 100 | 25<br>
+                                            CAB-002 | 2024-03 | 30 | 45 | 0
+                                            </code>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#sku-format">
+                                            SKU Master Data Format
+                                        </button>
+                                    </h2>
+                                    <div id="sku-format" class="accordion-collapse collapse" data-bs-parent="#import-instructions">
+                                        <div class="accordion-body">
+                                            <strong>Required columns:</strong> sku_id, description, supplier, cost_per_unit<br>
+                                            <strong>Optional columns:</strong> status, transfer_multiple, abc_code, xyz_code<br>
+                                            <strong>Example:</strong><br>
+                                            <code>
+                                            sku_id | description | supplier | cost_per_unit<br>
+                                            CHG-001 | USB-C Fast Charger 65W | Supplier A | 15.50<br>
+                                            CAB-002 | Lightning Cable 3ft | Supplier B | 8.25
+                                            </code>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Export Section -->
+            <div class="col-lg-6">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-download me-2"></i>Export Data
+                            <small class="text-muted">Download reports and transfer orders</small>
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <!-- Transfer Orders Export -->
+                            <div class="col-md-6 mb-3">
+                                <div class="card export-card h-100 text-center">
+                                    <div class="card-body">
+                                        <i class="fas fa-truck export-icon text-primary"></i>
+                                        <h6>Transfer Orders</h6>
+                                        <p class="text-muted small">Current transfer recommendations with priorities</p>
+                                        <div class="d-grid gap-2">
+                                            <button class="btn btn-primary btn-sm" onclick="exportTransferOrders('excel')">
+                                                <i class="fas fa-file-excel"></i> Excel
+                                            </button>
+                                            <button class="btn btn-outline-primary btn-sm" onclick="exportTransferOrders('csv')">
+                                                <i class="fas fa-file-csv"></i> CSV
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Inventory Status Export -->
+                            <div class="col-md-6 mb-3">
+                                <div class="card export-card h-100 text-center">
+                                    <div class="card-body">
+                                        <i class="fas fa-boxes export-icon text-success"></i>
+                                        <h6>Inventory Status</h6>
+                                        <p class="text-muted small">Complete inventory report with values</p>
+                                        <div class="d-grid gap-2">
+                                            <button class="btn btn-success btn-sm" onclick="exportInventoryStatus()">
+                                                <i class="fas fa-file-excel"></i> Excel
+                                            </button>
+                                            <button class="btn btn-outline-success btn-sm" onclick="exportInventoryStatus('csv')" disabled>
+                                                <i class="fas fa-file-csv"></i> CSV (Soon)
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Export History -->
+                        <div class="mt-3">
+                            <h6>Recent Exports:</h6>
+                            <div id="export-history" class="list-group">
+                                <div class="list-group-item text-muted text-center py-4">
+                                    No recent exports
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Export Options -->
+                        <div class="mt-3">
+                            <h6>Export Options:</h6>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="include-stockout-details" checked>
+                                        <label class="form-check-label" for="include-stockout-details">
+                                            Include stockout details
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="color-coding" checked>
+                                        <label class="form-check-label" for="color-coding">
+                                            Color-coded priorities
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="include-summary" checked>
+                                        <label class="form-check-label" for="include-summary">
+                                            Include summary sheet
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="include-formulas" checked>
+                                        <label class="form-check-label" for="include-formulas">
+                                            Excel formulas
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Data Statistics -->
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-chart-bar me-2"></i>Database Statistics
+                    <button class="btn btn-sm btn-outline-secondary float-end" onclick="refreshStats()">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row" id="database-stats">
+                    <div class="col-md-2">
+                        <div class="summary-stat bg-primary text-white">
+                            <span class="stat-number" id="total-skus">--</span>
+                            <span class="stat-label">Total SKUs</span>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="summary-stat bg-danger text-white">
+                            <span class="stat-number" id="out-of-stock">--</span>
+                            <span class="stat-label">Out of Stock</span>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="summary-stat bg-warning text-dark">
+                            <span class="stat-number" id="low-stock">--</span>
+                            <span class="stat-label">Low Stock</span>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="summary-stat bg-success text-white">
+                            <span class="stat-number" id="total-value">--</span>
+                            <span class="stat-label">Inventory Value</span>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="summary-stat bg-info text-white">
+                            <span class="stat-number" id="sales-records">--</span>
+                            <span class="stat-label">Sales Records</span>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="summary-stat bg-secondary text-white">
+                            <span class="stat-number" id="last-import">--</span>
+                            <span class="stat-label">Last Import</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <footer class="text-center text-muted py-4 mt-4">
+            <small>Data Management System | Last updated: <span id="page-timestamp">--</span></small>
+        </footer>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+
+    <script>
+        // Global variables
+        let selectedFiles = [];
+        let exportHistory = [];
+
+        // Initialize when DOM is ready
+        $(document).ready(function() {
+            setupFileUpload();
+            refreshStats();
+            loadExportHistory();
+            updateTimestamp();
+        });
+
+        // =============================================================================
+        // FILE UPLOAD FUNCTIONALITY
+        // =============================================================================
+
+        function setupFileUpload() {
+            const uploadArea = document.getElementById('upload-area');
+            const fileInput = document.getElementById('file-input');
+
+            // Drag and drop handlers
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
+
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.classList.remove('dragover');
+            });
+
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+                handleFiles(e.dataTransfer.files);
+            });
+
+            // File input handler
+            fileInput.addEventListener('change', (e) => {
+                handleFiles(e.target.files);
+            });
+        }
+
+        function handleFiles(files) {
+            selectedFiles = Array.from(files);
+            displayFileInfo();
+
+            // Automatically start upload if files are selected
+            if (selectedFiles.length > 0) {
+                setTimeout(() => {
+                    uploadFiles();
+                }, 500);
+            }
+        }
+
+        function displayFileInfo() {
+            const fileInfo = document.getElementById('file-info');
+            const fileList = document.getElementById('file-list');
+
+            if (selectedFiles.length === 0) {
+                fileInfo.style.display = 'none';
+                return;
+            }
+
+            fileInfo.style.display = 'block';
+            
+            fileList.innerHTML = selectedFiles.map(file => `
+                <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
+                    <div>
+                        <i class="fas fa-file-${getFileIcon(file.name)} me-2"></i>
+                        <strong>${file.name}</strong>
+                        <small class="text-muted">(${formatFileSize(file.size)})</small>
+                    </div>
+                    <span class="badge bg-primary">${getFileType(file.name)}</span>
+                </div>
+            `).join('');
+        }
+
+        async function uploadFiles() {
+            if (selectedFiles.length === 0) return;
+
+            showLoading(true, 'Uploading Files', 'Processing your data files...');
+
+            for (let i = 0; i < selectedFiles.length; i++) {
+                const file = selectedFiles[i];
+                await uploadSingleFile(file, i + 1, selectedFiles.length);
+            }
+
+            showLoading(false);
+            refreshStats(); // Refresh stats after import
+        }
+
+        async function uploadSingleFile(file, current, total) {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const isExcel = file.name.toLowerCase().endsWith('.xlsx') || file.name.toLowerCase().endsWith('.xls');
+            const endpoint = isExcel ? '/api/import/excel' : '/api/import/csv';
+
+            try {
+                updateLoadingMessage(`Processing file ${current} of ${total}: ${file.name}`);
+
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                displayImportResults(result, file.name);
+
+                if (result.success) {
+                    addToExportHistory('import', file.name, result);
+                }
+
+            } catch (error) {
+                console.error('Upload error:', error);
+                displayImportResults({
+                    success: false,
+                    filename: file.name,
+                    error: `Upload failed: ${error.message}`
+                }, file.name);
+            }
+        }
+
+        function displayImportResults(result, filename) {
+            const resultsDiv = document.getElementById('import-results');
+            const summaryDiv = document.getElementById('import-summary');
+            const messagesDiv = document.getElementById('import-messages');
+
+            resultsDiv.style.display = 'block';
+
+            // Update summary statistics
+            if (result.success) {
+                summaryDiv.innerHTML = `
+                    <div class="col-md-3">
+                        <div class="summary-stat bg-success text-white">
+                            <span class="stat-number">${result.sheets_processed || 1}</span>
+                            <span class="stat-label">Sheets Processed</span>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="summary-stat bg-primary text-white">
+                            <span class="stat-number">${result.records_imported || 0}</span>
+                            <span class="stat-label">Records Imported</span>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="summary-stat bg-warning text-dark">
+                            <span class="stat-number">${result.warnings?.length || 0}</span>
+                            <span class="stat-label">Warnings</span>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="summary-stat bg-danger text-white">
+                            <span class="stat-number">${result.errors?.length || 0}</span>
+                            <span class="stat-label">Errors</span>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Display messages
+            let messagesHtml = '';
+
+            if (result.success) {
+                messagesHtml += `<div class="validation-success">
+                    <i class="fas fa-check-circle me-2"></i>
+                    Successfully imported ${filename} - ${result.records_imported || 0} records processed
+                </div>`;
+            } else {
+                messagesHtml += `<div class="validation-error">
+                    <i class="fas fa-exclamation-circle me-2"></i>
+                    Import failed for ${filename}: ${result.error || 'Unknown error'}
+                </div>`;
+            }
+
+            // Add warnings
+            if (result.warnings && result.warnings.length > 0) {
+                result.warnings.forEach(warning => {
+                    messagesHtml += `<div class="validation-warning">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        ${warning}
+                    </div>`;
+                });
+            }
+
+            // Add errors
+            if (result.errors && result.errors.length > 0) {
+                result.errors.forEach(error => {
+                    messagesHtml += `<div class="validation-error">
+                        <i class="fas fa-times-circle me-2"></i>
+                        ${error}
+                    </div>`;
+                });
+            }
+
+            messagesDiv.innerHTML = messagesHtml;
+        }
+
+        // =============================================================================
+        // EXPORT FUNCTIONALITY
+        // =============================================================================
+
+        async function exportTransferOrders(format = 'excel') {
+            showLoading(true, 'Generating Export', `Creating ${format.toUpperCase()} file with transfer recommendations...`);
+
+            try {
+                const endpoint = format === 'excel' 
+                    ? '/api/export/excel/transfer-orders'
+                    : '/api/export/csv/transfer-orders';
+
+                const response = await fetch(endpoint);
+                
+                if (!response.ok) {
+                    throw new Error(`Export failed: ${response.statusText}`);
+                }
+
+                // Get filename from response headers or create default
+                const contentDisposition = response.headers.get('content-disposition');
+                const filename = contentDisposition 
+                    ? contentDisposition.split('filename=')[1].replace(/"/g, '')
+                    : `transfer-orders-${new Date().toISOString().split('T')[0]}.${format === 'excel' ? 'xlsx' : 'csv'}`;
+
+                // Download file
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+
+                // Add to export history
+                addToExportHistory('export', filename, {
+                    type: 'Transfer Orders',
+                    format: format.toUpperCase(),
+                    success: true
+                });
+
+                showSuccess(`Transfer orders exported successfully as ${filename}`);
+
+            } catch (error) {
+                console.error('Export error:', error);
+                showError(`Export failed: ${error.message}`);
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        async function exportInventoryStatus(format = 'excel') {
+            showLoading(true, 'Generating Inventory Report', 'Creating comprehensive inventory status report...');
+
+            try {
+                const response = await fetch('/api/export/excel/inventory-status');
+                
+                if (!response.ok) {
+                    throw new Error(`Export failed: ${response.statusText}`);
+                }
+
+                const contentDisposition = response.headers.get('content-disposition');
+                const filename = contentDisposition 
+                    ? contentDisposition.split('filename=')[1].replace(/"/g, '')
+                    : `inventory-status-${new Date().toISOString().split('T')[0]}.xlsx`;
+
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+
+                addToExportHistory('export', filename, {
+                    type: 'Inventory Status',
+                    format: 'Excel',
+                    success: true
+                });
+
+                showSuccess(`Inventory status exported successfully as ${filename}`);
+
+            } catch (error) {
+                console.error('Export error:', error);
+                showError(`Inventory export failed: ${error.message}`);
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        // =============================================================================
+        // STATISTICS AND UTILITIES
+        // =============================================================================
+
+        async function refreshStats() {
+            try {
+                // Get dashboard metrics
+                const response = await fetch('/api/dashboard');
+                const data = await response.json();
+
+                // Update statistics
+                document.getElementById('total-skus').textContent = data.metrics.out_of_stock + data.metrics.low_stock + 100; // Approximate
+                document.getElementById('out-of-stock').textContent = data.metrics.out_of_stock;
+                document.getElementById('low-stock').textContent = data.metrics.low_stock;
+                document.getElementById('total-value').textContent = `$${(data.metrics.total_inventory_value/1000).toFixed(0)}K`;
+                document.getElementById('sales-records').textContent = data.metrics.current_month_sales;
+                document.getElementById('last-import').textContent = 'Today'; // Placeholder
+
+            } catch (error) {
+                console.error('Error refreshing stats:', error);
+            }
+        }
+
+        function addToExportHistory(type, filename, details) {
+            const historyItem = {
+                timestamp: new Date().toISOString(),
+                type: type,
+                filename: filename,
+                details: details
+            };
+
+            exportHistory.unshift(historyItem);
+            exportHistory = exportHistory.slice(0, 10); // Keep last 10 items
+            
+            updateExportHistoryDisplay();
+            localStorage.setItem('exportHistory', JSON.stringify(exportHistory));
+        }
+
+        function loadExportHistory() {
+            const saved = localStorage.getItem('exportHistory');
+            if (saved) {
+                exportHistory = JSON.parse(saved);
+                updateExportHistoryDisplay();
+            }
+        }
+
+        function updateExportHistoryDisplay() {
+            const historyDiv = document.getElementById('export-history');
+            
+            if (exportHistory.length === 0) {
+                historyDiv.innerHTML = '<div class="list-group-item text-muted text-center py-4">No recent exports</div>';
+                return;
+            }
+
+            historyDiv.innerHTML = exportHistory.map(item => {
+                const time = new Date(item.timestamp).toLocaleString();
+                const iconClass = item.type === 'import' ? 'fa-upload text-primary' : 'fa-download text-success';
+                
+                return `
+                    <div class="list-group-item">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <i class="fas ${iconClass} me-2"></i>
+                                <strong>${item.filename}</strong>
+                                <br>
+                                <small class="text-muted">${time}</small>
+                            </div>
+                            <span class="badge ${item.details.success ? 'bg-success' : 'bg-danger'}">
+                                ${item.details.success ? 'Success' : 'Failed'}
+                            </span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Utility functions
+        function getFileIcon(filename) {
+            if (filename.toLowerCase().endsWith('.xlsx') || filename.toLowerCase().endsWith('.xls')) {
+                return 'excel';
+            } else if (filename.toLowerCase().endsWith('.csv')) {
+                return 'csv';
+            }
+            return 'alt';
+        }
+
+        function getFileType(filename) {
+            if (filename.toLowerCase().endsWith('.xlsx') || filename.toLowerCase().endsWith('.xls')) {
+                return 'Excel';
+            } else if (filename.toLowerCase().endsWith('.csv')) {
+                return 'CSV';
+            }
+            return 'Unknown';
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        function showLoading(show, title = 'Processing...', message = 'Please wait while we process your request') {
+            const overlay = document.getElementById('loading-overlay');
+            const titleEl = document.getElementById('loading-title');
+            const messageEl = document.getElementById('loading-message');
+            
+            if (show) {
+                titleEl.textContent = title;
+                messageEl.textContent = message;
+                overlay.style.display = 'flex';
+            } else {
+                overlay.style.display = 'none';
+            }
+        }
+
+        function updateLoadingMessage(message) {
+            document.getElementById('loading-message').textContent = message;
+        }
+
+        function showSuccess(message) {
+            // You could implement a toast notification here
+            alert(message);
+        }
+
+        function showError(message) {
+            alert(message);
+        }
+
+        function updateTimestamp() {
+            document.getElementById('page-timestamp').textContent = new Date().toLocaleString();
+        }
+    </script>
+</body>
+</html>

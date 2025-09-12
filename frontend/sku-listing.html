@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SKU Listing - Warehouse Transfer Tool</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="https://cdn.datatables.net/1.13.4/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-blue: #3b82f6;
+            --success-green: #10b981;
+            --warning-yellow: #f59e0b;
+            --danger-red: #ef4444;
+            --gray-100: #f3f4f6;
+            --gray-800: #1f2937;
+        }
+        
+        body {
+            background-color: var(--gray-100);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        
+        .navbar {
+            background: linear-gradient(135deg, var(--primary-blue), #1e40af);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .card {
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            background: white;
+        }
+        
+        .card-header {
+            background: linear-gradient(135deg, var(--gray-800), #374151);
+            color: white;
+            border-radius: 12px 12px 0 0 !important;
+            padding: 1.25rem;
+        }
+        
+        .status-badge {
+            padding: 0.375rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .status-in-stock {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+        
+        .status-out-of-stock {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+        
+        .status-low-stock {
+            background-color: #fef3c7;
+            color: #92400e;
+        }
+        
+        .abc-badge {
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 700;
+        }
+        
+        .abc-a { background-color: #dc2626; color: white; }
+        .abc-b { background-color: #f59e0b; color: white; }
+        .abc-c { background-color: #10b981; color: white; }
+        
+        .xyz-badge {
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            margin-left: 0.25rem;
+        }
+        
+        .xyz-x { background-color: #1f2937; color: white; }
+        .xyz-y { background-color: #6b7280; color: white; }
+        .xyz-z { background-color: #9ca3af; color: white; }
+        
+        .table th {
+            background-color: var(--gray-800);
+            color: white;
+            border: none;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            letter-spacing: 0.05em;
+        }
+        
+        .table td {
+            vertical-align: middle;
+            border-color: #e5e7eb;
+        }
+        
+        .table tbody tr:hover {
+            background-color: #f8fafc;
+        }
+        
+        .loading-spinner {
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid var(--primary-blue);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .metric-card {
+            background: linear-gradient(135deg, var(--primary-blue), #1e40af);
+            color: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        .metric-value {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+        
+        .metric-label {
+            font-size: 0.875rem;
+            opacity: 0.9;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-dark">
+        <div class="container-fluid">
+            <div class="navbar-brand">
+                <i class="fas fa-warehouse me-2"></i>
+                <span class="fw-bold">SKU Inventory Listing</span>
+            </div>
+            <div class="d-flex">
+                <a href="index.html" class="btn btn-outline-light me-2">
+                    <i class="fas fa-tachometer-alt me-1"></i> Dashboard
+                </a>
+                <a href="transfer-planning.html" class="btn btn-outline-light">
+                    <i class="fas fa-truck me-1"></i> Transfer Planning
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid py-4">
+        <!-- Summary Metrics -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <div class="metric-value" id="totalSkus">
+                        <span class="loading-spinner"></span>
+                    </div>
+                    <div class="metric-label">Total SKUs</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-card bg-success">
+                    <div class="metric-value" id="inStockCount">
+                        <span class="loading-spinner"></span>
+                    </div>
+                    <div class="metric-label">In Stock</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-card bg-warning">
+                    <div class="metric-value" id="lowStockCount">
+                        <span class="loading-spinner"></span>
+                    </div>
+                    <div class="metric-label">Low Stock</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-card bg-danger">
+                    <div class="metric-value" id="outOfStockCount">
+                        <span class="loading-spinner"></span>
+                    </div>
+                    <div class="metric-label">Out of Stock</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-filter me-2"></i>
+                    Filters & Actions
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3">
+                        <label class="form-label">Stock Status</label>
+                        <select class="form-select" id="statusFilter">
+                            <option value="">All Statuses</option>
+                            <option value="in_stock">In Stock</option>
+                            <option value="low_stock">Low Stock</option>
+                            <option value="out_of_stock">Out of Stock</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">ABC Classification</label>
+                        <select class="form-select" id="abcFilter">
+                            <option value="">All Classes</option>
+                            <option value="A">A Items (High Value)</option>
+                            <option value="B">B Items (Medium Value)</option>
+                            <option value="C">C Items (Low Value)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">XYZ Classification</label>
+                        <select class="form-select" id="xyzFilter">
+                            <option value="">All Variability</option>
+                            <option value="X">X Items (Stable)</option>
+                            <option value="Y">Y Items (Variable)</option>
+                            <option value="Z">Z Items (Unpredictable)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3 d-flex align-items-end">
+                        <button class="btn btn-primary me-2" id="applyFilters">
+                            <i class="fas fa-search me-1"></i> Apply Filters
+                        </button>
+                        <button class="btn btn-outline-secondary" id="clearFilters">
+                            <i class="fas fa-times me-1"></i> Clear
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SKU Table -->
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-list me-2"></i>
+                    SKU Inventory Details
+                    <span class="badge bg-light text-dark ms-2" id="recordCount">Loading...</span>
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped" id="skuTable">
+                        <thead>
+                            <tr>
+                                <th>SKU ID</th>
+                                <th>Description</th>
+                                <th>Status</th>
+                                <th>Burnaby QTY</th>
+                                <th>Kentucky QTY</th>
+                                <th>Total QTY</th>
+                                <th>Unit Price</th>
+                                <th>Total Value</th>
+                                <th>ABC/XYZ</th>
+                                <th>Last Sale</th>
+                            </tr>
+                        </thead>
+                        <tbody id="skuTableBody">
+                            <tr>
+                                <td colspan="10" class="text-center py-4">
+                                    <span class="loading-spinner me-2"></span>
+                                    Loading SKU data...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.0/dist/jquery.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.4/js/dataTables.bootstrap5.min.js"></script>
+    
+    <script>
+        let allSkus = [];
+        let dataTable;
+
+        $(document).ready(function() {
+            loadSkuData();
+            
+            // Event listeners
+            $('#applyFilters').click(applyFilters);
+            $('#clearFilters').click(clearFilters);
+        });
+
+        async function loadSkuData() {
+            try {
+                const response = await fetch('/api/skus');
+                if (!response.ok) throw new Error('Failed to load SKU data');
+                
+                const data = await response.json();
+                allSkus = data.skus || data; // Handle both {"skus": [...]} and [...] formats
+                displaySkus(allSkus);
+                updateSummaryMetrics(allSkus);
+                
+            } catch (error) {
+                console.error('Error loading SKU data:', error);
+                $('#skuTableBody').html(`
+                    <tr>
+                        <td colspan="10" class="text-center py-4 text-danger">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            Failed to load SKU data. Please refresh the page.
+                        </td>
+                    </tr>
+                `);
+            }
+        }
+
+        function displaySkus(skus) {
+            if (dataTable) {
+                dataTable.destroy();
+            }
+
+            const tbody = $('#skuTableBody');
+            
+            if (skus.length === 0) {
+                tbody.html(`
+                    <tr>
+                        <td colspan="10" class="text-center py-4">
+                            <i class="fas fa-search me-2"></i>
+                            No SKUs found matching current filters.
+                        </td>
+                    </tr>
+                `);
+                $('#recordCount').text('0 SKUs');
+                return;
+            }
+
+            let html = '';
+            skus.forEach(sku => {
+                const status = getStockStatus(sku.burnaby_qty, sku.kentucky_qty);
+                const totalQty = (sku.burnaby_qty || 0) + (sku.kentucky_qty || 0);
+                const unitPrice = sku.unit_price || 25.00; // Default price if not available
+                const totalValue = totalQty * unitPrice;
+                
+                html += `
+                    <tr>
+                        <td><strong>${sku.sku_id}</strong></td>
+                        <td>${sku.description || 'N/A'}</td>
+                        <td>${getStatusBadge(status)}</td>
+                        <td>${formatNumber(sku.burnaby_qty || 0)}</td>
+                        <td>${formatNumber(sku.kentucky_qty || 0)}</td>
+                        <td><strong>${formatNumber(totalQty)}</strong></td>
+                        <td>$${formatMoney(unitPrice)}</td>
+                        <td><strong>$${formatMoney(totalValue)}</strong></td>
+                        <td>
+                            ${getAbcBadge(sku.abc_code)}${getXyzBadge(sku.xyz_code)}
+                        </td>
+                        <td>${formatDate(sku.last_sale_date || 'N/A')}</td>
+                    </tr>
+                `;
+            });
+            
+            tbody.html(html);
+            $('#recordCount').text(`${skus.length} SKUs`);
+
+            // Initialize DataTable
+            dataTable = $('#skuTable').DataTable({
+                pageLength: 25,
+                lengthMenu: [10, 25, 50, 100],
+                order: [[0, 'asc']],
+                columnDefs: [
+                    { targets: [3, 4, 5], className: 'text-end' },
+                    { targets: [6, 7], className: 'text-end' }
+                ]
+            });
+        }
+
+        function updateSummaryMetrics(skus) {
+            const total = skus.length;
+            let inStock = 0, lowStock = 0, outOfStock = 0;
+            
+            skus.forEach(sku => {
+                const status = getStockStatus(sku.burnaby_qty, sku.kentucky_qty);
+                if (status === 'in_stock') inStock++;
+                else if (status === 'low_stock') lowStock++;
+                else if (status === 'out_of_stock') outOfStock++;
+            });
+            
+            $('#totalSkus').text(total);
+            $('#inStockCount').text(inStock);
+            $('#lowStockCount').text(lowStock);
+            $('#outOfStockCount').text(outOfStock);
+        }
+
+        function getStockStatus(burnabyQty, kentuckyQty) {
+            const totalQty = (burnabyQty || 0) + (kentuckyQty || 0);
+            if (totalQty === 0) return 'out_of_stock';
+            if (totalQty < 50) return 'low_stock';  // Threshold can be adjusted
+            return 'in_stock';
+        }
+
+        function getStatusBadge(status) {
+            const badges = {
+                'in_stock': '<span class="status-badge status-in-stock">In Stock</span>',
+                'low_stock': '<span class="status-badge status-low-stock">Low Stock</span>',
+                'out_of_stock': '<span class="status-badge status-out-of-stock">Out of Stock</span>'
+            };
+            return badges[status] || '<span class="status-badge">Unknown</span>';
+        }
+
+        function getAbcBadge(abcClass) {
+            if (!abcClass) return '';
+            return `<span class="abc-badge abc-${abcClass.toLowerCase()}">${abcClass}</span>`;
+        }
+
+        function getXyzBadge(xyzClass) {
+            if (!xyzClass) return '';
+            return `<span class="xyz-badge xyz-${xyzClass.toLowerCase()}">${xyzClass}</span>`;
+        }
+
+        function formatNumber(num) {
+            return new Intl.NumberFormat().format(num);
+        }
+
+        function formatMoney(amount) {
+            return new Intl.NumberFormat('en-US', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            }).format(amount);
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return 'N/A';
+            return new Date(dateStr).toLocaleDateString();
+        }
+
+        function applyFilters() {
+            const statusFilter = $('#statusFilter').val();
+            const abcFilter = $('#abcFilter').val();
+            const xyzFilter = $('#xyzFilter').val();
+            
+            let filteredSkus = allSkus.filter(sku => {
+                let matches = true;
+                
+                if (statusFilter) {
+                    const status = getStockStatus(sku.burnaby_qty, sku.kentucky_qty);
+                    matches = matches && status === statusFilter;
+                }
+                
+                if (abcFilter) {
+                    matches = matches && sku.abc_code === abcFilter;
+                }
+                
+                if (xyzFilter) {
+                    matches = matches && sku.xyz_code === xyzFilter;
+                }
+                
+                return matches;
+            });
+            
+            displaySkus(filteredSkus);
+            updateSummaryMetrics(filteredSkus);
+        }
+
+        function clearFilters() {
+            $('#statusFilter').val('');
+            $('#abcFilter').val('');
+            $('#xyzFilter').val('');
+            displaySkus(allSkus);
+            updateSummaryMetrics(allSkus);
+        }
+    </script>
+</body>
+</html>
