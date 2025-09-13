@@ -13,6 +13,7 @@ import pymysql
 import io
 from datetime import datetime
 import logging
+import uuid
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -974,6 +975,647 @@ async def bulk_delete_test_skus():
             detail=f"Bulk deletion failed: {str(e)}"
         )
 
+# ===================================================================
+# STOCKOUT MANAGEMENT API ENDPOINTS
+# ===================================================================
+
+@app.post("/api/skus/validate",
+          summary="Validate SKU List", 
+          description="Validate a list of SKUs against the database",
+          tags=["Stockout Management"],
+          responses={
+              200: {"description": "SKU validation results"},
+              422: {"description": "Invalid input format"}
+          })
+async def validate_skus(request: dict):
+    """
+    Validate a list of SKUs against the database
+    
+    Args:
+        request: Dictionary containing 'skus' list
+        
+    Returns:
+        Dictionary with valid_skus and invalid_skus lists
+        
+    Example:
+        POST /api/skus/validate
+        {
+            "skus": ["CHG-001", "CBL-002", "INVALID-SKU"]
+        }
+    """
+    try:
+        skus = request.get('skus', [])
+        if not isinstance(skus, list):
+            raise HTTPException(status_code=422, detail="SKUs must be provided as a list")
+        
+        if not skus:
+            return {"valid_skus": [], "invalid_skus": []}
+        
+        db = database.get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+        
+        # Query existing SKUs
+        placeholders = ','.join(['%s'] * len(skus))
+        query = f"""
+            SELECT sku_id, description, status 
+            FROM skus 
+            WHERE sku_id IN ({placeholders})
+        """
+        
+        cursor.execute(query, skus)
+        found_skus = cursor.fetchall()
+        found_sku_ids = {sku['sku_id'] for sku in found_skus}
+        
+        # Separate valid and invalid SKUs
+        valid_skus = [sku for sku in found_skus]
+        invalid_skus = [sku for sku in skus if sku not in found_sku_ids]
+        
+        cursor.close()
+        db.close()
+        
+        return {
+            "valid_skus": valid_skus,
+            "invalid_skus": invalid_skus,
+            "total_requested": len(skus),
+            "valid_count": len(valid_skus),
+            "invalid_count": len(invalid_skus)
+        }
+        
+    except Exception as e:
+        logger.error(f"SKU validation failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"SKU validation failed: {str(e)}"
+        )
+
+@app.post("/api/stockouts/bulk-update",
+          summary="Bulk Update Stockout Status",
+          description="Update stockout status for multiple SKUs",
+          tags=["Stockout Management"],
+          responses={
+              200: {"description": "Bulk update completed successfully"},
+              400: {"description": "Invalid input data"},
+              500: {"description": "Update operation failed"}
+          })
+async def bulk_update_stockout_status(request: dict):
+    """
+    Bulk update stockout status for multiple SKUs
+    
+    Args:
+        request: Dictionary containing update parameters
+            - skus: List of SKU IDs to update
+            - status: 'out' or 'in' 
+            - warehouse: 'kentucky', 'burnaby', or 'both'
+            - date: Date string (YYYY-MM-DD)
+            - notes: Optional notes for the update
+            
+    Returns:
+        Dictionary with update results and statistics
+        
+    Example:
+        POST /api/stockouts/bulk-update
+        {
+            "skus": ["CHG-001", "CBL-002"],
+            "status": "out",
+            "warehouse": "kentucky", 
+            "date": "2024-03-28",
+            "notes": "Morning stockout check"
+        }
+    """
+    try:
+        # Validate input
+        required_fields = ['skus', 'status', 'warehouse', 'date']
+        for field in required_fields:
+            if field not in request:
+                raise HTTPException(status_code=400, detail=f"Missing required field: {field}")
+        
+        skus = request['skus']
+        status = request['status']
+        warehouse = request['warehouse']
+        date_str = request['date']
+        notes = request.get('notes', '')
+        
+        # Validate parameters
+        if not isinstance(skus, list) or not skus:
+            raise HTTPException(status_code=400, detail="SKUs must be a non-empty list")
+        
+        if status not in ['out', 'in']:
+            raise HTTPException(status_code=400, detail="Status must be 'out' or 'in'")
+            
+        if warehouse not in ['kentucky', 'burnaby', 'both']:
+            raise HTTPException(status_code=400, detail="Warehouse must be 'kentucky', 'burnaby', or 'both'")
+        
+        # Parse date
+        from datetime import datetime
+        try:
+            stockout_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Date must be in YYYY-MM-DD format")
+        
+        db = database.get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+        
+        # Generate batch ID for tracking
+        import uuid
+        batch_id = str(uuid.uuid4())
+        
+        # Start transaction
+        db.begin()
+        
+        updated_count = 0
+        warehouses = ['kentucky', 'burnaby'] if warehouse == 'both' else [warehouse]
+        
+        for sku_id in skus:
+            for wh in warehouses:
+                if status == 'out':
+                    # Check if SKU is already out of stock for this warehouse (any unresolved stockout)
+                    cursor.execute("""
+                        SELECT sku_id, stockout_date FROM stockout_dates
+                        WHERE sku_id = %s AND warehouse = %s AND is_resolved = FALSE
+                    """, (sku_id, wh))
+
+                    existing_stockout = cursor.fetchone()
+                    if existing_stockout:
+                        logger.warning(f"SKU {sku_id} is already marked as out of stock for {wh} warehouse since {existing_stockout['stockout_date']}. Skipping duplicate entry.")
+                        continue  # Skip this SKU/warehouse combination
+
+                    # Mark as out of stock
+                    cursor.execute("""
+                        INSERT INTO stockout_dates (sku_id, warehouse, stockout_date, is_resolved)
+                        VALUES (%s, %s, %s, FALSE)
+                        ON DUPLICATE KEY UPDATE
+                            stockout_date = VALUES(stockout_date),
+                            is_resolved = FALSE,
+                            resolved_date = NULL
+                    """, (sku_id, wh, stockout_date))
+                    
+                    # Update last stockout date in SKUs table
+                    cursor.execute("""
+                        UPDATE skus 
+                        SET last_stockout_date = %s, updated_at = NOW()
+                        WHERE sku_id = %s
+                    """, (stockout_date, sku_id))
+                    
+                else:  # status == 'in'
+                    # Mark as back in stock (resolve stockout)
+                    cursor.execute("""
+                        UPDATE stockout_dates
+                        SET is_resolved = TRUE, resolved_date = %s
+                        WHERE sku_id = %s AND warehouse = %s AND is_resolved = FALSE
+                    """, (stockout_date, sku_id, wh))
+
+                # Log the update (only if we didn't skip due to duplicate)
+                cursor.execute("""
+                    INSERT INTO stockout_updates_log
+                    (update_batch_id, sku_id, warehouse, action, new_status, stockout_date,
+                     resolution_date, update_source, user_notes, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                """, (
+                    batch_id,
+                    sku_id,
+                    wh,
+                    'mark_out' if status == 'out' else 'mark_in',
+                    'out_of_stock' if status == 'out' else 'in_stock',
+                    stockout_date,
+                    stockout_date if status == 'in' else None,
+                    'quick_ui',
+                    notes
+                ))
+
+                updated_count += 1
+        
+        # Commit transaction
+        db.commit()
+        cursor.close()
+        db.close()
+        
+        logger.info(f"Bulk stockout update completed: {updated_count} updates for batch {batch_id}")
+        
+        return {
+            "success": True,
+            "batch_id": batch_id,
+            "updated_count": updated_count,
+            "skus_processed": len(skus),
+            "warehouses_processed": len(warehouses),
+            "status": status,
+            "date": date_str,
+            "notes": notes
+        }
+        
+    except HTTPException:
+        if 'db' in locals():
+            db.rollback()
+        raise
+    except Exception as e:
+        if 'db' in locals():
+            db.rollback()
+        logger.error(f"Bulk stockout update failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Bulk stockout update failed: {str(e)}"
+        )
+
+@app.get("/api/stockouts/current",
+         summary="Get Current Stockouts",
+         description="Retrieve all currently unresolved stockouts",
+         tags=["Stockout Management"],
+         responses={
+             200: {"description": "List of current stockouts"},
+             500: {"description": "Failed to retrieve stockouts"}
+         })
+async def get_current_stockouts():
+    """
+    Get all currently unresolved stockouts with urgency levels
+    
+    Returns:
+        List of stockout records with calculated urgency and days out
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+        
+        # Query stockout_dates directly with basic SKU information
+        query = """
+            SELECT
+                sd.sku_id,
+                s.description,
+                s.category,
+                sd.warehouse,
+                sd.stockout_date,
+                DATEDIFF(CURDATE(), sd.stockout_date) as days_out,
+                CASE
+                    WHEN DATEDIFF(CURDATE(), sd.stockout_date) >= 30 THEN 'CRITICAL'
+                    WHEN DATEDIFF(CURDATE(), sd.stockout_date) >= 14 THEN 'HIGH'
+                    WHEN DATEDIFF(CURDATE(), sd.stockout_date) >= 7 THEN 'MEDIUM'
+                    ELSE 'LOW'
+                END as urgency_level,
+                s.cost_per_unit,
+                ic.burnaby_qty,
+                ic.kentucky_qty
+            FROM stockout_dates sd
+            INNER JOIN skus s ON sd.sku_id = s.sku_id
+            LEFT JOIN inventory_current ic ON s.sku_id = ic.sku_id
+            WHERE sd.is_resolved = FALSE
+            ORDER BY
+                CASE
+                    WHEN DATEDIFF(CURDATE(), sd.stockout_date) >= 30 THEN 1
+                    WHEN DATEDIFF(CURDATE(), sd.stockout_date) >= 14 THEN 2
+                    WHEN DATEDIFF(CURDATE(), sd.stockout_date) >= 7 THEN 3
+                    ELSE 4
+                END,
+                sd.stockout_date ASC
+        """
+        
+        cursor.execute(query)
+        stockouts = cursor.fetchall()
+        
+        cursor.close()
+        db.close()
+        
+        return stockouts
+        
+    except Exception as e:
+        logger.error(f"Failed to get current stockouts: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve current stockouts: {str(e)}"
+        )
+
+@app.get("/api/stockouts/recent-updates",
+         summary="Get Recent Stockout Updates", 
+         description="Retrieve recent stockout status updates",
+         tags=["Stockout Management"],
+         responses={
+             200: {"description": "List of recent updates"},
+             500: {"description": "Failed to retrieve updates"}
+         })
+async def get_recent_stockout_updates(limit: int = 10):
+    """
+    Get recent stockout status updates for audit trail
+    
+    Args:
+        limit: Maximum number of updates to return (default 10)
+        
+    Returns:
+        List of recent update records grouped by batch
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+        
+        # Get recent updates grouped by batch
+        query = """
+            SELECT 
+                update_batch_id as batch_id,
+                action,
+                warehouse,
+                COUNT(*) as sku_count,
+                MIN(created_at) as created_at,
+                MAX(user_notes) as notes,
+                update_source
+            FROM stockout_updates_log
+            WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+            GROUP BY update_batch_id, action, warehouse, update_source
+            ORDER BY created_at DESC
+            LIMIT %s
+        """
+        
+        cursor.execute(query, (limit,))
+        updates = cursor.fetchall()
+        
+        cursor.close()
+        db.close()
+        
+        return updates
+        
+    except Exception as e:
+        logger.error(f"Failed to get recent updates: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve recent updates: {str(e)}"
+        )
+
+@app.post("/api/stockouts/undo/{batch_id}",
+          summary="Undo Stockout Update",
+          description="Reverse a previous stockout update batch",
+          tags=["Stockout Management"], 
+          responses={
+              200: {"description": "Update successfully undone"},
+              404: {"description": "Batch not found"},
+              500: {"description": "Undo operation failed"}
+          })
+async def undo_stockout_update(batch_id: str):
+    """
+    Undo a previous stockout update by batch ID
+    
+    Args:
+        batch_id: The batch ID of the update to reverse
+        
+    Returns:
+        Dictionary with undo operation results
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+        
+        # Get the updates to undo
+        cursor.execute("""
+            SELECT sku_id, warehouse, action, stockout_date, resolution_date
+            FROM stockout_updates_log
+            WHERE update_batch_id = %s
+            ORDER BY created_at DESC
+        """, (batch_id,))
+        
+        updates = cursor.fetchall()
+        
+        if not updates:
+            raise HTTPException(status_code=404, detail="Batch not found")
+        
+        # Start transaction for undo
+        db.begin()
+        
+        undone_count = 0
+        undo_batch_id = str(uuid.uuid4())
+        
+        for update in updates:
+            sku_id = update['sku_id']
+            warehouse = update['warehouse']
+            action = update['action']
+            
+            if action == 'mark_out':
+                # Reverse: mark as resolved/in stock
+                cursor.execute("""
+                    UPDATE stockout_dates 
+                    SET is_resolved = TRUE, resolved_date = CURDATE()
+                    WHERE sku_id = %s AND warehouse = %s 
+                        AND stockout_date = %s AND is_resolved = FALSE
+                """, (sku_id, warehouse, update['stockout_date']))
+                
+                new_action = 'mark_in'
+                new_status = 'in_stock'
+                
+            elif action == 'mark_in':
+                # Reverse: mark as out of stock again
+                cursor.execute("""
+                    UPDATE stockout_dates 
+                    SET is_resolved = FALSE, resolved_date = NULL
+                    WHERE sku_id = %s AND warehouse = %s 
+                        AND stockout_date = %s
+                """, (sku_id, warehouse, update['stockout_date']))
+                
+                new_action = 'mark_out'
+                new_status = 'out_of_stock'
+            
+            # Log the undo action
+            cursor.execute("""
+                INSERT INTO stockout_updates_log 
+                (update_batch_id, sku_id, warehouse, action, new_status, 
+                 stockout_date, update_source, user_notes, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            """, (
+                undo_batch_id,
+                sku_id,
+                warehouse, 
+                new_action,
+                new_status,
+                update['stockout_date'],
+                'quick_ui',
+                f'Undo of batch {batch_id}'
+            ))
+            
+            undone_count += 1
+        
+        # Commit undo transaction
+        db.commit()
+        cursor.close()
+        db.close()
+        
+        logger.info(f"Undid stockout update batch {batch_id}: {undone_count} operations reversed")
+        
+        return {
+            "success": True,
+            "undone_batch_id": batch_id,
+            "new_batch_id": undo_batch_id,
+            "undone_count": undone_count
+        }
+        
+    except HTTPException:
+        if 'db' in locals():
+            db.rollback()
+        raise
+    except Exception as e:
+        if 'db' in locals():
+            db.rollback()
+        logger.error(f"Undo operation failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Undo operation failed: {str(e)}"
+        )
+
+@app.post("/api/import/stockout-history",
+          summary="Import Historical Stockout Data",
+          description="Import historical stockout data from CSV file",
+          tags=["Stockout Management"],
+          responses={
+              200: {"description": "CSV import completed successfully"},
+              400: {"description": "Invalid file format or data"},
+              500: {"description": "Import operation failed"}
+          })
+async def import_stockout_history(file: UploadFile = File(...)):
+    """
+    Import historical stockout data from CSV file
+    
+    Expected CSV format (no headers):
+    - Column 1: SKU ID
+    - Column 2: Date out of stock (YYYY-MM-DD)
+    - Column 3: Date back in stock (YYYY-MM-DD or blank for ongoing)
+    
+    Args:
+        file: CSV file upload
+        
+    Returns:
+        Dictionary with import results and statistics
+    """
+    try:
+        # Validate file type
+        if not file.filename.lower().endswith('.csv'):
+            raise HTTPException(status_code=400, detail="File must be a CSV")
+        
+        # Read CSV content
+        content = await file.read()
+        decoded_content = content.decode('utf-8')
+        
+        import csv
+        import io
+        import uuid
+        from datetime import datetime
+        
+        # Parse CSV
+        csv_reader = csv.reader(io.StringIO(decoded_content))
+        
+        db = database.get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+        
+        # Start transaction
+        db.begin()
+        
+        imported_count = 0
+        error_count = 0
+        batch_id = str(uuid.uuid4())
+        errors = []
+        
+        for row_num, row in enumerate(csv_reader, 1):
+            try:
+                if len(row) < 2:
+                    errors.append(f"Row {row_num}: Insufficient columns")
+                    error_count += 1
+                    continue
+                
+                sku_id = row[0].strip()
+                date_out_str = row[1].strip()
+                date_in_str = row[2].strip() if len(row) > 2 else ''
+                
+                if not sku_id or not date_out_str:
+                    errors.append(f"Row {row_num}: Missing SKU or date")
+                    error_count += 1
+                    continue
+                
+                # Validate SKU exists
+                cursor.execute("SELECT sku_id FROM skus WHERE sku_id = %s", (sku_id,))
+                if not cursor.fetchone():
+                    errors.append(f"Row {row_num}: SKU {sku_id} not found")
+                    error_count += 1
+                    continue
+                
+                # Parse dates
+                try:
+                    date_out = datetime.strptime(date_out_str, '%Y-%m-%d').date()
+                except ValueError:
+                    errors.append(f"Row {row_num}: Invalid date format for date_out")
+                    error_count += 1
+                    continue
+                
+                date_in = None
+                is_resolved = False
+                if date_in_str:
+                    try:
+                        date_in = datetime.strptime(date_in_str, '%Y-%m-%d').date()
+                        is_resolved = True
+                    except ValueError:
+                        errors.append(f"Row {row_num}: Invalid date format for date_in")
+                        error_count += 1
+                        continue
+                
+                # Insert stockout record (assuming Kentucky warehouse for now)
+                # TODO: Add warehouse detection logic based on data or add warehouse column
+                cursor.execute("""
+                    INSERT INTO stockout_dates 
+                    (sku_id, warehouse, stockout_date, is_resolved, resolved_date)
+                    VALUES (%s, 'kentucky', %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        is_resolved = VALUES(is_resolved),
+                        resolved_date = VALUES(resolved_date)
+                """, (sku_id, date_out, is_resolved, date_in))
+                
+                # Log the import
+                cursor.execute("""
+                    INSERT INTO stockout_updates_log 
+                    (update_batch_id, sku_id, warehouse, action, new_status, 
+                     stockout_date, resolution_date, update_source, user_notes, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                """, (
+                    batch_id,
+                    sku_id,
+                    'kentucky',
+                    'mark_in' if is_resolved else 'mark_out',
+                    'in_stock' if is_resolved else 'out_of_stock',
+                    date_out,
+                    date_in,
+                    'csv_import',
+                    f'Historical import from {file.filename}'
+                ))
+                
+                imported_count += 1
+                
+            except Exception as e:
+                errors.append(f"Row {row_num}: {str(e)}")
+                error_count += 1
+                continue
+        
+        # Commit if any successful imports
+        if imported_count > 0:
+            db.commit()
+        else:
+            db.rollback()
+        
+        cursor.close()
+        db.close()
+        
+        logger.info(f"CSV import completed: {imported_count} imported, {error_count} errors")
+        
+        return {
+            "success": imported_count > 0,
+            "imported_count": imported_count,
+            "error_count": error_count,
+            "total_rows": imported_count + error_count,
+            "batch_id": batch_id,
+            "filename": file.filename,
+            "errors": errors[:10]  # Return first 10 errors
+        }
+        
+    except HTTPException:
+        if 'db' in locals():
+            db.rollback()
+        raise
+    except Exception as e:
+        if 'db' in locals():
+            db.rollback()
+        logger.error(f"CSV import failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"CSV import failed: {str(e)}"
+        )
+
 # Serve the main dashboard
 @app.get("/dashboard")
 async def dashboard_redirect():
@@ -1007,7 +1649,7 @@ async def dashboard_legacy():
         </head>
         <body>
             <div class="container">
-                <h1>🏭 Warehouse Transfer Planning Tool</h1>
+                <h1>Warehouse Transfer Planning Tool</h1>
                 
                 <div class="alert alert-info">
                     <strong>Status:</strong> Application is running successfully! Database connection verified.
@@ -1051,4 +1693,4 @@ async def dashboard_legacy():
     """
 
 if __name__ == "__main__":
-    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8002, reload=True)

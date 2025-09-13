@@ -30,6 +30,9 @@ This project is building a web-based tool to optimize inventory transfers from B
 - **Database**: MySQL via XAMPP (simple, familiar, sufficient for scale)
 - **Frontend**: Plain HTML/JS with DataTables (no build complexity, powerful features)
 
+## Important
+DO NOT CODE WITH EMOJIS!
+
 ### Core Algorithms
 
 #### Stockout-Corrected Demand (Monthly Data Only)

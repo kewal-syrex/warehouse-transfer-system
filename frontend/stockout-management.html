@@ -1,0 +1,1296 @@
+<!DOCTYPE html>
+<!-- 
+Warehouse Transfer Planning Tool - Stockout Management Interface  
+================================================================
+Purpose: Quick bulk updates for stockout status management
+Features: Bulk paste SKUs, status updates, CSV import, audit trail
+Business Impact: Reduces stockout management time from hours to minutes
+Performance: Optimized for handling 50+ SKU updates in seconds
+-->
+<html lang="en">
+<head>
+    <!-- Meta Configuration -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stockout Management - Warehouse Transfer Tool</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome for icons -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Custom Styles for Stockout Management Interface -->
+    <style>
+        /* Main Interface Styling */
+        .stockout-card {
+            border-left: 4px solid #dc3545;  /* Red accent for stockout theme */
+            transition: transform 0.2s;
+            background: #fff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .stockout-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        
+        /* SKU Input Area - Large textarea for bulk paste */
+        .sku-input {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.9rem;
+            line-height: 1.4;
+            min-height: 200px;
+            border: 2px dashed #dee2e6;
+            transition: border-color 0.3s ease;
+        }
+        .sku-input:focus {
+            border-color: #007bff;
+            border-style: solid;
+            box-shadow: 0 0 0 0.2rem rgba(0,123,255,0.25);
+        }
+        .sku-input.has-content {
+            border-style: solid;
+            border-color: #28a745;
+        }
+        
+        /* Status Selection - Visual radio buttons */
+        .status-option {
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            padding: 1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: #f8f9fa;
+        }
+        .status-option:hover {
+            border-color: #007bff;
+            background: #e3f2fd;
+        }
+        .status-option.selected {
+            border-color: #007bff;
+            background: #007bff;
+            color: white;
+        }
+        .status-option input[type="radio"] {
+            display: none;
+        }
+        
+        /* Warehouse Selection */
+        .warehouse-option {
+            border: 2px solid #dee2e6;
+            border-radius: 6px;
+            padding: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: center;
+        }
+        .warehouse-option:hover {
+            border-color: #28a745;
+            background: #e8f5e8;
+        }
+        .warehouse-option.selected {
+            border-color: #28a745;
+            background: #28a745;
+            color: white;
+        }
+        .warehouse-option input[type="radio"] {
+            display: none;
+        }
+        
+        /* Recent Updates History */
+        .recent-update {
+            border-left: 3px solid #6c757d;
+            padding: 0.75rem;
+            margin-bottom: 0.5rem;
+            background: #f8f9fa;
+            border-radius: 0 4px 4px 0;
+        }
+        .recent-update.out-of-stock {
+            border-left-color: #dc3545;
+            background: #fff5f5;
+        }
+        .recent-update.back-in-stock {
+            border-left-color: #28a745;
+            background: #f0fff4;
+        }
+        
+        /* Action Buttons */
+        .action-btn {
+            min-width: 120px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+        .action-btn:hover {
+            transform: translateY(-1px);
+        }
+        
+        /* Validation and Status Messages */
+        .validation-item {
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #eee;
+        }
+        .validation-item:last-child {
+            border-bottom: none;
+        }
+        .sku-valid {
+            color: #28a745;
+        }
+        .sku-invalid {
+            color: #dc3545;
+            font-weight: 500;
+        }
+        
+        /* CSV Import Section */
+        .import-area {
+            border: 2px dashed #6c757d;
+            border-radius: 8px;
+            padding: 2rem;
+            text-align: center;
+            transition: all 0.3s ease;
+            background: #f8f9fa;
+        }
+        .import-area:hover,
+        .import-area.dragover {
+            border-color: #007bff;
+            background: #e3f2fd;
+        }
+        
+        /* Progress Indicators */
+        .progress-container {
+            margin: 1rem 0;
+        }
+        .progress {
+            height: 8px;
+            border-radius: 4px;
+        }
+        
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .status-option, .warehouse-option {
+                margin-bottom: 0.5rem;
+            }
+            .sku-input {
+                min-height: 150px;
+                font-size: 0.8rem;
+            }
+        }
+        
+        /* Animation Classes */
+        .fade-in {
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .success-flash {
+            animation: successFlash 0.5s ease-in-out;
+        }
+        @keyframes successFlash {
+            0% { background-color: #d4edda; }
+            100% { background-color: transparent; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation Bar - Consistent with other pages -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <!-- Brand and Logo -->
+            <a class="navbar-brand" href="index.html">
+                <i class="fas fa-warehouse me-2"></i>
+                Warehouse Transfer Tool
+            </a>
+            
+            <!-- Mobile Toggle Button -->
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            
+            <!-- Navigation Links -->
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="index.html">
+                            <i class="fas fa-tachometer-alt me-1"></i>Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="transfer-planning.html">
+                            <i class="fas fa-exchange-alt me-1"></i>Transfer Planning
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="sku-listing.html">
+                            <i class="fas fa-list me-1"></i>SKU Listing
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="stockout-management.html">
+                            <i class="fas fa-exclamation-triangle me-1"></i>Stockout Management
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content Container -->
+    <div class="container-fluid mt-4">
+        <!-- Page Header -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h1 class="h2 mb-1">
+                            <i class="fas fa-exclamation-triangle text-warning me-2"></i>
+                            Stockout Management
+                        </h1>
+                        <p class="text-muted mb-0">Quick updates for inventory stockout tracking</p>
+                    </div>
+                    <div>
+                        <button class="btn btn-outline-secondary me-2" onclick="showCurrentStockouts()">
+                            <i class="fas fa-eye me-1"></i>View Current Stockouts
+                        </button>
+                        <button class="btn btn-outline-info" onclick="showHistory()">
+                            <i class="fas fa-sync me-1"></i>Refresh Updates
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <!-- Quick Stockout Update Panel (Main Feature) -->
+            <div class="col-lg-8">
+                <div class="card stockout-card">
+                    <div class="card-header bg-light">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-bolt text-warning me-2"></i>
+                            Quick Stockout Update
+                        </h5>
+                        <small class="text-muted">Paste SKU list and bulk update stockout status</small>
+                    </div>
+                    <div class="card-body">
+                        <!-- SKU Input Section -->
+                        <div class="mb-4">
+                            <label for="skuInput" class="form-label fw-bold">
+                                <i class="fas fa-list me-1"></i>SKU List
+                                <span class="text-muted fw-normal">(paste one per line or comma-separated)</span>
+                            </label>
+                            <textarea 
+                                id="skuInput" 
+                                class="form-control sku-input" 
+                                placeholder="Paste your SKU list here...&#10;&#10;Examples:&#10;CHG-001&#10;CBL-002&#10;WDG-003&#10;&#10;Or comma-separated: CHG-001, CBL-002, WDG-003"
+                                oninput="validateSKUs()"
+                            ></textarea>
+                            
+                            <!-- SKU Count and Validation Status -->
+                            <div class="mt-2 d-flex justify-content-between align-items-center">
+                                <small id="skuCount" class="text-muted">0 SKUs detected</small>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearSKUs()">
+                                    <i class="fas fa-times me-1"></i>Clear
+                                </button>
+                            </div>
+                            
+                            <!-- Validation Results (Hidden by default) -->
+                            <div id="validationResults" class="mt-3" style="display: none;">
+                                <div class="card bg-light">
+                                    <div class="card-body p-3">
+                                        <h6 class="card-title">
+                                            <i class="fas fa-check-circle text-success me-1"></i>
+                                            SKU Validation
+                                        </h6>
+                                        <div id="validationList"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Status Selection -->
+                        <div class="mb-4">
+                            <label class="form-label fw-bold">
+                                <i class="fas fa-toggle-on me-1"></i>Stockout Status
+                            </label>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="status-option" onclick="selectStatus('out')">
+                                        <input type="radio" name="status" value="out" id="statusOut">
+                                        <div class="text-center">
+                                            <i class="fas fa-exclamation-triangle fa-2x text-danger mb-2"></i>
+                                            <div class="fw-bold">Mark as Out of Stock</div>
+                                            <small class="text-muted">Items are currently unavailable</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="status-option" onclick="selectStatus('in')">
+                                        <input type="radio" name="status" value="in" id="statusIn">
+                                        <div class="text-center">
+                                            <i class="fas fa-check-circle fa-2x text-success mb-2"></i>
+                                            <div class="fw-bold">Mark as Back in Stock</div>
+                                            <small class="text-muted">Items are now available</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Warehouse Selection -->
+                        <div class="mb-4">
+                            <label class="form-label fw-bold">
+                                <i class="fas fa-warehouse me-1"></i>Warehouse Location
+                            </label>
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="warehouse-option" onclick="selectWarehouse('kentucky', event)">
+                                        <input type="radio" name="warehouse" value="kentucky" id="warehouseKY">
+                                        <i class="fas fa-map-marker-alt me-1"></i>
+                                        <strong>Kentucky</strong>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="warehouse-option" onclick="selectWarehouse('burnaby', event)">
+                                        <input type="radio" name="warehouse" value="burnaby" id="warehouseBC">
+                                        <i class="fas fa-map-marker-alt me-1"></i>
+                                        <strong>Burnaby</strong>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="warehouse-option" onclick="selectWarehouse('both', event)">
+                                        <input type="radio" name="warehouse" value="both" id="warehouseBoth">
+                                        <i class="fas fa-globe me-1"></i>
+                                        <strong>Both</strong>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Date Selection -->
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <label for="stockoutDate" class="form-label fw-bold">
+                                    <i class="fas fa-calendar-alt me-1"></i>Stockout Date
+                                </label>
+                                <input type="date" id="stockoutDate" class="form-control" onchange="validateForm()">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">
+                                    <i class="fas fa-clock me-1"></i>Quick Date Options
+                                </label>
+                                <div class="btn-group w-100" role="group">
+                                    <button type="button" class="btn btn-outline-secondary" onclick="setDate('today')">Today</button>
+                                    <button type="button" class="btn btn-outline-secondary" onclick="setDate('yesterday')">Yesterday</button>
+                                    <button type="button" class="btn btn-outline-secondary" onclick="setDate('week-ago')">Week Ago</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Action Buttons -->
+                        <div class="text-end">
+                            <button type="button" class="btn btn-secondary action-btn me-2" onclick="previewUpdate()">
+                                <i class="fas fa-eye me-1"></i>Preview Changes
+                            </button>
+                            <button type="button" class="btn btn-primary action-btn" id="updateBtn" onclick="submitUpdate()" disabled>
+                                <i class="fas fa-save me-1"></i>Update Status
+                            </button>
+                        </div>
+
+                        <!-- Progress Bar (Hidden by default) -->
+                        <div id="progressContainer" class="progress-container" style="display: none;">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="text-muted">Processing updates...</span>
+                                <span id="progressText" class="text-muted">0%</span>
+                            </div>
+                            <div class="progress">
+                                <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sidebar with Additional Features -->
+            <div class="col-lg-4">
+                <!-- CSV Import Section -->
+                <div class="card mb-4">
+                    <div class="card-header bg-light">
+                        <h6 class="card-title mb-0">
+                            <i class="fas fa-file-csv text-success me-2"></i>
+                            CSV Import
+                        </h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="import-area" id="csvImportArea">
+                            <i class="fas fa-cloud-upload-alt fa-2x text-muted mb-3"></i>
+                            <p class="text-muted mb-2">Drop CSV file here or</p>
+                            <button type="button" class="btn btn-outline-primary btn-sm" onclick="selectCSVFile()">
+                                <i class="fas fa-folder-open me-1"></i>Browse Files
+                            </button>
+                            <input type="file" id="csvFileInput" accept=".csv" style="display: none;" onchange="handleCSVImport(this.files[0])">
+                        </div>
+                        <small class="text-muted">
+                            <strong>Format:</strong> SKU, Date_Out, Date_Back_In<br>
+                            Leave Date_Back_In blank for ongoing stockouts
+                        </small>
+                    </div>
+                </div>
+
+                <!-- Recent Updates History -->
+                <div class="card">
+                    <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                        <h6 class="card-title mb-0">
+                            <i class="fas fa-history text-info me-2"></i>
+                            Recent Updates
+                        </h6>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="refreshHistory()">
+                            <i class="fas fa-refresh"></i>
+                        </button>
+                    </div>
+                    <div class="card-body p-0">
+                        <div id="recentUpdates" style="max-height: 400px; overflow-y: auto;">
+                            <!-- Recent updates will be loaded here -->
+                            <div class="p-3 text-center text-muted">
+                                <i class="fas fa-spinner fa-spin me-2"></i>
+                                Loading recent updates...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Preview Modal -->
+    <div class="modal fade" id="previewModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="fas fa-eye me-2"></i>Preview Stockout Updates
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="previewContent">
+                        <!-- Preview content will be populated here -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="confirmUpdate()">
+                        <i class="fas fa-check me-1"></i>Confirm Update
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Current Stockouts Modal -->
+    <div class="modal fade" id="stockoutsModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="fas fa-exclamation-triangle text-warning me-2"></i>Current Stockouts
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="stockoutsContent">
+                        <!-- Current stockouts will be loaded here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Success/Error Toast -->
+    <div class="toast-container position-fixed bottom-0 end-0 p-3">
+        <div id="updateToast" class="toast" role="alert">
+            <div class="toast-header">
+                <i id="toastIcon" class="me-2"></i>
+                <strong id="toastTitle" class="me-auto">Update Status</strong>
+                <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
+            </div>
+            <div class="toast-body" id="toastBody">
+                <!-- Toast message will be populated here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JavaScript -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Stockout Management JavaScript -->
+    <script>
+        /**
+         * Stockout Management Interface JavaScript
+         * Handles bulk SKU updates, validation, and CSV import functionality
+         */
+
+        // Global variables for state management
+        let validatedSKUs = [];
+        let currentStatus = null;
+        let currentWarehouse = null;
+        let recentUpdatesCache = [];
+
+        /**
+         * Initialize the page when DOM is loaded
+         */
+        document.addEventListener('DOMContentLoaded', function() {
+            // Set default date to today
+            document.getElementById('stockoutDate').valueAsDate = new Date();
+            
+            // Load recent updates
+            loadRecentUpdates();
+            
+            // Set up CSV drag and drop
+            setupCSVDragDrop();
+            
+            console.log('Stockout management interface initialized');
+        });
+
+        /**
+         * Validate pasted SKUs and check if they exist in the database
+         * Updates the UI with validation results
+         */
+        async function validateSKUs() {
+            const textarea = document.getElementById('skuInput');
+            const text = textarea.value.trim();
+            
+            if (!text) {
+                document.getElementById('skuCount').textContent = '0 SKUs detected';
+                document.getElementById('validationResults').style.display = 'none';
+                textarea.classList.remove('has-content');
+                validatedSKUs = [];
+                validateForm();
+                return;
+            }
+
+            // Add visual indicator that content exists
+            textarea.classList.add('has-content');
+
+            // Parse SKUs from input (handle both line-separated and comma-separated)
+            const rawSKUs = text.split(/[\n,]+/).map(sku => sku.trim()).filter(sku => sku.length > 0);
+            const uniqueSKUs = [...new Set(rawSKUs)]; // Remove duplicates
+
+            document.getElementById('skuCount').textContent = `${uniqueSKUs.length} unique SKUs detected`;
+
+            if (uniqueSKUs.length === 0) return;
+
+            try {
+                // Validate SKUs against database
+                const response = await fetch('/api/skus/validate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ skus: uniqueSKUs })
+                });
+
+                if (!response.ok) throw new Error('Failed to validate SKUs');
+
+                const validation = await response.json();
+                validatedSKUs = validation.valid_skus || [];
+                
+                displayValidationResults(validation);
+                validateForm();
+
+            } catch (error) {
+                console.error('SKU validation failed:', error);
+                showToast('Error validating SKUs', error.message, 'error');
+            }
+        }
+
+        /**
+         * Display SKU validation results in the UI
+         */
+        function displayValidationResults(validation) {
+            const resultsDiv = document.getElementById('validationResults');
+            const listDiv = document.getElementById('validationList');
+
+            let html = '';
+
+            if (validation.valid_skus && validation.valid_skus.length > 0) {
+                html += `<div class="mb-2"><strong class="text-success">${validation.valid_skus.length} Valid SKUs:</strong></div>`;
+                validation.valid_skus.forEach(sku => {
+                    html += `<div class="validation-item sku-valid">
+                        <i class="fas fa-check-circle me-2"></i>${sku.sku_id} - ${sku.description || 'No description'}
+                    </div>`;
+                });
+            }
+
+            if (validation.invalid_skus && validation.invalid_skus.length > 0) {
+                html += `<div class="mb-2 mt-3"><strong class="text-danger">${validation.invalid_skus.length} Invalid SKUs:</strong></div>`;
+                validation.invalid_skus.forEach(sku => {
+                    html += `<div class="validation-item sku-invalid">
+                        <i class="fas fa-times-circle me-2"></i>${sku} - Not found in database
+                    </div>`;
+                });
+            }
+
+            listDiv.innerHTML = html;
+            resultsDiv.style.display = 'block';
+            resultsDiv.classList.add('fade-in');
+        }
+
+        /**
+         * Handle status selection (out/in stock)
+         */
+        function selectStatus(status) {
+            // Remove previous selection
+            document.querySelectorAll('.status-option').forEach(option => {
+                option.classList.remove('selected');
+            });
+
+            // Select new option
+            document.querySelector(`.status-option`).parentElement.parentElement.querySelector(`input[value="${status}"]`).closest('.status-option').classList.add('selected');
+            document.getElementById(`status${status === 'out' ? 'Out' : 'In'}`).checked = true;
+            
+            currentStatus = status;
+            validateForm();
+        }
+
+        /**
+         * Handle warehouse selection
+         */
+        function selectWarehouse(warehouse, event) {
+            // Remove previous selection
+            document.querySelectorAll('.warehouse-option').forEach(option => {
+                option.classList.remove('selected');
+            });
+
+            // Select new option
+            if (event && event.target) {
+                const warehouseOption = event.target.closest('.warehouse-option');
+                if (warehouseOption) {
+                    warehouseOption.classList.add('selected');
+                }
+            } else {
+                // Fallback: find by warehouse value
+                const targetOption = document.querySelector(`[onclick*="${warehouse}"]`);
+                if (targetOption) {
+                    targetOption.closest('.warehouse-option').classList.add('selected');
+                }
+            }
+            
+            document.getElementById(`warehouse${warehouse === 'kentucky' ? 'KY' : warehouse === 'burnaby' ? 'BC' : 'Both'}`).checked = true;
+            
+            currentWarehouse = warehouse;
+            validateForm();
+        }
+
+        /**
+         * Set date using quick options
+         */
+        function setDate(option) {
+            const dateInput = document.getElementById('stockoutDate');
+            const today = new Date();
+
+            switch (option) {
+                case 'today':
+                    dateInput.valueAsDate = today;
+                    break;
+                case 'yesterday':
+                    const yesterday = new Date(today);
+                    yesterday.setDate(yesterday.getDate() - 1);
+                    dateInput.valueAsDate = yesterday;
+                    break;
+                case 'week-ago':
+                    const weekAgo = new Date(today);
+                    weekAgo.setDate(weekAgo.getDate() - 7);
+                    dateInput.valueAsDate = weekAgo;
+                    break;
+            }
+            validateForm();
+        }
+
+        /**
+         * Validate form and enable/disable submit button
+         */
+        function validateForm() {
+            const updateBtn = document.getElementById('updateBtn');
+            const hasValidSKUs = validatedSKUs.length > 0;
+            const hasStatus = currentStatus !== null;
+            const hasWarehouse = currentWarehouse !== null;
+            const hasDate = document.getElementById('stockoutDate').value;
+
+            const isValid = hasValidSKUs && hasStatus && hasWarehouse && hasDate;
+
+            updateBtn.disabled = !isValid;
+
+            // Update button appearance based on validation
+            if (isValid) {
+                updateBtn.classList.remove('btn-outline-primary');
+                updateBtn.classList.add('btn-primary');
+            } else {
+                updateBtn.classList.remove('btn-primary');
+                updateBtn.classList.add('btn-outline-primary');
+            }
+
+            return isValid;
+        }
+
+        /**
+         * Clear all SKUs from input
+         */
+        function clearSKUs() {
+            document.getElementById('skuInput').value = '';
+            document.getElementById('skuInput').classList.remove('has-content');
+            validatedSKUs = [];
+            validateSKUs();
+        }
+
+        /**
+         * Preview the updates before applying
+         */
+        function previewUpdate() {
+            if (validatedSKUs.length === 0) return;
+
+            const status = currentStatus;
+            const warehouse = currentWarehouse;
+            const date = document.getElementById('stockoutDate').value;
+
+            const modal = new bootstrap.Modal(document.getElementById('previewModal'));
+            const previewContent = document.getElementById('previewContent');
+
+            let html = `
+                <div class="alert alert-info">
+                    <h6><i class="fas fa-info-circle me-2"></i>Update Summary</h6>
+                    <ul class="mb-0">
+                        <li><strong>Action:</strong> Mark ${status === 'out' ? 'OUT OF STOCK' : 'BACK IN STOCK'}</li>
+                        <li><strong>Warehouse:</strong> ${warehouse.toUpperCase()}</li>
+                        <li><strong>Date:</strong> ${new Date(date).toLocaleDateString()}</li>
+                        <li><strong>SKUs:</strong> ${validatedSKUs.length} items</li>
+                    </ul>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>SKU</th>
+                                <th>Description</th>
+                                <th>Current Status</th>
+                                <th>New Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+
+            validatedSKUs.forEach(sku => {
+                html += `
+                    <tr>
+                        <td><code>${sku.sku_id}</code></td>
+                        <td>${sku.description || 'N/A'}</td>
+                        <td><span class="badge bg-secondary">Unknown</span></td>
+                        <td><span class="badge ${status === 'out' ? 'bg-danger' : 'bg-success'}">
+                            ${status === 'out' ? 'Out of Stock' : 'In Stock'}
+                        </span></td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
+
+            previewContent.innerHTML = html;
+            modal.show();
+        }
+
+        /**
+         * Submit the stockout update
+         */
+        async function submitUpdate() {
+            if (!validateForm()) return;
+
+            const updateData = {
+                skus: validatedSKUs.map(sku => sku.sku_id),
+                status: currentStatus,
+                warehouse: currentWarehouse,
+                date: document.getElementById('stockoutDate').value,
+                notes: `Bulk update via Quick UI - ${validatedSKUs.length} SKUs`
+            };
+
+            // Show progress
+            try {
+                showProgress(true);
+            } catch (e) {
+                console.error('Progress display error:', e);
+                // Continue with the API call anyway
+            }
+
+            try {
+                const response = await fetch('/api/stockouts/bulk-update', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(updateData)
+                });
+
+                if (!response.ok) throw new Error('Update failed');
+
+                const result = await response.json();
+
+                showToast('Success!', `Updated ${result.updated_count || validatedSKUs.length} SKUs successfully`, 'success');
+                
+                // Clear form after successful update
+                clearForm();
+                
+                // Refresh recent updates
+                loadRecentUpdates();
+
+            } catch (error) {
+                console.error('Update failed:', error);
+                showToast('Update Failed', error.message, 'error');
+            } finally {
+                showProgress(false);
+            }
+        }
+
+        /**
+         * Confirm update from preview modal
+         */
+        function confirmUpdate() {
+            // Close modal
+            bootstrap.Modal.getInstance(document.getElementById('previewModal')).hide();
+            
+            // Submit update
+            submitUpdate();
+        }
+
+        /**
+         * Show/hide progress indicator
+         */
+        function showProgress(show) {
+            const progressContainer = document.getElementById('progressContainer');
+            const updateBtn = document.getElementById('updateBtn');
+
+            if (show) {
+                progressContainer.style.display = 'block';
+                updateBtn.disabled = true;
+                
+                // Animate progress bar
+                let progress = 0;
+                const interval = setInterval(() => {
+                    progress += Math.random() * 30;
+                    if (progress > 95) progress = 95;
+                    
+                    document.getElementById('progressBar').style.width = progress + '%';
+                    document.getElementById('progressText').textContent = Math.round(progress) + '%';
+                    
+                    if (progress >= 95) clearInterval(interval);
+                }, 200);
+            } else {
+                // Complete progress
+                document.getElementById('progressBar').style.width = '100%';
+                document.getElementById('progressText').textContent = '100%';
+                
+                setTimeout(() => {
+                    progressContainer.style.display = 'none';
+                    updateBtn.disabled = false;
+                }, 500);
+            }
+        }
+
+        /**
+         * Clear the form after successful update
+         */
+        function clearForm() {
+            // Clear SKU input
+            clearSKUs();
+            
+            // Clear selections
+            document.querySelectorAll('.status-option, .warehouse-option').forEach(option => {
+                option.classList.remove('selected');
+            });
+            
+            // Reset form state
+            currentStatus = null;
+            currentWarehouse = null;
+            
+            // Reset date to today
+            document.getElementById('stockoutDate').valueAsDate = new Date();
+            
+            validateForm();
+        }
+
+        /**
+         * Load and display recent updates
+         */
+        async function loadRecentUpdates() {
+            const container = document.getElementById('recentUpdates');
+            
+            try {
+                const response = await fetch('/api/stockouts/recent-updates?limit=10');
+                if (!response.ok) throw new Error('Failed to load recent updates');
+
+                const updates = await response.json();
+                recentUpdatesCache = updates;
+
+                let html = '';
+                if (updates.length === 0) {
+                    html = `
+                        <div class="p-3 text-center text-muted">
+                            <i class="fas fa-inbox me-2"></i>
+                            No recent updates
+                        </div>
+                    `;
+                } else {
+                    updates.forEach(update => {
+                        const isOutOfStock = update.action === 'mark_out';
+                        const timeAgo = formatTimeAgo(update.created_at);
+                        
+                        html += `
+                            <div class="recent-update ${isOutOfStock ? 'out-of-stock' : 'back-in-stock'}">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <div>
+                                        <strong>${update.sku_count || 1} SKUs</strong> marked 
+                                        <span class="badge ${isOutOfStock ? 'bg-danger' : 'bg-success'} ms-1">
+                                            ${isOutOfStock ? 'OUT' : 'IN'}
+                                        </span>
+                                        <br>
+                                        <small class="text-muted">
+                                            ${update.warehouse.toUpperCase()} • ${timeAgo}
+                                        </small>
+                                    </div>
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="undoUpdate('${update.batch_id}')" title="Undo">
+                                        <i class="fas fa-undo"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    });
+                }
+
+                container.innerHTML = html;
+
+            } catch (error) {
+                console.error('Failed to load recent updates:', error);
+                container.innerHTML = `
+                    <div class="p-3 text-center text-muted">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        Failed to load updates
+                    </div>
+                `;
+            }
+        }
+
+        /**
+         * Format timestamp as "time ago" string
+         */
+        function formatTimeAgo(timestamp) {
+            const now = new Date();
+            const time = new Date(timestamp);
+            const diffMs = now - time;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMins / 60);
+            const diffDays = Math.floor(diffHours / 24);
+
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            if (diffHours < 24) return `${diffHours}h ago`;
+            if (diffDays < 7) return `${diffDays}d ago`;
+            return time.toLocaleDateString();
+        }
+
+        /**
+         * Set up CSV drag and drop functionality
+         */
+        function setupCSVDragDrop() {
+            const dropArea = document.getElementById('csvImportArea');
+
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropArea.addEventListener(eventName, preventDefaults, false);
+            });
+
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropArea.addEventListener(eventName, () => dropArea.classList.add('dragover'), false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropArea.addEventListener(eventName, () => dropArea.classList.remove('dragover'), false);
+            });
+
+            dropArea.addEventListener('drop', function(e) {
+                const files = e.dataTransfer.files;
+                if (files.length > 0) handleCSVImport(files[0]);
+            }, false);
+        }
+
+        /**
+         * Open file browser for CSV selection
+         */
+        function selectCSVFile() {
+            document.getElementById('csvFileInput').click();
+        }
+
+        /**
+         * Handle CSV file import
+         */
+        async function handleCSVImport(file) {
+            if (!file || !file.name.toLowerCase().endsWith('.csv')) {
+                showToast('Invalid File', 'Please select a CSV file', 'error');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                showToast('Processing...', 'Importing CSV file', 'info');
+
+                const response = await fetch('/api/import/stockout-history', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) throw new Error('Import failed');
+
+                const result = await response.json();
+                
+                showToast('Import Successful!', `Imported ${result.imported_count} stockout records`, 'success');
+                loadRecentUpdates();
+
+            } catch (error) {
+                console.error('CSV import failed:', error);
+                showToast('Import Failed', error.message, 'error');
+            }
+        }
+
+        /**
+         * Show current stockouts in modal
+         */
+        async function showCurrentStockouts() {
+            const modal = new bootstrap.Modal(document.getElementById('stockoutsModal'));
+            const content = document.getElementById('stockoutsContent');
+
+            content.innerHTML = `
+                <div class="text-center p-4">
+                    <i class="fas fa-spinner fa-spin fa-2x text-muted"></i>
+                    <p class="text-muted mt-2">Loading current stockouts...</p>
+                </div>
+            `;
+            
+            modal.show();
+
+            try {
+                const response = await fetch('/api/stockouts/current');
+                if (!response.ok) throw new Error('Failed to load stockouts');
+
+                const stockouts = await response.json();
+
+                if (stockouts.length === 0) {
+                    content.innerHTML = `
+                        <div class="text-center p-4">
+                            <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
+                            <h5>No Current Stockouts</h5>
+                            <p class="text-muted">All tracked items are currently in stock!</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                let html = `
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th>SKU</th>
+                                    <th>Description</th>
+                                    <th>Warehouse</th>
+                                    <th>Days Out</th>
+                                    <th>Urgency</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                `;
+
+                stockouts.forEach(stockout => {
+                    const urgencyClass = {
+                        'CRITICAL': 'bg-danger',
+                        'HIGH': 'bg-warning',
+                        'MEDIUM': 'bg-info',
+                        'LOW': 'bg-secondary'
+                    }[stockout.urgency_level] || 'bg-secondary';
+
+                    html += `
+                        <tr>
+                            <td><code>${stockout.sku_id}</code></td>
+                            <td>${stockout.description || 'N/A'}</td>
+                            <td><span class="badge bg-primary">${stockout.warehouse.toUpperCase()}</span></td>
+                            <td>${stockout.days_out}</td>
+                            <td><span class="badge ${urgencyClass}">${stockout.urgency_level}</span></td>
+                            <td>
+                                <button class="btn btn-sm btn-success" onclick="quickMarkInStock('${stockout.sku_id}', '${stockout.warehouse}')" title="Mark In Stock">
+                                    <i class="fas fa-check"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                });
+
+                html += `
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+
+                content.innerHTML = html;
+
+            } catch (error) {
+                console.error('Failed to load stockouts:', error);
+                content.innerHTML = `
+                    <div class="text-center p-4">
+                        <i class="fas fa-exclamation-triangle fa-2x text-warning"></i>
+                        <p class="text-muted mt-2">Failed to load stockouts</p>
+                    </div>
+                `;
+            }
+        }
+
+        /**
+         * Quick mark SKU as in stock from current stockouts view
+         */
+        async function quickMarkInStock(skuId, warehouse) {
+            try {
+                const response = await fetch('/api/stockouts/bulk-update', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        skus: [skuId],
+                        status: 'in',
+                        warehouse: warehouse,
+                        date: new Date().toISOString().split('T')[0],
+                        notes: 'Quick update from stockouts view'
+                    })
+                });
+
+                if (!response.ok) throw new Error('Update failed');
+
+                showToast('Updated!', `${skuId} marked as back in stock`, 'success');
+                
+                // Refresh both views
+                showCurrentStockouts();
+                loadRecentUpdates();
+
+            } catch (error) {
+                console.error('Quick update failed:', error);
+                showToast('Update Failed', error.message, 'error');
+            }
+        }
+
+        /**
+         * Show update history modal
+         */
+        function showHistory() {
+            // This would open a detailed history view
+            // For now, just refresh the recent updates
+            loadRecentUpdates();
+            showToast('History', 'Recent updates refreshed', 'info');
+        }
+
+        /**
+         * Refresh the recent updates list
+         */
+        function refreshHistory() {
+            loadRecentUpdates();
+        }
+
+        /**
+         * Undo a recent update
+         */
+        async function undoUpdate(batchId) {
+            if (!confirm('Are you sure you want to undo this update? This will reverse all changes in this batch.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/stockouts/undo/${batchId}`, {
+                    method: 'POST'
+                });
+
+                if (!response.ok) throw new Error('Undo failed');
+
+                showToast('Undone!', 'Update has been reversed', 'success');
+                loadRecentUpdates();
+
+            } catch (error) {
+                console.error('Undo failed:', error);
+                showToast('Undo Failed', error.message, 'error');
+            }
+        }
+
+        /**
+         * Show toast notification
+         */
+        function showToast(title, message, type = 'info') {
+            const toast = document.getElementById('updateToast');
+            const toastTitle = document.getElementById('toastTitle');
+            const toastBody = document.getElementById('toastBody');
+            const toastIcon = document.getElementById('toastIcon');
+
+            // Set icon and styling based on type
+            const config = {
+                success: { icon: 'fas fa-check-circle text-success', class: 'text-success' },
+                error: { icon: 'fas fa-exclamation-circle text-danger', class: 'text-danger' },
+                info: { icon: 'fas fa-info-circle text-info', class: 'text-info' },
+                warning: { icon: 'fas fa-exclamation-triangle text-warning', class: 'text-warning' }
+            }[type] || { icon: 'fas fa-info-circle text-info', class: 'text-info' };
+
+            toastIcon.className = config.icon;
+            toastTitle.textContent = title;
+            toastTitle.className = `me-auto ${config.class}`;
+            toastBody.textContent = message;
+
+            // Show toast
+            const bsToast = new bootstrap.Toast(toast);
+            bsToast.show();
+        }
+
+        // Auto-save form state to localStorage
+        setInterval(() => {
+            if (document.getElementById('skuInput').value.trim()) {
+                localStorage.setItem('stockout_form_state', JSON.stringify({
+                    skus: document.getElementById('skuInput').value,
+                    status: currentStatus,
+                    warehouse: currentWarehouse,
+                    date: document.getElementById('stockoutDate').value,
+                    timestamp: Date.now()
+                }));
+            }
+        }, 10000); // Save every 10 seconds
+
+        // Restore form state on page load
+        window.addEventListener('load', () => {
+            const savedState = localStorage.getItem('stockout_form_state');
+            if (savedState) {
+                const state = JSON.parse(savedState);
+                // Only restore if saved within last hour
+                if (Date.now() - state.timestamp < 3600000) {
+                    if (confirm('Restore your previous form data?')) {
+                        document.getElementById('skuInput').value = state.skus;
+                        if (state.status) selectStatus(state.status);
+                        if (state.warehouse) selectWarehouse(state.warehouse);
+                        if (state.date) document.getElementById('stockoutDate').value = state.date;
+                        validateSKUs();
+                    }
+                }
+                localStorage.removeItem('stockout_form_state');
+            }
+        });
+    </script>
+</body>
+</html>

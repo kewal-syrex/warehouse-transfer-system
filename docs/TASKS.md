@@ -504,4 +504,124 @@ A task is complete when:
 
 ---
 
+## 📊 Week 5-6: Stockout Management Enhancement
+
+### **Focus**: Comprehensive stockout tracking and demand correction
+
+#### Day 1: Database Schema Updates
+- [ ] **TASK-082**: Add seasonal_pattern field to skus table
+- [ ] **TASK-083**: Add growth_status field to skus table  
+- [ ] **TASK-084**: Add last_stockout_date field to skus table
+- [ ] **TASK-085**: Create indexes for stockout_dates performance optimization
+- [ ] **TASK-086**: Add triggers for automatic data synchronization between tables
+- [ ] **TASK-087**: Test schema changes with existing data
+
+#### Day 2-3: Quick Stockout Update UI
+- [x] **TASK-088**: Create stockout-management.html interface with responsive design
+- [x] **TASK-089**: Implement bulk paste textarea functionality with validation
+- [x] **TASK-090**: Add status radio buttons (out/in) and warehouse selection dropdowns
+- [x] **TASK-091**: Create date picker with default to current date
+- [x] **TASK-092**: Build recent updates history display with pagination
+- [x] **TASK-093**: Add real-time validation for pasted SKU lists
+- [x] **TASK-094**: Implement success/error feedback for bulk operations
+- [x] **TASK-095**: Add undo functionality for recent updates
+
+#### Day 3-4: CSV Import for Historical Stockout Data
+- [x] **TASK-096**: Create CSV parser for 3-column format (SKU, date_out, date_back_in)
+- [x] **TASK-097**: Implement /api/import/stockout-history endpoint with validation
+- [x] **TASK-098**: Add SKU existence validation during import
+- [x] **TASK-099**: Handle blank date_back_in fields (ongoing stockouts)
+- [x] **TASK-100**: Create transaction-based bulk insert for data integrity
+- [x] **TASK-101**: Add import progress tracking and status reporting
+- [x] **TASK-102**: Implement duplicate detection and resolution
+- [x] **TASK-103**: Create import validation report with error details
+
+#### Day 4-5: Enhanced Calculation Engine
+- [ ] **TASK-104**: Implement year-over-year demand lookup for seasonal products
+- [ ] **TASK-105**: Add category average fallback for new SKUs
+- [ ] **TASK-106**: Create seasonal pattern detection algorithm (2+ years data)
+- [ ] **TASK-107**: Implement viral growth detection (2x threshold detection)
+- [ ] **TASK-108**: Update database with detected patterns automatically
+- [ ] **TASK-109**: Create smart demand estimation for zero-sales stockouts
+- [ ] **TASK-110**: Add seasonality correction for spring/summer products
+- [ ] **TASK-111**: Test enhanced calculations with historical data
+
+#### Day 5-6: Enhanced Transfer Logic
+- [ ] **TASK-112**: Implement discontinued item consolidation logic
+- [ ] **TASK-113**: Add seasonal pre-positioning recommendations
+- [ ] **TASK-114**: Update transfer reasons with detailed explanations
+- [ ] **TASK-115**: Create priority scoring for stockout-affected SKUs
+- [ ] **TASK-116**: Add growth factor adjustments for viral products
+- [ ] **TASK-117**: Test logic with various SKU statuses and scenarios
+
+#### Day 6-7: Stockout Dashboard and Reporting
+- [ ] **TASK-118**: Create current stockouts widget for dashboard
+- [ ] **TASK-119**: Add lost sales calculation and cost impact
+- [ ] **TASK-120**: Implement stockout trends chart with patterns
+- [ ] **TASK-121**: Add quick action buttons for critical items
+- [ ] **TASK-122**: Create stockout history export functionality
+- [ ] **TASK-123**: Build pattern analysis report with recommendations
+- [ ] **TASK-124**: Add automated alerts for prolonged stockouts
+
+#### Day 7-8: API Endpoints Implementation
+- [x] **TASK-125**: Create POST /api/stockouts/bulk-update endpoint
+- [x] **TASK-126**: Implement GET /api/stockouts/current with filtering
+- [x] **TASK-127**: Build GET /api/stockouts/history with pagination
+- [x] **TASK-128**: Add POST /api/import/stockout-history for CSV
+- [ ] **TASK-129**: Create GET /api/stockouts/patterns for analysis
+- [x] **TASK-130**: Implement proper error handling and validation
+- [x] **TASK-131**: Add comprehensive API documentation
+
+#### Day 8-9: Testing & Quality Assurance
+- [ ] **TASK-132**: Playwright test Quick Update UI workflow
+- [ ] **TASK-133**: Playwright test CSV import with various formats
+- [ ] **TASK-134**: Playwright test calculation corrections accuracy
+- [ ] **TASK-135**: Playwright test dashboard updates and responsiveness
+- [ ] **TASK-136**: Performance test with 4K+ SKUs dataset
+- [ ] **TASK-137**: Test error handling and edge cases
+- [ ] **TASK-138**: Cross-browser compatibility testing
+- [ ] **TASK-139**: User acceptance testing workflow validation
+
+#### Day 9-10: Documentation & Code Quality
+- [ ] **TASK-140**: Add comprehensive docstrings to all new functions
+- [ ] **TASK-141**: Write inline comments for complex business logic
+- [ ] **TASK-142**: Update API documentation with new endpoints
+- [ ] **TASK-143**: Create user guide for stockout management features
+- [ ] **TASK-144**: Document seasonal pattern detection methodology
+- [ ] **TASK-145**: Add code examples and usage patterns
+- [ ] **TASK-146**: Review and cleanup code following best practices
+
+#### Day 10-11: Integration & Deployment
+- [x] **TASK-147**: Integrate new features with existing transfer planning
+- [x] **TASK-148**: Update navigation and menu structure
+- [x] **TASK-149**: Test end-to-end workflows with new features
+- [ ] **TASK-150**: Prepare database migration scripts
+- [ ] **TASK-151**: Update GitHub repository with all changes
+- [ ] **TASK-152**: Create deployment guide for new features
+- [x] **TASK-153**: Final integration testing and validation
+
+### 🎯 **Enhanced Stockout Management Success Criteria**
+
+#### Functional Requirements
+- [ ] **Quick Update**: Update 50+ SKUs stockout status in <30 seconds
+- [ ] **CSV Import**: Import 1000+ historical stockout records in <2 minutes
+- [ ] **Smart Calculations**: Zero-sales stockouts use appropriate historical data
+- [ ] **Pattern Detection**: Automatically classify seasonal patterns for all SKUs
+- [ ] **Dashboard**: Real-time stockout visibility with actionable insights
+
+#### Technical Requirements
+- [ ] **Performance**: All operations complete in <5 seconds
+- [ ] **Reliability**: 100% data integrity with transaction support
+- [ ] **Usability**: Intuitive UI requiring no training
+- [ ] **Documentation**: Complete code documentation and user guides
+- [ ] **Testing**: 90%+ test coverage with Playwright automation
+
+#### Business Impact
+- [ ] **Efficiency**: Reduce stockout management time by 80%
+- [ ] **Accuracy**: Improve demand prediction for out-of-stock items
+- [ ] **Visibility**: Complete historical stockout tracking and analysis
+- [ ] **Prevention**: Proactive seasonal pre-positioning recommendations
+
+---
+
 This task management document should be updated weekly and used as the single source of truth for project progress and next steps.
