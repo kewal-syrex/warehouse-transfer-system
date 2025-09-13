@@ -296,9 +296,13 @@
                                 <th>Priority</th>
                                 <th>Current KY</th>
                                 <th>Available CA</th>
+                                <th>Burnaby Pending</th>
+                                <th>Kentucky Pending</th>
                                 <th>Monthly Demand</th>
                                 <th>Coverage</th>
                                 <th>Transfer Qty</th>
+                                <th>CA Coverage After</th>
+                                <th>KY Coverage After</th>
                                 <th>ABC/XYZ</th>
                                 <th>Reason</th>
                                 <th>Actions</th>
@@ -364,9 +368,9 @@
                 "pageLength": 25,
                 "order": [[3, "asc"]], // Sort by priority
                 "columnDefs": [
-                    { "orderable": false, "targets": [0, 11] }, // Checkbox and actions
-                    { "searchable": false, "targets": [0, 11] },
-                    { "className": "text-center", "targets": [0, 3, 4, 5, 6, 7, 8, 9] }
+                    { "orderable": false, "targets": [0, 13] }, // Checkbox and actions (updated for new columns)
+                    { "searchable": false, "targets": [0, 13] },
+                    { "className": "text-center", "targets": [0, 3, 4, 5, 6, 7, 8, 9, 10, 11] }
                 ],
                 "dom": '<"row"<"col-sm-6"l><"col-sm-6"f>>rtip',
                 "language": {
@@ -446,6 +450,14 @@
                     <td>${rec.current_kentucky_qty}</td>
                     <td>${rec.current_burnaby_qty}</td>
                     <td>
+                        ${rec.burnaby_pending_qty || 0}
+                        ${rec.burnaby_pending_days ? `<small class="text-muted">(${rec.burnaby_pending_days}d)</small>` : ''}
+                    </td>
+                    <td>
+                        ${rec.kentucky_pending_qty || 0}
+                        ${rec.kentucky_pending_days ? `<small class="text-muted">(${rec.kentucky_pending_days}d)</small>` : ''}
+                    </td>
+                    <td>
                         ${rec.corrected_monthly_demand.toFixed(0)}
                         ${stockoutBadge}
                     </td>
@@ -458,6 +470,13 @@
                                step="${rec.transfer_multiple}"
                                data-sku="${rec.sku_id}"
                                onchange="updateTransferQty('${rec.sku_id}', this.value)">
+                    </td>
+                    <td>
+                        <span class="text-success">${(rec.burnaby_coverage_after_transfer || 0).toFixed(1)}m</span>
+                        ${rec.burnaby_retention_warning ? '<i class="fas fa-exclamation-triangle text-warning ms-1" title="Below minimum retention"></i>' : ''}
+                    </td>
+                    <td>
+                        <span class="text-info">${(rec.kentucky_coverage_after_transfer || 0).toFixed(1)}m</span>
                     </td>
                     <td>${rec.abc_class}${rec.xyz_class}</td>
                     <td>

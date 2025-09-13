@@ -12,6 +12,7 @@ from pathlib import Path
 import pymysql
 import io
 from datetime import datetime
+from typing import Optional
 import logging
 import uuid
 
@@ -1840,6 +1841,435 @@ async def import_stockout_history(file: UploadFile = File(...)):
             detail=f"CSV import failed: {str(e)}"
         )
 
+# ===================================================================
+# PENDING ORDERS API ENDPOINTS
+# ===================================================================
+
+@app.get("/api/pending-orders",
+         summary="Get All Pending Orders",
+         description="Retrieve all pending inventory orders with analysis data",
+         tags=["Pending Orders"])
+async def get_pending_orders(
+    status: Optional[str] = None,
+    destination: Optional[str] = None,
+    order_type: Optional[str] = None,
+    overdue_only: bool = False
+):
+    """
+    Retrieve pending orders with filtering options
+
+    Args:
+        status: Filter by order status (ordered/shipped/received/cancelled)
+        destination: Filter by destination warehouse (burnaby/kentucky)
+        order_type: Filter by order type (supplier/transfer)
+        overdue_only: Show only overdue orders
+
+    Returns:
+        List of pending orders with analysis data
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+
+        # Base query using the analysis view
+        query = """
+        SELECT * FROM v_pending_orders_analysis
+        WHERE 1=1
+        """
+        params = []
+
+        # Apply filters
+        if status:
+            query += " AND status = %s"
+            params.append(status.lower())
+
+        if destination:
+            query += " AND destination = %s"
+            params.append(destination.lower())
+
+        if order_type:
+            query += " AND order_type = %s"
+            params.append(order_type.lower())
+
+        if overdue_only:
+            query += " AND is_overdue = TRUE"
+
+        query += " ORDER BY priority_score DESC, order_date ASC"
+
+        cursor.execute(query, params)
+        results = cursor.fetchall()
+
+        cursor.close()
+        db.close()
+
+        return {
+            "success": True,
+            "data": results,
+            "count": len(results)
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to retrieve pending orders: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve pending orders: {str(e)}"
+        )
+
+@app.get("/api/pending-orders/summary",
+         summary="Get Pending Orders Summary",
+         description="Get summary of pending orders grouped by SKU",
+         tags=["Pending Orders"])
+async def get_pending_orders_summary():
+    """
+    Get pending orders summary by SKU using the pending quantities view
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+
+        query = """
+        SELECT
+            pq.*,
+            s.description,
+            s.supplier,
+            s.abc_code,
+            s.xyz_code,
+            ic.burnaby_qty as current_burnaby,
+            ic.kentucky_qty as current_kentucky
+        FROM v_pending_quantities pq
+        INNER JOIN skus s ON pq.sku_id = s.sku_id
+        LEFT JOIN inventory_current ic ON pq.sku_id = ic.sku_id
+        ORDER BY pq.total_pending DESC, pq.earliest_arrival ASC
+        """
+
+        cursor.execute(query)
+        results = cursor.fetchall()
+
+        cursor.close()
+        db.close()
+
+        return {
+            "success": True,
+            "data": results,
+            "count": len(results)
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get pending orders summary: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get pending orders summary: {str(e)}"
+        )
+
+@app.post("/api/pending-orders",
+          summary="Create Pending Order",
+          description="Create a new pending inventory order",
+          tags=["Pending Orders"])
+async def create_pending_order(order: models.PendingInventoryCreate):
+    """
+    Create a new pending inventory order
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor()
+
+        # Validate SKU exists
+        cursor.execute("SELECT sku_id FROM skus WHERE sku_id = %s", (order.sku_id,))
+        if not cursor.fetchone():
+            raise HTTPException(
+                status_code=404,
+                detail=f"SKU '{order.sku_id}' not found"
+            )
+
+        # Insert new pending order
+        insert_query = """
+        INSERT INTO pending_inventory (
+            sku_id, quantity, destination, order_date, expected_arrival,
+            order_type, status, lead_time_days, is_estimated, notes
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+
+        cursor.execute(insert_query, (
+            order.sku_id,
+            order.quantity,
+            order.destination,
+            order.order_date,
+            order.expected_arrival,
+            order.order_type,
+            order.status,
+            order.lead_time_days,
+            order.is_estimated,
+            order.notes
+        ))
+
+        order_id = cursor.lastrowid
+        db.commit()
+
+        cursor.close()
+        db.close()
+
+        return {
+            "success": True,
+            "message": "Pending order created successfully",
+            "id": order_id,
+            "sku_id": order.sku_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if 'db' in locals():
+            db.rollback()
+        logger.error(f"Failed to create pending order: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create pending order: {str(e)}"
+        )
+
+@app.post("/api/pending-orders/bulk",
+          summary="Bulk Create Pending Orders",
+          description="Create multiple pending orders in a single transaction",
+          tags=["Pending Orders"])
+async def bulk_create_pending_orders(bulk_data: models.BulkPendingInventoryCreate):
+    """
+    Create multiple pending orders in a single transaction
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor()
+
+        imported_count = 0
+        error_count = 0
+        errors = []
+        batch_id = str(uuid.uuid4())
+
+        # Validate SKUs if requested
+        if bulk_data.validate_skus:
+            all_skus = [order.sku_id for order in bulk_data.orders]
+            placeholders = ','.join(['%s'] * len(all_skus))
+            cursor.execute(f"SELECT sku_id FROM skus WHERE sku_id IN ({placeholders})", all_skus)
+            valid_skus = {row[0] for row in cursor.fetchall()}
+
+            invalid_skus = set(all_skus) - valid_skus
+            if invalid_skus:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid SKUs found: {', '.join(sorted(invalid_skus))}"
+                )
+
+        # Insert orders
+        insert_query = """
+        INSERT INTO pending_inventory (
+            sku_id, quantity, destination, order_date, expected_arrival,
+            order_type, status, lead_time_days, is_estimated, notes
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+
+        for idx, order in enumerate(bulk_data.orders):
+            try:
+                cursor.execute(insert_query, (
+                    order.sku_id,
+                    order.quantity,
+                    order.destination,
+                    order.order_date,
+                    order.expected_arrival,
+                    order.order_type,
+                    order.status,
+                    order.lead_time_days,
+                    order.is_estimated,
+                    order.notes
+                ))
+                imported_count += 1
+
+            except Exception as e:
+                errors.append(f"Order {idx + 1} ({order.sku_id}): {str(e)}")
+                error_count += 1
+                continue
+
+        if imported_count > 0:
+            db.commit()
+        else:
+            db.rollback()
+
+        cursor.close()
+        db.close()
+
+        return {
+            "success": imported_count > 0,
+            "imported_count": imported_count,
+            "error_count": error_count,
+            "total_orders": len(bulk_data.orders),
+            "batch_id": batch_id,
+            "errors": errors[:10]
+        }
+
+    except HTTPException:
+        if 'db' in locals():
+            db.rollback()
+        raise
+    except Exception as e:
+        if 'db' in locals():
+            db.rollback()
+        logger.error(f"Bulk pending orders creation failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Bulk creation failed: {str(e)}"
+        )
+
+@app.put("/api/pending-orders/{order_id}",
+         summary="Update Pending Order",
+         description="Update an existing pending order",
+         tags=["Pending Orders"])
+async def update_pending_order(order_id: int, updates: models.PendingInventoryUpdate):
+    """
+    Update an existing pending order
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor()
+
+        # Check if order exists
+        cursor.execute("SELECT id FROM pending_inventory WHERE id = %s", (order_id,))
+        if not cursor.fetchone():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Pending order {order_id} not found"
+            )
+
+        # Build update query dynamically
+        update_fields = []
+        update_values = []
+
+        for field, value in updates.dict(exclude_unset=True).items():
+            if value is not None:
+                update_fields.append(f"{field} = %s")
+                update_values.append(value)
+
+        if not update_fields:
+            raise HTTPException(
+                status_code=400,
+                detail="No fields to update"
+            )
+
+        update_query = f"""
+        UPDATE pending_inventory
+        SET {', '.join(update_fields)}, updated_at = NOW()
+        WHERE id = %s
+        """
+        update_values.append(order_id)
+
+        cursor.execute(update_query, update_values)
+
+        if cursor.rowcount == 0:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Pending order {order_id} not found"
+            )
+
+        db.commit()
+        cursor.close()
+        db.close()
+
+        return {
+            "success": True,
+            "message": f"Pending order {order_id} updated successfully",
+            "id": order_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if 'db' in locals():
+            db.rollback()
+        logger.error(f"Failed to update pending order {order_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update pending order: {str(e)}"
+        )
+
+@app.delete("/api/pending-orders/{order_id}",
+           summary="Delete Pending Order",
+           description="Delete a pending order",
+           tags=["Pending Orders"])
+async def delete_pending_order(order_id: int):
+    """
+    Delete a pending order
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor()
+
+        cursor.execute("DELETE FROM pending_inventory WHERE id = %s", (order_id,))
+
+        if cursor.rowcount == 0:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Pending order {order_id} not found"
+            )
+
+        db.commit()
+        cursor.close()
+        db.close()
+
+        return {
+            "success": True,
+            "message": f"Pending order {order_id} deleted successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if 'db' in locals():
+            db.rollback()
+        logger.error(f"Failed to delete pending order {order_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete pending order: {str(e)}"
+        )
+
+@app.get("/api/pending-orders/{order_id}",
+         summary="Get Pending Order Details",
+         description="Get detailed information for a specific pending order",
+         tags=["Pending Orders"])
+async def get_pending_order(order_id: int):
+    """
+    Get detailed information for a specific pending order
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+
+        query = """
+        SELECT * FROM v_pending_orders_analysis
+        WHERE id = %s
+        """
+
+        cursor.execute(query, (order_id,))
+        result = cursor.fetchone()
+
+        if not result:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Pending order {order_id} not found"
+            )
+
+        cursor.close()
+        db.close()
+
+        return {
+            "success": True,
+            "data": result
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get pending order {order_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get pending order: {str(e)}"
+        )
+
 # Serve the main dashboard
 @app.get("/dashboard")
 async def dashboard_redirect():
@@ -1917,4 +2347,4 @@ async def dashboard_legacy():
     """
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8002, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8003, reload=True)

@@ -324,12 +324,159 @@
                                         </div>
                                     </div>
                                 </div>
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#pending-format">
+                                            Pending Orders Format
+                                        </button>
+                                    </h2>
+                                    <div id="pending-format" class="accordion-collapse collapse" data-bs-parent="#import-instructions">
+                                        <div class="accordion-body">
+                                            <strong>Required columns:</strong> sku_id, quantity, destination<br>
+                                            <strong>Optional columns:</strong> expected_date, order_type, status, notes<br>
+                                            <strong>Note:</strong> If expected_date is empty, system uses Today + 120 days (estimated)<br>
+                                            <strong>Destinations:</strong> burnaby, kentucky<br>
+                                            <strong>Examples:</strong><br>
+                                            <code>
+                                            <strong>Basic Format:</strong><br>
+                                            sku_id | quantity | destination | expected_date<br>
+                                            CHG-001 | 500 | burnaby | 2025-02-15<br>
+                                            CAB-002 | 300 | kentucky |<br>
+                                            WDG-003 | 200 | burnaby | 2025-03-01<br><br>
+                                            <strong>With Details:</strong><br>
+                                            sku_id | quantity | destination | expected_date | order_type | status | notes<br>
+                                            CHG-001 | 500 | burnaby | 2025-02-15 | supplier | ordered | Shipment confirmed<br>
+                                            CAB-002 | 300 | kentucky | | supplier | ordered | Lead time estimated
+                                            </code>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
-            
+
+            <!-- Pending Orders Management Section -->
+            <div class="col-12">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-clock me-2"></i>Pending Orders Management
+                            <small class="text-muted">Track and manage incoming inventory orders</small>
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <!-- Pending Orders Upload -->
+                            <div class="col-lg-6 mb-4">
+                                <h6><i class="fas fa-upload me-2"></i>Import Pending Orders</h6>
+                                <div id="pending-upload-area" class="upload-area" onclick="document.getElementById('pending-file-input').click()">
+                                    <i class="fas fa-calendar-plus upload-icon"></i>
+                                    <h6>Drop pending orders file here or click to browse</h6>
+                                    <p class="text-muted mb-0">
+                                        Upload CSV/Excel with pending inventory orders<br>
+                                        <small>Format: sku_id, quantity, destination, expected_date (optional)</small>
+                                    </p>
+                                </div>
+                                <input type="file" id="pending-file-input" accept=".xlsx,.xls,.csv" style="display: none;">
+
+                                <!-- Import Progress -->
+                                <div id="pending-upload-progress" class="upload-progress">
+                                    <div class="progress">
+                                        <div class="progress-bar" role="progressbar" style="width: 0%"></div>
+                                    </div>
+                                    <small class="text-muted mt-1">Processing pending orders...</small>
+                                </div>
+
+                                <!-- Import Results -->
+                                <div id="pending-import-results" class="import-results"></div>
+                            </div>
+
+                            <!-- Pending Orders Summary -->
+                            <div class="col-lg-6 mb-4">
+                                <h6><i class="fas fa-chart-pie me-2"></i>Current Summary</h6>
+                                <div class="row g-3">
+                                    <div class="col-6">
+                                        <div class="card text-center">
+                                            <div class="card-body py-3">
+                                                <h4 class="text-primary mb-1" id="pending-total-orders">-</h4>
+                                                <small class="text-muted">Total Orders</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="card text-center">
+                                            <div class="card-body py-3">
+                                                <h4 class="text-info mb-1" id="pending-unique-skus">-</h4>
+                                                <small class="text-muted">Unique SKUs</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="card text-center">
+                                            <div class="card-body py-3">
+                                                <h4 class="text-success mb-1" id="pending-burnaby-orders">-</h4>
+                                                <small class="text-muted">To Burnaby</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="card text-center">
+                                            <div class="card-body py-3">
+                                                <h4 class="text-warning mb-1" id="pending-kentucky-orders">-</h4>
+                                                <small class="text-muted">To Kentucky</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Refresh Button -->
+                                <div class="d-grid mt-3">
+                                    <button class="btn btn-outline-primary" onclick="refreshPendingOrdersSummary()">
+                                        <i class="fas fa-sync-alt me-2"></i>Refresh Summary
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Pending Orders Table -->
+                        <div class="row mt-4">
+                            <div class="col-12">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h6><i class="fas fa-list me-2"></i>Recent Pending Orders</h6>
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="showAllPendingOrders()">
+                                        <i class="fas fa-external-link-alt me-1"></i>View All
+                                    </button>
+                                </div>
+                                <div class="table-responsive">
+                                    <table class="table table-sm" id="pending-orders-preview">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th>SKU</th>
+                                                <th>Quantity</th>
+                                                <th>Destination</th>
+                                                <th>Expected Date</th>
+                                                <th>Status</th>
+                                                <th>Days Until</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td colspan="7" class="text-center text-muted">
+                                                    <em>No pending orders found. Upload pending orders to get started.</em>
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Export Section -->
             <div class="col-lg-6">
                 <div class="card mb-4">
@@ -921,6 +1068,247 @@
         function updateTimestamp() {
             document.getElementById('page-timestamp').textContent = new Date().toLocaleString();
         }
+
+        // =============================================================================
+        // PENDING ORDERS FUNCTIONALITY
+        // =============================================================================
+
+        function setupPendingOrdersUpload() {
+            const uploadArea = document.getElementById('pending-upload-area');
+            const fileInput = document.getElementById('pending-file-input');
+
+            if (!uploadArea || !fileInput) return;
+
+            // Drag and drop handlers
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
+
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.classList.remove('dragover');
+            });
+
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    handlePendingOrdersFile(files[0]);
+                }
+            });
+
+            // File input handler
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    handlePendingOrdersFile(e.target.files[0]);
+                }
+            });
+        }
+
+        async function handlePendingOrdersFile(file) {
+            // Show progress
+            const progressContainer = document.getElementById('pending-upload-progress');
+            const resultsContainer = document.getElementById('pending-import-results');
+            const progressBar = progressContainer.querySelector('.progress-bar');
+
+            progressContainer.style.display = 'block';
+            resultsContainer.style.display = 'none';
+            progressBar.style.width = '10%';
+
+            try {
+                // Create FormData for file upload
+                const formData = new FormData();
+                formData.append('file', file);
+
+                progressBar.style.width = '30%';
+
+                // Upload to pending orders import endpoint
+                const response = await fetch('/api/pending-orders/import', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                progressBar.style.width = '80%';
+
+                if (!response.ok) {
+                    throw new Error(`Import failed: ${response.statusText}`);
+                }
+
+                const result = await response.json();
+                progressBar.style.width = '100%';
+
+                // Show results
+                displayPendingOrdersImportResults(result);
+
+                // Refresh summary and table
+                await refreshPendingOrdersSummary();
+                await refreshPendingOrdersPreview();
+
+                // Add to export history
+                addToExportHistory('Pending Orders Import', file.name, result);
+
+            } catch (error) {
+                console.error('Pending orders import error:', error);
+                displayPendingOrdersImportResults({
+                    success: false,
+                    error: error.message,
+                    imported_count: 0,
+                    total_orders: 0
+                });
+            } finally {
+                progressContainer.style.display = 'none';
+                document.getElementById('pending-file-input').value = '';
+            }
+        }
+
+        function displayPendingOrdersImportResults(result) {
+            const container = document.getElementById('pending-import-results');
+            container.style.display = 'block';
+
+            let html = '';
+
+            if (result.success) {
+                html += `<div class="validation-success">
+                    <i class="fas fa-check-circle me-2"></i>
+                    <strong>Import Successful!</strong><br>
+                    Imported ${result.imported_count} pending orders from ${result.total_orders} rows.
+                </div>`;
+
+                if (result.estimated_dates_added > 0) {
+                    html += `<div class="validation-warning">
+                        <i class="fas fa-calendar me-2"></i>
+                        ${result.estimated_dates_added} orders used estimated dates (Today + 120 days).
+                    </div>`;
+                }
+
+                if (result.errors && result.errors.length > 0) {
+                    html += `<div class="validation-error">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        <strong>Some issues found:</strong><br>
+                        ${result.errors.slice(0, 5).map(error => `• ${error}`).join('<br>')}
+                        ${result.errors.length > 5 ? '<br>• ...and more' : ''}
+                    </div>`;
+                }
+            } else {
+                html += `<div class="validation-error">
+                    <i class="fas fa-times-circle me-2"></i>
+                    <strong>Import Failed:</strong> ${result.error || 'Unknown error occurred'}
+                </div>`;
+            }
+
+            container.innerHTML = html;
+
+            // Auto-hide after 10 seconds if successful
+            if (result.success) {
+                setTimeout(() => {
+                    container.style.display = 'none';
+                }, 10000);
+            }
+        }
+
+        async function refreshPendingOrdersSummary() {
+            try {
+                const response = await fetch('/api/pending-orders/summary');
+
+                if (!response.ok) {
+                    throw new Error('Failed to fetch pending orders summary');
+                }
+
+                const data = await response.json();
+
+                // Update summary statistics
+                document.getElementById('pending-total-orders').textContent = data.total_orders || 0;
+                document.getElementById('pending-unique-skus').textContent = data.unique_skus || 0;
+                document.getElementById('pending-burnaby-orders').textContent = data.burnaby_orders || 0;
+                document.getElementById('pending-kentucky-orders').textContent = data.kentucky_orders || 0;
+
+            } catch (error) {
+                console.error('Error refreshing pending orders summary:', error);
+                // Set fallback values
+                document.getElementById('pending-total-orders').textContent = '-';
+                document.getElementById('pending-unique-skus').textContent = '-';
+                document.getElementById('pending-burnaby-orders').textContent = '-';
+                document.getElementById('pending-kentucky-orders').textContent = '-';
+            }
+        }
+
+        async function refreshPendingOrdersPreview() {
+            try {
+                const response = await fetch('/api/pending-orders?limit=5');
+
+                if (!response.ok) {
+                    throw new Error('Failed to fetch pending orders');
+                }
+
+                const result = await response.json();
+                const orders = result.data || [];
+
+                const tbody = document.querySelector('#pending-orders-preview tbody');
+
+                if (orders.length === 0) {
+                    tbody.innerHTML = `
+                        <tr>
+                            <td colspan="7" class="text-center text-muted">
+                                <em>No pending orders found.</em>
+                            </td>
+                        </tr>
+                    `;
+                } else {
+                    tbody.innerHTML = orders.map(order => {
+                        const expectedDate = new Date(order.expected_arrival).toLocaleDateString();
+                        const daysUntil = Math.ceil((new Date(order.expected_arrival) - new Date()) / (1000 * 60 * 60 * 24));
+                        const statusBadge = order.is_estimated ?
+                            '<span class="badge bg-warning text-dark">Estimated</span>' :
+                            '<span class="badge bg-success">Confirmed</span>';
+
+                        return `
+                            <tr>
+                                <td><code>${order.sku_id}</code></td>
+                                <td>${order.quantity.toLocaleString()}</td>
+                                <td><span class="badge bg-${order.destination === 'burnaby' ? 'success' : 'warning'}">${order.destination}</span></td>
+                                <td>${expectedDate}</td>
+                                <td>${statusBadge}</td>
+                                <td class="${daysUntil < 0 ? 'text-danger' : daysUntil <= 30 ? 'text-warning' : 'text-muted'}">${daysUntil} days</td>
+                                <td>
+                                    <button class="btn btn-outline-primary btn-sm" onclick="editPendingOrder(${order.id})">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
+
+            } catch (error) {
+                console.error('Error refreshing pending orders preview:', error);
+                document.querySelector('#pending-orders-preview tbody').innerHTML = `
+                    <tr>
+                        <td colspan="7" class="text-center text-danger">
+                            <em>Error loading pending orders</em>
+                        </td>
+                    </tr>
+                `;
+            }
+        }
+
+        function showAllPendingOrders() {
+            // This would open a detailed pending orders management page
+            // For now, show an alert
+            alert('Full pending orders management interface coming soon!');
+        }
+
+        function editPendingOrder(orderId) {
+            // This would open an edit modal for the specific pending order
+            alert(`Edit pending order ${orderId} - feature coming soon!`);
+        }
+
+        // Initialize pending orders functionality when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            setupPendingOrdersUpload();
+            refreshPendingOrdersSummary();
+            refreshPendingOrdersPreview();
+        });
     </script>
 </body>
 </html>
