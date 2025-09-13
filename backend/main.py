@@ -572,6 +572,169 @@ async def get_sku_details(sku_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
 
+@app.put("/api/skus/{sku_id}",
+         summary="Update SKU Master Data",
+         description="Update editable fields of an existing SKU with comprehensive validation",
+         tags=["SKU Management"],
+         responses={
+             200: {
+                 "description": "SKU updated successfully",
+                 "content": {
+                     "application/json": {
+                         "example": {
+                             "success": True,
+                             "sku_id": "CHG-001",
+                             "message": "SKU updated successfully",
+                             "updated_fields": ["description", "cost_per_unit", "abc_code"],
+                             "updated_at": "2025-09-13T10:30:00Z"
+                         }
+                     }
+                 }
+             },
+             400: {"description": "Invalid input data or validation failed"},
+             404: {"description": "SKU not found"},
+             500: {"description": "Update operation failed"}
+         })
+async def update_sku(sku_id: str, update_data: models.SKUUpdateRequest):
+    """
+    Update SKU master data with comprehensive validation and data integrity checks
+
+    Updates only the provided fields, leaving others unchanged.
+    All updates are performed within a database transaction for data integrity.
+
+    Args:
+        sku_id: The unique SKU identifier to update
+        update_data: JSON object containing the fields to update
+
+    Updateable Fields:
+        - description: Product description (1-255 characters)
+        - supplier: Supplier name (max 100 characters)
+        - cost_per_unit: Unit cost (0.01-99999.99, rounded to 2 decimals)
+        - status: Product status (Active, Death Row, or Discontinued)
+        - transfer_multiple: Transfer quantity multiple (1-9999)
+        - abc_code: ABC classification (A, B, or C)
+        - xyz_code: XYZ classification (X, Y, or Z)
+        - category: Product category (max 50 characters)
+
+    Returns:
+        JSON object with update confirmation and details
+
+    Raises:
+        HTTPException: 400 for validation errors, 404 if SKU not found, 500 for database errors
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+
+        # First, verify the SKU exists
+        cursor.execute("SELECT sku_id FROM skus WHERE sku_id = %s", (sku_id,))
+        existing_sku = cursor.fetchone()
+
+        if not existing_sku:
+            db.close()
+            raise HTTPException(status_code=404, detail=f"SKU '{sku_id}' not found")
+
+        # Build dynamic update query from provided fields
+        update_fields = []
+        update_values = []
+        updated_field_names = []
+
+        # Only update fields that are provided in the request
+        if update_data.description is not None:
+            update_fields.append("description = %s")
+            update_values.append(update_data.description)
+            updated_field_names.append("description")
+
+        if update_data.supplier is not None:
+            update_fields.append("supplier = %s")
+            update_values.append(update_data.supplier)
+            updated_field_names.append("supplier")
+
+        if update_data.cost_per_unit is not None:
+            update_fields.append("cost_per_unit = %s")
+            update_values.append(update_data.cost_per_unit)
+            updated_field_names.append("cost_per_unit")
+
+        if update_data.status is not None:
+            update_fields.append("status = %s")
+            update_values.append(update_data.status)
+            updated_field_names.append("status")
+
+        if update_data.transfer_multiple is not None:
+            update_fields.append("transfer_multiple = %s")
+            update_values.append(update_data.transfer_multiple)
+            updated_field_names.append("transfer_multiple")
+
+        if update_data.abc_code is not None:
+            update_fields.append("abc_code = %s")
+            update_values.append(update_data.abc_code)
+            updated_field_names.append("abc_code")
+
+        if update_data.xyz_code is not None:
+            update_fields.append("xyz_code = %s")
+            update_values.append(update_data.xyz_code)
+            updated_field_names.append("xyz_code")
+
+        if update_data.category is not None:
+            update_fields.append("category = %s")
+            update_values.append(update_data.category)
+            updated_field_names.append("category")
+
+        # Check if any fields were provided for update
+        if not update_fields:
+            db.close()
+            raise HTTPException(status_code=400, detail="No valid fields provided for update")
+
+        # Add updated_at timestamp
+        update_fields.append("updated_at = NOW()")
+
+        # Execute the update within a transaction
+        try:
+            # Start transaction
+            cursor.execute("START TRANSACTION")
+
+            # Build and execute update query
+            update_query = f"UPDATE skus SET {', '.join(update_fields)} WHERE sku_id = %s"
+            update_values.append(sku_id)
+
+            cursor.execute(update_query, update_values)
+
+            # Verify the update affected exactly one row
+            if cursor.rowcount != 1:
+                raise Exception(f"Expected to update 1 row, but affected {cursor.rowcount} rows")
+
+            # Commit the transaction
+            cursor.execute("COMMIT")
+
+            # Log the successful update
+            print(f"SKU update successful: {sku_id}, fields: {updated_field_names}")
+
+            db.close()
+
+            return {
+                "success": True,
+                "sku_id": sku_id,
+                "message": "SKU updated successfully",
+                "updated_fields": updated_field_names,
+                "updated_at": datetime.utcnow().isoformat() + "Z"
+            }
+
+        except Exception as e:
+            # Rollback on any error
+            cursor.execute("ROLLBACK")
+            raise e
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except ValueError as e:
+        # Handle validation errors from Pydantic
+        raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
+    except Exception as e:
+        # Handle unexpected database or system errors
+        print(f"SKU update error for {sku_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Update operation failed: {str(e)}")
+
 # =============================================================================
 # IMPORT/EXPORT API ENDPOINTS
 # =============================================================================

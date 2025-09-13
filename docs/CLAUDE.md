@@ -171,6 +171,7 @@ warehouse-transfer/
 ├── frontend/
 │   ├── index.html          # Dashboard
 │   ├── transfer-planning.html # Main interface
+│   ├── sku-listing.html    # SKU inventory management
 │   └── js/app.js          # Frontend logic
 ├── database/
 │   └── schema.sql         # Database structure
@@ -179,6 +180,12 @@ warehouse-transfer/
     ├── PRD-v2.md         # Detailed requirements
     └── TASKS.md          # Implementation roadmap
 ```
+
+## Frontend Access URLs
+- **Server**: `http://localhost:8002` (FastAPI with static file serving)
+- **SKU Listing**: `http://localhost:8002/static/sku-listing.html`
+- **Dashboard**: `http://localhost:8002/static/index.html`
+- **Transfer Planning**: `http://localhost:8002/static/transfer-planning.html`
 
 ## Development Philosophy
 

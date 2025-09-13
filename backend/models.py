@@ -190,7 +190,7 @@ class TransferHistory(Base):
     sku = relationship("SKU", back_populates="transfer_history")
 
 # Pydantic models for API serialization
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from typing import List, Optional
 from datetime import date
 
@@ -204,6 +204,68 @@ class SKUBase(BaseModel):
     abc_code: str = "C"
     xyz_code: str = "Z"
     category: Optional[str] = None
+
+class SKUUpdateRequest(BaseModel):
+    """
+    Request model for updating SKU master data
+    All fields are optional - only provided fields will be updated
+    """
+    description: Optional[str] = None
+    supplier: Optional[str] = None
+    cost_per_unit: Optional[float] = None
+    status: Optional[str] = None
+    transfer_multiple: Optional[int] = None
+    abc_code: Optional[str] = None
+    xyz_code: Optional[str] = None
+    category: Optional[str] = None
+
+    @validator('description')
+    def validate_description(cls, v):
+        if v is not None and (len(v.strip()) == 0 or len(v) > 255):
+            raise ValueError('Description must be 1-255 characters long')
+        return v.strip() if v else v
+
+    @validator('supplier')
+    def validate_supplier(cls, v):
+        if v is not None and len(v) > 100:
+            raise ValueError('Supplier name must be 100 characters or less')
+        return v.strip() if v else v
+
+    @validator('cost_per_unit')
+    def validate_cost_per_unit(cls, v):
+        if v is not None and (v <= 0 or v > 99999.99):
+            raise ValueError('Cost per unit must be between 0.01 and 99999.99')
+        return round(v, 2) if v is not None else v
+
+    @validator('status')
+    def validate_status(cls, v):
+        if v is not None and v not in ['Active', 'Death Row', 'Discontinued']:
+            raise ValueError('Status must be Active, Death Row, or Discontinued')
+        return v
+
+    @validator('transfer_multiple')
+    def validate_transfer_multiple(cls, v):
+        if v is not None and (v <= 0 or v > 9999):
+            raise ValueError('Transfer multiple must be between 1 and 9999')
+        return v
+
+    @validator('abc_code')
+    def validate_abc_code(cls, v):
+        if v is not None and v.upper() not in ['A', 'B', 'C']:
+            raise ValueError('ABC code must be A, B, or C')
+        return v.upper() if v else v
+
+    @validator('xyz_code')
+    def validate_xyz_code(cls, v):
+        if v is not None and v.upper() not in ['X', 'Y', 'Z']:
+            raise ValueError('XYZ code must be X, Y, or Z')
+        return v.upper() if v else v
+
+    @validator('category')
+    def validate_category(cls, v):
+        if v is not None and len(v) > 50:
+            raise ValueError('Category must be 50 characters or less')
+        return v.strip() if v else v
 
 class SKUResponse(SKUBase):
     burnaby_qty: int = 0

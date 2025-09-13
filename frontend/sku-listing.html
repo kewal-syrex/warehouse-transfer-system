@@ -386,6 +386,138 @@
         </div>
     </div>
 
+    <!-- SKU Edit Modal -->
+    <div class="modal fade" id="editSkuModal" tabindex="-1" aria-labelledby="editSkuModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editSkuModalLabel">
+                        <i class="fas fa-edit text-primary me-2"></i>
+                        Edit SKU
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="editSkuForm">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="editSkuId" class="form-label">SKU ID</label>
+                                    <input type="text" class="form-control" id="editSkuId" readonly
+                                           style="background-color: #e9ecef;">
+                                    <div class="form-text">SKU ID cannot be changed</div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="editDescription" class="form-label">Description <span class="text-danger">*</span></label>
+                                    <input type="text" class="form-control" id="editDescription"
+                                           maxlength="255" required>
+                                    <div class="invalid-feedback"></div>
+                                    <div class="form-text">Product description (1-255 characters)</div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="editSupplier" class="form-label">Supplier</label>
+                                    <input type="text" class="form-control" id="editSupplier"
+                                           maxlength="100">
+                                    <div class="invalid-feedback"></div>
+                                    <div class="form-text">Supplier name (max 100 characters)</div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="editCostPerUnit" class="form-label">Cost per Unit</label>
+                                    <div class="input-group">
+                                        <span class="input-group-text">$</span>
+                                        <input type="number" class="form-control" id="editCostPerUnit"
+                                               min="0.01" max="99999.99" step="0.01">
+                                        <div class="invalid-feedback"></div>
+                                    </div>
+                                    <div class="form-text">Unit cost ($0.01 - $99,999.99)</div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="editCategory" class="form-label">Category</label>
+                                    <input type="text" class="form-control" id="editCategory"
+                                           maxlength="50">
+                                    <div class="invalid-feedback"></div>
+                                    <div class="form-text">Product category (max 50 characters)</div>
+                                </div>
+                            </div>
+
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="editStatus" class="form-label">Status <span class="text-danger">*</span></label>
+                                    <select class="form-select" id="editStatus" required>
+                                        <option value="">Select status...</option>
+                                        <option value="Active">Active</option>
+                                        <option value="Death Row">Death Row</option>
+                                        <option value="Discontinued">Discontinued</option>
+                                    </select>
+                                    <div class="invalid-feedback"></div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="editTransferMultiple" class="form-label">Transfer Multiple <span class="text-danger">*</span></label>
+                                    <input type="number" class="form-control" id="editTransferMultiple"
+                                           min="1" max="9999" required>
+                                    <div class="invalid-feedback"></div>
+                                    <div class="form-text">Transfer quantity multiple (1-9999)</div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="editAbcCode" class="form-label">ABC Code <span class="text-danger">*</span>
+                                        <i class="fas fa-info-circle text-info ms-1"
+                                           data-bs-toggle="tooltip" data-bs-placement="top"
+                                           title="A: High value (80%), B: Medium value (15%), C: Low value (5%)"></i>
+                                    </label>
+                                    <select class="form-select" id="editAbcCode" required>
+                                        <option value="">Select ABC code...</option>
+                                        <option value="A">A - High Value (80%)</option>
+                                        <option value="B">B - Medium Value (15%)</option>
+                                        <option value="C">C - Low Value (5%)</option>
+                                    </select>
+                                    <div class="invalid-feedback"></div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="editXyzCode" class="form-label">XYZ Code <span class="text-danger">*</span>
+                                        <i class="fas fa-info-circle text-info ms-1"
+                                           data-bs-toggle="tooltip" data-bs-placement="top"
+                                           title="X: Stable demand, Y: Variable demand, Z: Unpredictable demand"></i>
+                                    </label>
+                                    <select class="form-select" id="editXyzCode" required>
+                                        <option value="">Select XYZ code...</option>
+                                        <option value="X">X - Stable Demand</option>
+                                        <option value="Y">Y - Variable Demand</option>
+                                        <option value="Z">Z - Unpredictable Demand</option>
+                                    </select>
+                                    <div class="invalid-feedback"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row mt-3">
+                            <div class="col-12">
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle me-2"></i>
+                                    <strong>Note:</strong> Only modified fields will be updated. Empty optional fields will remain unchanged.
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="fas fa-times me-1"></i>Cancel
+                    </button>
+                    <button type="button" class="btn btn-primary" id="saveSkuBtn">
+                        <i class="fas fa-save me-1"></i>Save Changes
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.0/dist/jquery.min.js"></script>
     <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
@@ -468,7 +600,12 @@
                         </td>
                         <td>${formatDate(sku.last_sale_date || 'N/A')}</td>
                         <td>
-                            <button class="btn btn-sm btn-outline-danger delete-sku-btn" 
+                            <button class="btn btn-sm btn-outline-primary edit-sku-btn me-1"
+                                    data-sku-id="${sku.sku_id}"
+                                    title="Edit SKU">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger delete-sku-btn"
                                     data-sku-id="${sku.sku_id}"
                                     data-description="${sku.description || 'N/A'}"
                                     title="Delete SKU">
@@ -731,9 +868,310 @@
             }
         }
 
+        // =============================================================================
+        // SKU EDITING FUNCTIONALITY
+        // =============================================================================
+
+        let currentSkuToEdit = null;
+        let originalSkuData = {};
+
+        /**
+         * Initialize edit button event handlers
+         */
+        function initializeEditHandlers() {
+            // Handle edit button clicks
+            $(document).on('click', '.edit-sku-btn', function() {
+                const skuId = $(this).data('sku-id');
+                showEditModal(skuId);
+            });
+
+            // Handle save button click
+            $('#saveSkuBtn').on('click', saveSkuChanges);
+
+            // Handle form validation on input
+            $('#editSkuForm input, #editSkuForm select').on('input change', validateEditForm);
+
+            // Initialize tooltips
+            var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+            var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+                return new bootstrap.Tooltip(tooltipTriggerEl);
+            });
+
+            // Handle keyboard shortcuts
+            $('#editSkuModal').on('keydown', function(e) {
+                if (e.key === 'Enter' && e.ctrlKey) {
+                    e.preventDefault();
+                    saveSkuChanges();
+                } else if (e.key === 'Escape') {
+                    $('#editSkuModal').modal('hide');
+                }
+            });
+        }
+
+        /**
+         * Show edit modal and load SKU data
+         * @param {string} skuId - The SKU ID to edit
+         */
+        async function showEditModal(skuId) {
+            try {
+                currentSkuToEdit = skuId;
+
+                // Show loading state
+                const modal = new bootstrap.Modal(document.getElementById('editSkuModal'));
+
+                // Reset form
+                $('#editSkuForm')[0].reset();
+                $('.is-invalid').removeClass('is-invalid');
+                $('.invalid-feedback').text('');
+
+                // Disable save button while loading
+                $('#saveSkuBtn').prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i>Loading...');
+
+                modal.show();
+
+                // Load SKU data from API
+                const response = await fetch(`/api/sku/${skuId}`);
+                if (!response.ok) {
+                    throw new Error(`Failed to load SKU data: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                const sku = data.sku;
+
+                // Store original data for comparison
+                originalSkuData = { ...sku };
+
+                // Populate form fields
+                $('#editSkuId').val(sku.sku_id);
+                $('#editDescription').val(sku.description || '');
+                $('#editSupplier').val(sku.supplier || '');
+                $('#editCostPerUnit').val(sku.cost_per_unit || '');
+                $('#editStatus').val(sku.status || '');
+                $('#editTransferMultiple').val(sku.transfer_multiple || '');
+                $('#editAbcCode').val(sku.abc_code || '');
+                $('#editXyzCode').val(sku.xyz_code || '');
+                $('#editCategory').val(sku.category || '');
+
+                // Enable save button
+                $('#saveSkuBtn').prop('disabled', false).html('<i class="fas fa-save me-1"></i>Save Changes');
+
+                // Validate form
+                validateEditForm();
+
+            } catch (error) {
+                console.error('Error loading SKU data:', error);
+                alert(`Failed to load SKU data: ${error.message}`);
+                $('#editSkuModal').modal('hide');
+            }
+        }
+
+        /**
+         * Validate the edit form and show validation feedback
+         * @returns {boolean} - True if form is valid
+         */
+        function validateEditForm() {
+            let isValid = true;
+            const form = document.getElementById('editSkuForm');
+
+            // Clear previous validation
+            $('.is-invalid').removeClass('is-invalid');
+            $('.invalid-feedback').text('');
+
+            // Validate required fields
+            const description = $('#editDescription').val().trim();
+            if (!description || description.length === 0) {
+                showFieldError('editDescription', 'Description is required');
+                isValid = false;
+            } else if (description.length > 255) {
+                showFieldError('editDescription', 'Description must be 255 characters or less');
+                isValid = false;
+            }
+
+            // Validate cost per unit
+            const cost = $('#editCostPerUnit').val();
+            if (cost && (parseFloat(cost) <= 0 || parseFloat(cost) > 99999.99)) {
+                showFieldError('editCostPerUnit', 'Cost must be between $0.01 and $99,999.99');
+                isValid = false;
+            }
+
+            // Validate transfer multiple
+            const transferMultiple = $('#editTransferMultiple').val();
+            if (!transferMultiple || parseInt(transferMultiple) < 1 || parseInt(transferMultiple) > 9999) {
+                showFieldError('editTransferMultiple', 'Transfer multiple must be between 1 and 9999');
+                isValid = false;
+            }
+
+            // Validate supplier length
+            const supplier = $('#editSupplier').val();
+            if (supplier && supplier.length > 100) {
+                showFieldError('editSupplier', 'Supplier name must be 100 characters or less');
+                isValid = false;
+            }
+
+            // Validate category length
+            const category = $('#editCategory').val();
+            if (category && category.length > 50) {
+                showFieldError('editCategory', 'Category must be 50 characters or less');
+                isValid = false;
+            }
+
+            // Validate required dropdowns
+            if (!$('#editStatus').val()) {
+                showFieldError('editStatus', 'Status is required');
+                isValid = false;
+            }
+
+            if (!$('#editAbcCode').val()) {
+                showFieldError('editAbcCode', 'ABC code is required');
+                isValid = false;
+            }
+
+            if (!$('#editXyzCode').val()) {
+                showFieldError('editXyzCode', 'XYZ code is required');
+                isValid = false;
+            }
+
+            // Enable/disable save button based on validation and changes
+            const hasChanges = checkForChanges();
+            $('#saveSkuBtn').prop('disabled', !isValid || !hasChanges);
+
+            return isValid;
+        }
+
+        /**
+         * Show validation error for a specific field
+         * @param {string} fieldId - The field ID
+         * @param {string} message - Error message
+         */
+        function showFieldError(fieldId, message) {
+            $(`#${fieldId}`).addClass('is-invalid');
+            $(`#${fieldId}`).siblings('.invalid-feedback').text(message);
+        }
+
+        /**
+         * Check if any fields have been modified
+         * @returns {boolean} - True if there are changes
+         */
+        function checkForChanges() {
+            const currentData = {
+                description: $('#editDescription').val().trim(),
+                supplier: $('#editSupplier').val().trim(),
+                cost_per_unit: $('#editCostPerUnit').val() ? parseFloat($('#editCostPerUnit').val()) : null,
+                status: $('#editStatus').val(),
+                transfer_multiple: parseInt($('#editTransferMultiple').val()),
+                abc_code: $('#editAbcCode').val(),
+                xyz_code: $('#editXyzCode').val(),
+                category: $('#editCategory').val().trim()
+            };
+
+            // Compare with original data
+            return Object.keys(currentData).some(key => {
+                const originalValue = originalSkuData[key];
+                const currentValue = currentData[key];
+
+                // Handle null/empty comparisons
+                if (!originalValue && !currentValue) return false;
+                if (!originalValue && currentValue) return true;
+                if (originalValue && !currentValue) return true;
+
+                return originalValue !== currentValue;
+            });
+        }
+
+        /**
+         * Save SKU changes via API
+         */
+        async function saveSkuChanges() {
+            if (!validateEditForm()) {
+                return;
+            }
+
+            try {
+                // Show loading state
+                $('#saveSkuBtn').prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i>Saving...');
+
+                // Build update payload with only changed fields
+                const updateData = {};
+
+                const description = $('#editDescription').val().trim();
+                if (description !== originalSkuData.description) {
+                    updateData.description = description;
+                }
+
+                const supplier = $('#editSupplier').val().trim();
+                if (supplier !== (originalSkuData.supplier || '')) {
+                    updateData.supplier = supplier || null;
+                }
+
+                const cost = $('#editCostPerUnit').val();
+                const costValue = cost ? parseFloat(cost) : null;
+                if (costValue !== originalSkuData.cost_per_unit) {
+                    updateData.cost_per_unit = costValue;
+                }
+
+                const status = $('#editStatus').val();
+                if (status !== originalSkuData.status) {
+                    updateData.status = status;
+                }
+
+                const transferMultiple = parseInt($('#editTransferMultiple').val());
+                if (transferMultiple !== originalSkuData.transfer_multiple) {
+                    updateData.transfer_multiple = transferMultiple;
+                }
+
+                const abcCode = $('#editAbcCode').val();
+                if (abcCode !== originalSkuData.abc_code) {
+                    updateData.abc_code = abcCode;
+                }
+
+                const xyzCode = $('#editXyzCode').val();
+                if (xyzCode !== originalSkuData.xyz_code) {
+                    updateData.xyz_code = xyzCode;
+                }
+
+                const category = $('#editCategory').val().trim();
+                if (category !== (originalSkuData.category || '')) {
+                    updateData.category = category || null;
+                }
+
+                // Send update request
+                const response = await fetch(`/api/skus/${currentSkuToEdit}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(updateData)
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || `Update failed: ${response.statusText}`);
+                }
+
+                const result = await response.json();
+
+                // Show success message
+                alert(`SKU ${result.sku_id} updated successfully!\n\nUpdated fields: ${result.updated_fields.join(', ')}`);
+
+                // Close modal
+                $('#editSkuModal').modal('hide');
+
+                // Refresh the SKU table
+                await loadSkuData();
+
+            } catch (error) {
+                console.error('Error saving SKU:', error);
+                alert(`Failed to save changes: ${error.message}`);
+            } finally {
+                // Reset button state
+                $('#saveSkuBtn').prop('disabled', false).html('<i class="fas fa-save me-1"></i>Save Changes');
+            }
+        }
+
         // Initialize delete handlers when DOM is ready
         $(document).ready(function() {
             initializeDeleteHandlers();
+            initializeEditHandlers();
         });
     </script>
 </body>
