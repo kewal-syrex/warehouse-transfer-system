@@ -679,15 +679,45 @@ class TransferCalculator:
             available_to_transfer = min(transfer_need, basic_rec['current_burnaby_qty'])
             enhanced_transfer_qty = self.round_to_multiple(available_to_transfer, basic_rec['transfer_multiple'])
 
-            # Enhanced priority calculation
-            enhanced_priority = self._calculate_enhanced_priority(
-                kentucky_qty, enhanced_demand, growth_status, seasonal_pattern, stockout_days
-            )
+            # Check for seasonal pre-positioning needs
+            seasonal_positioning = self.get_seasonal_pre_positioning(sku_id, seasonal_pattern, current_month)
 
-            # Enhanced reason
-            enhanced_reason = self._generate_enhanced_reason(
-                basic_rec['reason'], seasonal_pattern, growth_status, seasonal_multiplier, growth_multiplier
-            )
+            # Apply seasonal pre-positioning multiplier if needed
+            final_demand = enhanced_demand
+            if seasonal_positioning['needs_pre_positioning']:
+                pre_position_multiplier = seasonal_positioning['multiplier']
+                final_demand = enhanced_demand * pre_position_multiplier
+
+                # Recalculate transfer need with pre-positioning
+                coverage_months = self.get_coverage_target(basic_rec['abc_class'], basic_rec['xyz_class'])
+                pre_position_target = final_demand * coverage_months
+                transfer_need = pre_position_target - kentucky_qty
+                available_to_transfer = min(transfer_need, basic_rec['current_burnaby_qty'])
+                enhanced_transfer_qty = self.round_to_multiple(available_to_transfer, basic_rec['transfer_multiple'])
+
+            # Calculate priority score using new scoring system
+            score_data = {
+                'kentucky_stockout_days': stockout_days,
+                'kentucky_qty': kentucky_qty,
+                'corrected_demand': final_demand,
+                'abc_code': basic_rec['abc_class'],
+                'growth_status': growth_status
+            }
+            priority_analysis = self.calculate_priority_score(score_data)
+            enhanced_priority = priority_analysis['priority_level']
+
+            # Generate detailed transfer reason
+            reason_factors = {
+                'base_reason': basic_rec['reason'],
+                'stockout_days': stockout_days,
+                'growth_status': growth_status,
+                'seasonal_info': seasonal_positioning,
+                'current_coverage': kentucky_qty / max(final_demand, 1),
+                'target_coverage': coverage_months,
+                'abc_class': basic_rec['abc_class'],
+                'kentucky_qty': kentucky_qty
+            }
+            enhanced_reason = self.generate_detailed_transfer_reason(reason_factors)
 
             # Update database with patterns
             self._update_sku_patterns(sku_id, seasonal_pattern, growth_status)
@@ -695,7 +725,7 @@ class TransferCalculator:
             # Create enhanced recommendation
             enhanced_rec = basic_rec.copy()
             enhanced_rec.update({
-                'corrected_monthly_demand': round(enhanced_demand, 2),
+                'corrected_monthly_demand': round(final_demand, 2),
                 'recommended_transfer_qty': enhanced_transfer_qty,
                 'priority': enhanced_priority,
                 'reason': enhanced_reason,
@@ -703,8 +733,10 @@ class TransferCalculator:
                 'growth_status': growth_status,
                 'seasonal_multiplier': round(seasonal_multiplier, 2),
                 'growth_multiplier': round(growth_multiplier, 2),
-                'coverage_months': round(kentucky_qty / max(enhanced_demand, 1), 1),
-                'enhanced_calculation': True
+                'coverage_months': round(kentucky_qty / max(final_demand, 1), 1),
+                'enhanced_calculation': True,
+                'seasonal_positioning': seasonal_positioning,
+                'priority_analysis': priority_analysis
             })
 
             return enhanced_rec
@@ -795,6 +827,252 @@ class TransferCalculator:
             reason_parts.append(f"Demand adjusted down {(1-total_adjustment)*100:.0f}%")
 
         return "; ".join(reason_parts)
+
+    def get_seasonal_pre_positioning(self, sku_id: str, seasonal_pattern: str, current_month: int) -> Dict[str, Any]:
+        """
+        Determine if SKU needs seasonal pre-positioning for upcoming peak seasons
+
+        Args:
+            sku_id: SKU identifier
+            seasonal_pattern: Detected seasonal pattern
+            current_month: Current month (1-12)
+
+        Returns:
+            Dictionary with pre-positioning recommendation
+        """
+        try:
+            # Define peak months for each seasonal pattern
+            peak_months = {
+                'spring_summer': [4, 5, 6, 7],  # Apr-Jul
+                'fall_winter': [10, 11, 12, 1, 2],  # Oct-Feb
+                'holiday': [11, 12],  # Nov-Dec
+                'year_round': []  # No specific peaks
+            }
+
+            if seasonal_pattern not in peak_months:
+                return {'needs_pre_positioning': False, 'reason': 'No seasonal pattern detected'}
+
+            peaks = peak_months[seasonal_pattern]
+            if not peaks:
+                return {'needs_pre_positioning': False, 'reason': 'Year-round demand pattern'}
+
+            # Check if we're 1-2 months before a peak
+            needs_positioning = False
+            upcoming_peak = None
+            months_ahead = 0
+
+            for peak_month in peaks:
+                # Calculate months ahead (handle year wrap-around)
+                if peak_month >= current_month:
+                    diff = peak_month - current_month
+                else:
+                    diff = (12 - current_month) + peak_month
+
+                # Pre-position 1-2 months ahead
+                if 1 <= diff <= 2:
+                    needs_positioning = True
+                    upcoming_peak = peak_month
+                    months_ahead = diff
+                    break
+
+            if needs_positioning:
+                season_name = seasonal_pattern.replace('_', ' ').title()
+                peak_month_name = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                                 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][upcoming_peak]
+
+                return {
+                    'needs_pre_positioning': True,
+                    'seasonal_pattern': seasonal_pattern,
+                    'upcoming_peak_month': upcoming_peak,
+                    'months_ahead': months_ahead,
+                    'reason': f"Pre-position for {season_name} season (peak in {peak_month_name})",
+                    'multiplier': 1.3 if months_ahead == 1 else 1.2  # Stronger positioning closer to peak
+                }
+            else:
+                return {'needs_pre_positioning': False, 'reason': 'No upcoming seasonal peak within 2 months'}
+
+        except Exception as e:
+            logger.error(f"Seasonal pre-positioning check failed for {sku_id}: {e}")
+            return {'needs_pre_positioning': False, 'reason': 'Error in seasonal analysis'}
+
+    def generate_detailed_transfer_reason(self, factors: Dict[str, Any]) -> str:
+        """
+        Generate detailed, contextual transfer reason with business justification
+
+        Args:
+            factors: Dictionary containing various factors affecting the transfer decision
+                - base_reason: Original transfer reason
+                - stockout_days: Number of stockout days
+                - growth_status: Growth classification (viral, normal, declining)
+                - seasonal_info: Pre-positioning information
+                - current_coverage: Coverage months
+                - abc_class: ABC classification
+                - kentucky_qty: Current Kentucky quantity
+
+        Returns:
+            Detailed transfer reason string
+        """
+        try:
+            reason_components = []
+
+            # Start with urgency level based on current stock
+            kentucky_qty = factors.get('kentucky_qty', 0)
+            if kentucky_qty == 0:
+                reason_components.append("CRITICAL: Currently out of stock")
+            elif factors.get('current_coverage', 0) < 0.5:
+                reason_components.append("URGENT: Less than 2 weeks coverage remaining")
+
+            # Add stockout impact
+            stockout_days = factors.get('stockout_days', 0)
+            if stockout_days > 0:
+                if stockout_days >= 20:
+                    reason_components.append(f"Severe stockout impact: {stockout_days} days out of stock last month")
+                elif stockout_days >= 10:
+                    reason_components.append(f"Moderate stockout impact: {stockout_days} days out of stock")
+                else:
+                    reason_components.append(f"Recent stockout: {stockout_days} days affected")
+
+            # Add seasonal pre-positioning
+            seasonal_info = factors.get('seasonal_info', {})
+            if seasonal_info.get('needs_pre_positioning'):
+                reason_components.append(seasonal_info['reason'])
+
+            # Add growth context
+            growth_status = factors.get('growth_status', 'normal')
+            if growth_status == 'viral':
+                reason_components.append("High priority: Viral growth detected (2x+ demand increase)")
+            elif growth_status == 'declining':
+                reason_components.append("Trend alert: Declining demand pattern")
+
+            # Add business importance context
+            abc_class = factors.get('abc_class', 'C')
+            if abc_class == 'A':
+                reason_components.append("High-value item (Class A)")
+
+            # Add coverage context if relevant
+            coverage = factors.get('current_coverage', 0)
+            target_coverage = factors.get('target_coverage', 6)
+            if coverage < target_coverage * 0.5:
+                reason_components.append(f"Below minimum coverage (target: {target_coverage:.1f} months)")
+
+            # Fallback to base reason if no specific components
+            if not reason_components and factors.get('base_reason'):
+                reason_components.append(factors['base_reason'])
+
+            # Join components with proper formatting
+            if not reason_components:
+                return "Maintain optimal inventory levels"
+
+            return " | ".join(reason_components)
+
+        except Exception as e:
+            logger.error(f"Failed to generate detailed transfer reason: {e}")
+            return factors.get('base_reason', 'Transfer recommended')
+
+    def calculate_priority_score(self, sku_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Calculate weighted priority score for stockout-affected SKUs
+
+        Args:
+            sku_data: Dictionary containing SKU information including:
+                - kentucky_stockout_days: Stockout days
+                - kentucky_qty: Current Kentucky quantity
+                - corrected_demand: Monthly corrected demand
+                - abc_code: ABC classification
+                - growth_status: Growth status
+                - last_stockout_date: Most recent stockout date
+
+        Returns:
+            Dictionary with priority score and breakdown
+        """
+        try:
+            # Initialize scoring components
+            stockout_score = 0
+            coverage_score = 0
+            abc_score = 0
+            growth_score = 0
+
+            # 1. Stockout Days Score (40% weight) - 0-40 points
+            stockout_days = sku_data.get('kentucky_stockout_days', 0)
+            if stockout_days >= 25:
+                stockout_score = 40  # Severe stockout
+            elif stockout_days >= 15:
+                stockout_score = 32  # Major stockout
+            elif stockout_days >= 10:
+                stockout_score = 24  # Moderate stockout
+            elif stockout_days >= 5:
+                stockout_score = 16  # Minor stockout
+            elif stockout_days > 0:
+                stockout_score = 8   # Minimal stockout
+            # 0 stockout days = 0 points
+
+            # 2. Coverage Ratio Score (30% weight) - 0-30 points
+            kentucky_qty = sku_data.get('kentucky_qty', 0)
+            corrected_demand = sku_data.get('corrected_demand', 1)
+
+            if kentucky_qty == 0:
+                coverage_score = 30  # Out of stock
+            else:
+                coverage_months = kentucky_qty / max(corrected_demand, 1)
+                if coverage_months < 0.5:
+                    coverage_score = 25  # Less than 2 weeks
+                elif coverage_months < 1.0:
+                    coverage_score = 20  # Less than 1 month
+                elif coverage_months < 2.0:
+                    coverage_score = 15  # Less than 2 months
+                elif coverage_months < 4.0:
+                    coverage_score = 10  # Less than 4 months
+                else:
+                    coverage_score = 0   # Adequate coverage
+
+            # 3. ABC Classification Score (20% weight) - 0-20 points
+            abc_code = sku_data.get('abc_code', 'C')
+            abc_scores = {'A': 20, 'B': 12, 'C': 5}
+            abc_score = abc_scores.get(abc_code, 5)
+
+            # 4. Growth Status Score (10% weight) - 0-10 points
+            growth_status = sku_data.get('growth_status', 'normal')
+            growth_scores = {'viral': 10, 'normal': 5, 'declining': 0}
+            growth_score = growth_scores.get(growth_status, 5)
+
+            # Calculate total score
+            total_score = stockout_score + coverage_score + abc_score + growth_score
+
+            # Convert score to priority level
+            if total_score >= 80:
+                priority_level = "CRITICAL"
+            elif total_score >= 60:
+                priority_level = "HIGH"
+            elif total_score >= 40:
+                priority_level = "MEDIUM"
+            else:
+                priority_level = "LOW"
+
+            return {
+                'total_score': total_score,
+                'priority_level': priority_level,
+                'score_breakdown': {
+                    'stockout_score': stockout_score,
+                    'coverage_score': coverage_score,
+                    'abc_score': abc_score,
+                    'growth_score': growth_score
+                },
+                'score_details': {
+                    'stockout_days': stockout_days,
+                    'coverage_months': round(kentucky_qty / max(corrected_demand, 1), 1),
+                    'abc_class': abc_code,
+                    'growth_status': growth_status
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Priority score calculation failed for SKU {sku_data.get('sku_id', 'unknown')}: {e}")
+            return {
+                'total_score': 50,
+                'priority_level': "MEDIUM",
+                'score_breakdown': {'error': str(e)},
+                'score_details': {}
+            }
 
     def _update_sku_patterns(self, sku_id: str, seasonal_pattern: str, growth_status: str):
         """
