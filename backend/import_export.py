@@ -125,20 +125,70 @@ class ImportExportManager:
             return self._auto_detect_and_import(df, sheet_name)
     
     def _import_inventory_data(self, df: pd.DataFrame, sheet_name: str) -> Dict[str, Any]:
-        """Import inventory levels data from Excel sheet"""
-        
-        expected_columns = ['sku_id', 'burnaby_qty', 'kentucky_qty']
+        """
+        Import inventory levels data from Excel sheet with flexible column support
+
+        Supports partial imports with either Burnaby-only, Kentucky-only, or both quantities.
+        Missing quantity columns default to 0 to allow partial inventory updates.
+
+        Args:
+            df: DataFrame containing inventory data
+            sheet_name: Name of the Excel sheet for error reporting
+
+        Returns:
+            Dict containing import results, record count, and any errors
+        """
+
+        # Required column is just sku_id, quantity columns are flexible
+        required_columns = ['sku_id']
+        optional_columns = ['burnaby_qty', 'kentucky_qty']
         result = {"type": "inventory", "records": 0, "errors": []}
-        
-        # Validate columns
-        missing_cols = self._validate_required_columns(df, expected_columns, sheet_name)
-        if missing_cols:
+
+        # Check for sku_id column (required)
+        missing_required = self._validate_required_columns(df, required_columns, sheet_name)
+        if missing_required:
             return result
-        
-        # Clean and validate data
-        df_clean = df[expected_columns].copy()
-        df_clean = df_clean.dropna(subset=['sku_id'])
-        
+
+        # Check which quantity columns are available
+        available_cols = [col.lower() for col in df.columns]
+        has_burnaby = any('burnaby' in col.lower() and 'qty' in col.lower() for col in df.columns)
+        has_kentucky = any('kentucky' in col.lower() and 'qty' in col.lower() for col in df.columns)
+
+        # At least one quantity column is required
+        if not has_burnaby and not has_kentucky:
+            self.validation_errors.append(
+                f"Missing quantity columns in {sheet_name}: Need at least one of 'burnaby_qty' or 'kentucky_qty'"
+            )
+            return result
+
+        # Create clean dataframe with available columns
+        # Find the actual sku_id column name (case-insensitive)
+        sku_id_col = next(col for col in df.columns if col.lower() == 'sku_id')
+        columns_to_use = [sku_id_col]
+        if has_burnaby:
+            burnaby_col = next(col for col in df.columns if 'burnaby' in col.lower() and 'qty' in col.lower())
+            columns_to_use.append(burnaby_col)
+        if has_kentucky:
+            kentucky_col = next(col for col in df.columns if 'kentucky' in col.lower() and 'qty' in col.lower())
+            columns_to_use.append(kentucky_col)
+
+        df_clean = df[columns_to_use].copy()
+        df_clean = df_clean.dropna(subset=[sku_id_col])
+
+        # Standardize column names and add missing columns with default values
+        df_clean = df_clean.rename(columns={
+            col: 'burnaby_qty' if 'burnaby' in col.lower() else 'kentucky_qty' if 'kentucky' in col.lower() else 'sku_id' if col.lower() == 'sku_id' else col
+            for col in df_clean.columns
+        })
+
+        # Add missing quantity columns with default value 0
+        if 'burnaby_qty' not in df_clean.columns:
+            df_clean['burnaby_qty'] = 0
+            self.validation_warnings.append(f"Burnaby quantities defaulted to 0 in {sheet_name}")
+        if 'kentucky_qty' not in df_clean.columns:
+            df_clean['kentucky_qty'] = 0
+            self.validation_warnings.append(f"Kentucky quantities defaulted to 0 in {sheet_name}")
+
         # Convert quantities to integers
         for qty_col in ['burnaby_qty', 'kentucky_qty']:
             df_clean[qty_col] = pd.to_numeric(df_clean[qty_col], errors='coerce').fillna(0).astype(int)
@@ -147,20 +197,62 @@ class ImportExportManager:
         try:
             db = database.get_database_connection()
             cursor = db.cursor()
-            
+
             imported_count = 0
+            skipped_skus = []
             for _, row in df_clean.iterrows():
-                # Upsert inventory data
-                query = """
-                INSERT INTO inventory_current (sku_id, burnaby_qty, kentucky_qty, last_updated)
-                VALUES (%s, %s, %s, NOW())
-                ON DUPLICATE KEY UPDATE
-                    burnaby_qty = VALUES(burnaby_qty),
-                    kentucky_qty = VALUES(kentucky_qty),
-                    last_updated = NOW()
-                """
-                cursor.execute(query, (row['sku_id'], row['burnaby_qty'], row['kentucky_qty']))
-                imported_count += 1
+                # Check which columns were actually provided (not defaulted to 0)
+                update_burnaby = has_burnaby
+                update_kentucky = has_kentucky
+                update_both = update_burnaby and update_kentucky
+
+                # Check if this is a new or existing SKU
+                cursor.execute("SELECT sku_id FROM inventory_current WHERE sku_id = %s", (row['sku_id'],))
+                exists = cursor.fetchone()
+
+                if exists:
+                    # Existing SKU - UPDATE only the provided warehouse columns
+                    if update_both:
+                        query = """
+                        UPDATE inventory_current
+                        SET burnaby_qty = %s, kentucky_qty = %s, last_updated = NOW()
+                        WHERE sku_id = %s
+                        """
+                        cursor.execute(query, (row['burnaby_qty'], row['kentucky_qty'], row['sku_id']))
+                    elif update_burnaby:
+                        query = """
+                        UPDATE inventory_current
+                        SET burnaby_qty = %s, last_updated = NOW()
+                        WHERE sku_id = %s
+                        """
+                        cursor.execute(query, (row['burnaby_qty'], row['sku_id']))
+                    elif update_kentucky:
+                        query = """
+                        UPDATE inventory_current
+                        SET kentucky_qty = %s, last_updated = NOW()
+                        WHERE sku_id = %s
+                        """
+                        cursor.execute(query, (row['kentucky_qty'], row['sku_id']))
+                    imported_count += 1
+                else:
+                    # New SKU - only insert if both quantities provided
+                    if update_both:
+                        query = """
+                        INSERT INTO inventory_current (sku_id, burnaby_qty, kentucky_qty, last_updated)
+                        VALUES (%s, %s, %s, NOW())
+                        """
+                        cursor.execute(query, (row['sku_id'], row['burnaby_qty'], row['kentucky_qty']))
+                        imported_count += 1
+                    else:
+                        # Skip new SKU with partial data
+                        skipped_skus.append(row['sku_id'])
+
+            # Add warning for skipped SKUs if any
+            if skipped_skus:
+                self.validation_warnings.append(
+                    f"New SKUs with partial data skipped: {', '.join(skipped_skus[:5])}" +
+                    (f" and {len(skipped_skus)-5} more" if len(skipped_skus) > 5 else "")
+                )
             
             db.commit()
             db.close()
@@ -227,15 +319,15 @@ class ImportExportManager:
             for _, row in df_clean.iterrows():
                 # Upsert sales data
                 query = """
-                INSERT INTO monthly_sales 
-                (sku_id, year_month, burnaby_sales, kentucky_sales, 
-                 burnaby_stockout_days, kentucky_stockout_days)
+                INSERT INTO monthly_sales
+                (`sku_id`, `year_month`, `burnaby_sales`, `kentucky_sales`,
+                 `burnaby_stockout_days`, `kentucky_stockout_days`)
                 VALUES (%s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
-                    burnaby_sales = VALUES(burnaby_sales),
-                    kentucky_sales = VALUES(kentucky_sales),
-                    burnaby_stockout_days = VALUES(burnaby_stockout_days),
-                    kentucky_stockout_days = VALUES(kentucky_stockout_days)
+                    `burnaby_sales` = VALUES(`burnaby_sales`),
+                    `kentucky_sales` = VALUES(`kentucky_sales`),
+                    `burnaby_stockout_days` = VALUES(`burnaby_stockout_days`),
+                    `kentucky_stockout_days` = VALUES(`kentucky_stockout_days`)
                 """
                 cursor.execute(query, (
                     row['sku_id'], row['year_month'], row['burnaby_sales'], 
@@ -257,25 +349,80 @@ class ImportExportManager:
         return result
     
     def _import_sku_data(self, df: pd.DataFrame, sheet_name: str) -> Dict[str, Any]:
-        """Import SKU master data"""
-        
-        expected_columns = ['sku_id', 'description', 'supplier', 'cost_per_unit']
+        """
+        Import SKU master data with flexible column detection
+
+        Supports required and optional columns with intelligent detection.
+        Category field is automatically detected if present.
+
+        Args:
+            df: DataFrame containing SKU data
+            sheet_name: Name of the Excel sheet for error reporting
+
+        Returns:
+            Dict containing import results, record count, and any errors
+        """
+
+        # Required columns for SKU import
+        required_columns = ['sku_id', 'description', 'supplier', 'cost_per_unit']
+
+        # Optional columns that can be detected and imported
+        optional_columns = ['status', 'transfer_multiple', 'abc_code', 'xyz_code', 'category']
+
         result = {"type": "sku", "records": 0, "errors": []}
-        
+
         # Validate required columns
-        missing_cols = self._validate_required_columns(df, expected_columns, sheet_name)
+        missing_cols = self._validate_required_columns(df, required_columns, sheet_name)
         if missing_cols:
             return result
-        
-        # Clean data
-        df_clean = df[expected_columns].copy()
+
+        # Start with required columns
+        columns_to_use = required_columns.copy()
+
+        # Detect available optional columns using case-insensitive matching
+        available_cols_lower = {col.lower(): col for col in df.columns}
+
+        # Check for each optional column
+        for opt_col in optional_columns:
+            # Check for exact match first
+            if opt_col in df.columns:
+                columns_to_use.append(opt_col)
+            # Check for case-insensitive match
+            elif opt_col.lower() in available_cols_lower:
+                columns_to_use.append(available_cols_lower[opt_col.lower()])
+
+        # Create clean dataframe with detected columns
+        df_clean = df[columns_to_use].copy()
         df_clean = df_clean.dropna(subset=['sku_id'])
-        
-        # Handle optional columns
+
+        # Standardize column names (in case of case differences)
+        column_mapping = {}
+        for col in df_clean.columns:
+            col_lower = col.lower()
+            for opt_col in optional_columns:
+                if opt_col.lower() == col_lower and col != opt_col:
+                    column_mapping[col] = opt_col
+
+        if column_mapping:
+            df_clean = df_clean.rename(columns=column_mapping)
+
+        # Add default values for missing optional columns
         if 'status' not in df_clean.columns:
             df_clean['status'] = 'Active'
         if 'transfer_multiple' not in df_clean.columns:
             df_clean['transfer_multiple'] = 50
+        if 'abc_code' not in df_clean.columns:
+            df_clean['abc_code'] = 'C'
+        if 'xyz_code' not in df_clean.columns:
+            df_clean['xyz_code'] = 'Z'
+        if 'category' not in df_clean.columns:
+            df_clean['category'] = None
+
+        # Log which optional columns were detected
+        detected_optional = [col for col in optional_columns if col in df_clean.columns and df_clean[col].notna().any()]
+        if detected_optional:
+            self.validation_warnings.append(f"Detected optional columns in {sheet_name}: {', '.join(detected_optional)}")
+            logger.info(f"SKU import detected optional columns: {detected_optional}")
         
         # Import to database
         try:
@@ -285,18 +432,28 @@ class ImportExportManager:
             imported_count = 0
             for _, row in df_clean.iterrows():
                 query = """
-                INSERT INTO skus (sku_id, description, supplier, cost_per_unit, status, transfer_multiple)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                INSERT INTO skus (sku_id, description, supplier, cost_per_unit, status, transfer_multiple, abc_code, xyz_code, category)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     description = VALUES(description),
                     supplier = VALUES(supplier),
                     cost_per_unit = VALUES(cost_per_unit),
-                    transfer_multiple = VALUES(transfer_multiple)
+                    status = VALUES(status),
+                    transfer_multiple = VALUES(transfer_multiple),
+                    abc_code = VALUES(abc_code),
+                    xyz_code = VALUES(xyz_code),
+                    category = VALUES(category)
                 """
                 cursor.execute(query, (
-                    row['sku_id'], row['description'], row['supplier'], 
-                    row['cost_per_unit'], row.get('status', 'Active'), 
-                    row.get('transfer_multiple', 50)
+                    row['sku_id'],
+                    row['description'],
+                    row['supplier'],
+                    row['cost_per_unit'],
+                    row.get('status', 'Active'),
+                    row.get('transfer_multiple', 50),
+                    row.get('abc_code', 'C'),
+                    row.get('xyz_code', 'Z'),
+                    row.get('category', None)
                 ))
                 imported_count += 1
             
@@ -313,10 +470,15 @@ class ImportExportManager:
     
     def _auto_detect_and_import(self, df: pd.DataFrame, sheet_name: str) -> Dict[str, Any]:
         """Auto-detect sheet content type and import appropriately"""
-        
+
         columns = [col.lower() for col in df.columns]
-        
-        if 'burnaby_qty' in columns and 'kentucky_qty' in columns:
+
+        # Check for inventory data - requires sku_id and at least one quantity column
+        has_sku_id = 'sku_id' in columns
+        has_burnaby_qty = any('burnaby' in col and 'qty' in col for col in columns)
+        has_kentucky_qty = any('kentucky' in col and 'qty' in col for col in columns)
+
+        if has_sku_id and (has_burnaby_qty or has_kentucky_qty):
             return self._import_inventory_data(df, sheet_name)
         elif 'year_month' in columns and any('sales' in col for col in columns):
             return self._import_sales_data(df, sheet_name)

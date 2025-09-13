@@ -257,12 +257,23 @@
                                     </h2>
                                     <div id="inventory-format" class="accordion-collapse collapse" data-bs-parent="#import-instructions">
                                         <div class="accordion-body">
-                                            <strong>Required columns:</strong> sku_id, burnaby_qty, kentucky_qty<br>
-                                            <strong>Example:</strong><br>
+                                            <strong>Required columns:</strong> sku_id<br>
+                                            <strong>Optional columns:</strong> burnaby_qty, kentucky_qty (at least one required)<br>
+                                            <strong>Note:</strong> Supports partial imports - missing quantities default to 0<br>
+                                            <strong>Examples:</strong><br>
                                             <code>
+                                            <strong>Full Import:</strong><br>
                                             sku_id | burnaby_qty | kentucky_qty<br>
                                             CHG-001 | 500 | 0<br>
-                                            CAB-002 | 200 | 150
+                                            CAB-002 | 200 | 150<br><br>
+                                            <strong>Burnaby Only:</strong><br>
+                                            sku_id | burnaby_qty<br>
+                                            CHG-001 | 500<br>
+                                            CAB-002 | 200<br><br>
+                                            <strong>Kentucky Only:</strong><br>
+                                            sku_id | kentucky_qty<br>
+                                            CHG-001 | 0<br>
+                                            CAB-002 | 150
                                             </code>
                                         </div>
                                     </div>
@@ -275,12 +286,15 @@
                                     </h2>
                                     <div id="sales-format" class="accordion-collapse collapse" data-bs-parent="#import-instructions">
                                         <div class="accordion-body">
-                                            <strong>Required columns:</strong> sku_id, year_month, burnaby_sales, kentucky_sales, kentucky_stockout_days<br>
+                                            <strong>Required columns:</strong> sku_id, year_month, burnaby_sales, kentucky_sales<br>
+                                            <strong>Optional columns:</strong> burnaby_stockout_days, kentucky_stockout_days<br>
+                                            <strong>Note:</strong> Stockout days should be 0-31 representing days out of stock during the month<br>
                                             <strong>Example:</strong><br>
                                             <code>
-                                            sku_id | year_month | burnaby_sales | kentucky_sales | kentucky_stockout_days<br>
-                                            CHG-001 | 2024-03 | 50 | 100 | 25<br>
-                                            CAB-002 | 2024-03 | 30 | 45 | 0
+                                            sku_id | year_month | burnaby_sales | kentucky_sales | burnaby_stockout_days | kentucky_stockout_days<br>
+                                            CHG-001 | 2024-03 | 50 | 100 | 0 | 25<br>
+                                            CAB-002 | 2024-03 | 30 | 45 | 5 | 0<br>
+                                            DIS-003 | 2024-03 | 0 | 0 | 15 | 30
                                             </code>
                                         </div>
                                     </div>
@@ -294,12 +308,18 @@
                                     <div id="sku-format" class="accordion-collapse collapse" data-bs-parent="#import-instructions">
                                         <div class="accordion-body">
                                             <strong>Required columns:</strong> sku_id, description, supplier, cost_per_unit<br>
-                                            <strong>Optional columns:</strong> status, transfer_multiple, abc_code, xyz_code<br>
-                                            <strong>Example:</strong><br>
+                                            <strong>Optional columns:</strong> status, transfer_multiple, abc_code, xyz_code, category<br>
+                                            <strong>Note:</strong> Columns are auto-detected (case-insensitive). Category helps with demand analysis.<br>
+                                            <strong>Examples:</strong><br>
                                             <code>
+                                            <strong>Basic Format:</strong><br>
                                             sku_id | description | supplier | cost_per_unit<br>
                                             CHG-001 | USB-C Fast Charger 65W | Supplier A | 15.50<br>
-                                            CAB-002 | Lightning Cable 3ft | Supplier B | 8.25
+                                            CAB-002 | Lightning Cable 3ft | Supplier B | 8.25<br><br>
+                                            <strong>With Category:</strong><br>
+                                            sku_id | description | supplier | cost_per_unit | category<br>
+                                            CHG-001 | USB-C Fast Charger 65W | Supplier A | 15.50 | Chargers<br>
+                                            CAB-002 | Lightning Cable 3ft | Supplier B | 8.25 | Cables
                                             </code>
                                         </div>
                                     </div>
@@ -462,7 +482,7 @@
         </div>
         
         <!-- Footer -->
-        <footer class="text-center text-muted py-4 mt-4">
+        <footer class="text-center text-secondary py-4 mt-4">
             <small>Data Management System | Last updated: <span id="page-timestamp">--</span></small>
         </footer>
     </div>
@@ -769,12 +789,17 @@
 
         async function refreshStats() {
             try {
-                // Get dashboard metrics
-                const response = await fetch('/api/dashboard');
-                const data = await response.json();
+                // Get dashboard metrics and SKU count in parallel
+                const [dashboardResponse, skuCountResponse] = await Promise.all([
+                    fetch('/api/dashboard'),
+                    fetch('/api/skus/count')
+                ]);
 
-                // Update statistics
-                document.getElementById('total-skus').textContent = data.metrics.out_of_stock + data.metrics.low_stock + 100; // Approximate
+                const data = await dashboardResponse.json();
+                const skuCount = await skuCountResponse.json();
+
+                // Update statistics with accurate data
+                document.getElementById('total-skus').textContent = skuCount.count;
                 document.getElementById('out-of-stock').textContent = data.metrics.out_of_stock;
                 document.getElementById('low-stock').textContent = data.metrics.low_stock;
                 document.getElementById('total-value').textContent = `$${(data.metrics.total_inventory_value/1000).toFixed(0)}K`;

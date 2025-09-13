@@ -219,11 +219,72 @@ async def get_skus():
         db.close()
         
         return {"skus": results, "count": len(results)}
-        
+
     except Exception as e:
         raise HTTPException(
-            status_code=500, 
+            status_code=500,
             detail=f"SKU query failed: {str(e)}"
+        )
+
+@app.get("/api/skus/count",
+         summary="Get SKU Count",
+         description="Get the total count of active SKUs in the system",
+         tags=["Inventory Management"],
+         responses={
+             200: {
+                 "description": "SKU count information",
+                 "content": {
+                     "application/json": {
+                         "example": {
+                             "count": 4127,
+                             "active": 4100,
+                             "death_row": 25,
+                             "discontinued": 2
+                         }
+                     }
+                 }
+             },
+             500: {"description": "Database query failed"}
+         })
+async def get_sku_count():
+    """
+    Get comprehensive SKU count statistics
+
+    Returns total counts by status and provides accurate statistics
+    for dashboard display and data integrity checks.
+
+    Returns:
+        dict: SKU count statistics including totals by status
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+
+        # Get counts by status
+        query = """
+        SELECT
+            COUNT(*) as total,
+            SUM(CASE WHEN status = 'Active' THEN 1 ELSE 0 END) as active,
+            SUM(CASE WHEN status = 'Death Row' THEN 1 ELSE 0 END) as death_row,
+            SUM(CASE WHEN status = 'Discontinued' THEN 1 ELSE 0 END) as discontinued
+        FROM skus
+        """
+
+        cursor.execute(query)
+        result = cursor.fetchone()
+        db.close()
+
+        return {
+            "count": result['total'],
+            "active": result['active'],
+            "death_row": result['death_row'],
+            "discontinued": result['discontinued']
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"SKU count query failed: {str(e)}"
         )
 
 @app.get("/api/dashboard",

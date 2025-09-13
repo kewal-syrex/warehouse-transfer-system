@@ -288,7 +288,7 @@ Performance: Optimized for fast loading with API-driven data updates
         </div>
 
         <!-- Footer -->
-        <footer class="text-center text-muted py-3">
+        <footer class="text-center text-secondary py-3">
             <small>
                 Warehouse Transfer Planning Tool v1.0.0 | 
                 <a href="/health" target="_blank">System Health</a> | 
@@ -370,11 +370,11 @@ Performance: Optimized for fast loading with API-driven data updates
                 updateAlerts(dashboardData.alerts);
                 updateTimestamp(dashboardData.timestamp || new Date().toISOString());
                 
-                // Fetch supplementary SKU count data
-                const skusResponse = await fetch('/api/skus');
-                if (skusResponse.ok) {
-                    const skusData = await skusResponse.json();
-                    document.getElementById('total-skus').textContent = skusData.count;
+                // Fetch supplementary SKU count data efficiently
+                const skusCountResponse = await fetch('/api/skus/count');
+                if (skusCountResponse.ok) {
+                    const skusCountData = await skusCountResponse.json();
+                    document.getElementById('total-skus').textContent = skusCountData.count;
                 }
                 
             } catch (error) {
