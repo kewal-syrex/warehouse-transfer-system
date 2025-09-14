@@ -15,6 +15,11 @@ from datetime import datetime
 from typing import Optional
 import logging
 import uuid
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -25,6 +30,7 @@ try:
     from . import models
     from . import calculations
     from . import import_export
+    from . import settings
 except ImportError:
     # For direct execution - add current directory to path
     import sys
@@ -54,6 +60,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Disable static file caching in development mode
+is_development = os.getenv("DEBUG") == "true" or os.getenv("ENVIRONMENT") == "development"
+if is_development:
+    # Monkey patch to disable caching for development
+    StaticFiles.is_not_modified = lambda self, *args, **kwargs: False
 
 # Mount static files for frontend
 frontend_path = Path(__file__).parent.parent / "frontend"
@@ -865,13 +877,13 @@ async def import_csv_file(file: UploadFile = File(...)):
 async def import_pending_orders_csv(file: UploadFile = File(...)):
     """Import pending orders from CSV with automatic date calculations"""
 
-    if not file.filename or not file.filename.lower().endswith('.csv'):
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid file format. Please upload a CSV file"
-        )
-
     try:
+        if not file.filename or not file.filename.lower().endswith('.csv'):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file format. Please upload a CSV file"
+            )
+
         file_content = await file.read()
 
         result = import_export.import_export_manager.import_pending_orders_csv(
@@ -881,10 +893,169 @@ async def import_pending_orders_csv(file: UploadFile = File(...)):
 
         return result
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500,
             detail=f"Pending orders CSV import failed: {str(e)}"
+        )
+
+@app.post("/api/debug-test",
+         summary="Debug Test Endpoint",
+         description="Test endpoint to debug endpoint registration issues")
+async def debug_test():
+    """Debug endpoint to test route registration"""
+    return {"message": "Debug test endpoint working", "method": "POST"}
+
+@app.post("/api/pending-orders/import-csv",
+         summary="Import Pending Orders from CSV File",
+         description="Upload a CSV file and import pending orders",
+         tags=["Pending Orders"])
+async def import_pending_orders_from_csv(file: UploadFile = File(...)):
+    """Import pending orders from CSV file upload"""
+
+    if not file.filename or not file.filename.lower().endswith('.csv'):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid file format. Please upload a CSV file"
+        )
+
+    try:
+        # Read file content
+        file_content = await file.read()
+        csv_text = file_content.decode('utf-8')
+
+        # Parse CSV
+        import csv
+        import io
+        from datetime import datetime, timedelta
+
+        csv_file = io.StringIO(csv_text)
+        reader = csv.DictReader(csv_file)
+
+        orders = []
+        for row in reader:
+            # Parse required fields
+            sku_id = row.get('sku_id', '').strip()
+            quantity_str = row.get('quantity', '').strip()
+            destination = row.get('destination', '').strip().lower()
+
+            if not sku_id or not quantity_str or not destination:
+                continue
+
+            try:
+                quantity = int(quantity_str)
+            except ValueError:
+                continue
+
+            # Parse optional expected_date
+            expected_date_str = row.get('expected_date', '').strip()
+            if expected_date_str:
+                try:
+                    expected_arrival = datetime.strptime(expected_date_str, '%Y-%m-%d').date().isoformat()
+                    is_estimated = False
+                except ValueError:
+                    # Default to 120 days from now if invalid date
+                    expected_arrival = (datetime.now().date() + timedelta(days=120)).isoformat()
+                    is_estimated = True
+            else:
+                # Default to 120 days from now if no date provided
+                expected_arrival = (datetime.now().date() + timedelta(days=120)).isoformat()
+                is_estimated = True
+
+            order = {
+                "sku_id": sku_id,
+                "quantity": quantity,
+                "destination": destination,
+                "order_date": datetime.now().date().isoformat(),
+                "expected_arrival": expected_arrival,
+                "is_estimated": is_estimated,
+                "order_type": "supplier",
+                "status": "ordered"
+            }
+            orders.append(order)
+
+        if not orders:
+            raise HTTPException(
+                status_code=400,
+                detail="No valid orders found in CSV file"
+            )
+
+        # Use the bulk endpoint logic
+        try:
+            from . import models
+        except ImportError:
+            import models
+
+        bulk_data = models.BulkPendingInventoryCreate(orders=orders, validate_skus=True)
+
+        db = database.get_database_connection()
+        cursor = db.cursor()
+
+        imported_count = 0
+        error_count = 0
+        errors = []
+        batch_id = str(uuid.uuid4())
+        estimated_dates_added = 0
+
+        # Validate SKUs
+        all_skus = [order["sku_id"] for order in orders]
+        placeholders = ','.join(['%s'] * len(all_skus))
+        cursor.execute(f"SELECT sku_id FROM skus WHERE sku_id IN ({placeholders})", all_skus)
+        valid_skus = {row[0] for row in cursor.fetchall()}
+
+        invalid_skus = set(all_skus) - valid_skus
+        if invalid_skus:
+            errors.append(f"Invalid SKUs found: {', '.join(sorted(invalid_skus))}")
+
+        # Process valid orders
+        for order_data in orders:
+            if order_data["sku_id"] in valid_skus:
+                try:
+                    cursor.execute("""
+                        INSERT INTO pending_inventory
+                        (sku_id, quantity, destination, order_date, expected_arrival,
+                         order_type, status, lead_time_days, is_estimated, notes, batch_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        order_data["sku_id"],
+                        order_data["quantity"],
+                        order_data["destination"],
+                        order_data["order_date"],
+                        order_data["expected_arrival"],
+                        order_data["order_type"],
+                        order_data["status"],
+                        120,  # Default lead time
+                        order_data["is_estimated"],
+                        None,  # notes
+                        batch_id
+                    ))
+                    imported_count += 1
+                    if order_data["is_estimated"]:
+                        estimated_dates_added += 1
+                except Exception as e:
+                    errors.append(f"Failed to import {order_data['sku_id']}: {str(e)}")
+                    error_count += 1
+
+        db.commit()
+        cursor.close()
+        db.close()
+
+        return {
+            "success": True,
+            "imported_count": imported_count,
+            "total_orders": len(orders),
+            "estimated_dates_added": estimated_dates_added,
+            "errors": errors if errors else []
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"CSV import failed: {str(e)}"
         )
 
 @app.get("/api/export/excel/transfer-orders",

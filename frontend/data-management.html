@@ -1124,7 +1124,7 @@
                 progressBar.style.width = '30%';
 
                 // Upload to pending orders import endpoint
-                const response = await fetch('/api/pending-orders/import', {
+                const response = await fetch('/api/pending-orders/import-csv', {
                     method: 'POST',
                     body: formData
                 });
