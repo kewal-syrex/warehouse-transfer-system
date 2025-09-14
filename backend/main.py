@@ -35,6 +35,7 @@ except ImportError:
     import models
     import calculations
     import import_export
+    import settings
 
 # Create FastAPI application
 app = FastAPI(
@@ -2297,6 +2298,256 @@ async def get_pending_order(order_id: int):
         raise HTTPException(
             status_code=500,
             detail=f"Failed to get pending order: {str(e)}"
+        )
+
+# ===================================================================
+# CONFIGURATION MANAGEMENT API ENDPOINTS
+# ===================================================================
+
+@app.get("/api/config/settings",
+         summary="Get All Configuration Settings",
+         description="Retrieve all system configuration settings by category",
+         tags=["Configuration"])
+async def get_configuration_settings(category: Optional[str] = None):
+    """
+    Get all configuration settings with optional category filter
+
+    Args:
+        category: Optional category filter (lead_times, coverage, business_rules, etc.)
+
+    Returns:
+        Dictionary of configuration settings with metadata
+    """
+    try:
+        config_data = settings.configuration_manager.get_all_settings(category)
+
+        return {
+            "success": True,
+            "settings": config_data,
+            "categories": list(set(s['category'] for s in config_data.values())),
+            "total_settings": len(config_data)
+        }
+
+    except Exception as e:
+        logger.error(f"Error retrieving configuration settings: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve configuration: {str(e)}"
+        )
+
+@app.get("/api/config/settings/{key}",
+         summary="Get Configuration Setting",
+         description="Retrieve a specific configuration setting by key",
+         tags=["Configuration"])
+async def get_configuration_setting(key: str):
+    """Get specific configuration setting"""
+    try:
+        value = settings.configuration_manager.get_setting(key)
+
+        if value is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Configuration key '{key}' not found"
+            )
+
+        # Get full setting info
+        all_settings = settings.configuration_manager.get_all_settings()
+        setting_info = all_settings.get(key, {})
+
+        return {
+            "key": key,
+            "value": value,
+            **setting_info
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting configuration setting {key}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get setting: {str(e)}"
+        )
+
+@app.put("/api/config/settings/{key}",
+         summary="Update Configuration Setting",
+         description="Update a system configuration setting",
+         tags=["Configuration"])
+async def update_configuration_setting(key: str, setting_data: settings.ConfigurationValue):
+    """Update configuration setting"""
+    try:
+        success = settings.configuration_manager.set_setting(
+            key=key,
+            value=setting_data.value,
+            data_type=setting_data.data_type,
+            category=setting_data.category,
+            description=setting_data.description
+        )
+
+        if not success:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to update configuration setting"
+            )
+
+        # Return updated value
+        updated_value = settings.configuration_manager.get_setting(key)
+
+        return {
+            "success": True,
+            "key": key,
+            "value": updated_value,
+            "message": f"Configuration '{key}' updated successfully"
+        }
+
+    except Exception as e:
+        logger.error(f"Error updating configuration setting {key}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update setting: {str(e)}"
+        )
+
+@app.get("/api/config/supplier-lead-times",
+         summary="Get Supplier Lead Time Overrides",
+         description="Retrieve all supplier-specific lead time overrides",
+         tags=["Configuration"])
+async def get_supplier_lead_times():
+    """Get all supplier lead time overrides"""
+    try:
+        lead_times = settings.configuration_manager.get_supplier_lead_times()
+
+        return {
+            "success": True,
+            "supplier_lead_times": lead_times,
+            "total_overrides": len(lead_times)
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting supplier lead times: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get supplier lead times: {str(e)}"
+        )
+
+@app.post("/api/config/supplier-lead-times",
+          summary="Create Supplier Lead Time Override",
+          description="Create or update supplier-specific lead time override",
+          tags=["Configuration"])
+async def create_supplier_lead_time(lead_time_data: settings.SupplierLeadTime):
+    """Create or update supplier lead time override"""
+    try:
+        success = settings.configuration_manager.set_supplier_lead_time(
+            supplier=lead_time_data.supplier,
+            lead_time_days=lead_time_data.lead_time_days,
+            destination=lead_time_data.destination,
+            notes=lead_time_data.notes
+        )
+
+        if not success:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to create supplier lead time override"
+            )
+
+        return {
+            "success": True,
+            "supplier": lead_time_data.supplier,
+            "lead_time_days": lead_time_data.lead_time_days,
+            "destination": lead_time_data.destination,
+            "message": f"Supplier lead time for '{lead_time_data.supplier}' updated successfully"
+        }
+
+    except Exception as e:
+        logger.error(f"Error creating supplier lead time: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create supplier lead time: {str(e)}"
+        )
+
+@app.delete("/api/config/supplier-lead-times/{supplier}",
+           summary="Delete Supplier Lead Time Override",
+           description="Delete supplier-specific lead time override",
+           tags=["Configuration"])
+async def delete_supplier_lead_time(supplier: str, destination: Optional[str] = None):
+    """Delete supplier lead time override"""
+    try:
+        success = settings.configuration_manager.delete_supplier_lead_time(
+            supplier=supplier,
+            destination=destination
+        )
+
+        if not success:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to delete supplier lead time override"
+            )
+
+        return {
+            "success": True,
+            "supplier": supplier,
+            "destination": destination,
+            "message": f"Supplier lead time override deleted successfully"
+        }
+
+    except Exception as e:
+        logger.error(f"Error deleting supplier lead time: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete supplier lead time: {str(e)}"
+        )
+
+@app.get("/api/config/effective-lead-time",
+         summary="Get Effective Lead Time",
+         description="Get effective lead time considering supplier overrides",
+         tags=["Configuration"])
+async def get_effective_lead_time(supplier: Optional[str] = None, destination: Optional[str] = None):
+    """Get effective lead time for supplier and destination"""
+    try:
+        lead_time = settings.configuration_manager.get_effective_lead_time(
+            supplier=supplier,
+            destination=destination
+        )
+
+        return {
+            "supplier": supplier,
+            "destination": destination,
+            "effective_lead_time_days": lead_time,
+            "source": "supplier_override" if supplier else "default_setting"
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting effective lead time: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get effective lead time: {str(e)}"
+        )
+
+@app.post("/api/config/reset",
+          summary="Reset Configuration to Defaults",
+          description="Reset configuration settings to default values",
+          tags=["Configuration"])
+async def reset_configuration(category: Optional[str] = None):
+    """Reset configuration settings to defaults"""
+    try:
+        success = settings.configuration_manager.reset_to_defaults(category=category)
+
+        if not success:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to reset configuration"
+            )
+
+        return {
+            "success": True,
+            "category": category,
+            "message": f"Configuration reset to defaults" + (f" for category '{category}'" if category else "")
+        }
+
+    except Exception as e:
+        logger.error(f"Error resetting configuration: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to reset configuration: {str(e)}"
         )
 
 # Serve the main dashboard

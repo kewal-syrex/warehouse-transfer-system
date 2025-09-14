@@ -189,75 +189,91 @@ INVALID_SKU,100,invalid_destination
                                f"Exception during CSV import testing: {str(e)}")
 
 async def test_pending_orders_ui_components(test_results):
-    """Test pending orders UI components using Playwright MCP"""
+    """Test pending orders UI components using direct web requests"""
     try:
-        # Import Playwright MCP functions
-        from . import mcp_playwright_helpers as mph  # Assuming helper functions exist
+        import requests
 
-        # Test 3.1: Navigate to pending orders page
+        base_url = "http://localhost:8000"
+
+        # Test 3.1: Check if data management page loads
         try:
-            await mph.navigate_to_page("http://localhost:8000")
-            await mph.wait_for_page_load()
+            response = requests.get(f"{base_url}/frontend/data-management.html")
 
-            # Look for pending orders section or navigation
-            pending_orders_section = await mph.find_element_by_text("Pending Orders")
-            if pending_orders_section:
-                _record_ui_test_result(test_results, "Pending Orders Navigation", True,
-                                     "Found pending orders section in UI")
-            else:
-                _record_ui_test_result(test_results, "Pending Orders Navigation", False,
-                                     "Could not find pending orders section in UI")
+            if response.status_code == 200:
+                page_content = response.text
 
-        except Exception as e:
-            _record_ui_test_result(test_results, "UI Navigation Test", False,
-                                 f"Failed to navigate to UI: {str(e)}")
-
-        # Test 3.2: Test pending orders data display
-        try:
-            # Look for pending orders table or data display
-            await mph.wait_for_element("[data-testid='pending-orders-table']", timeout=5000)
-
-            # Check if data is loaded
-            rows = await mph.count_table_rows("[data-testid='pending-orders-table']")
-
-            if rows > 0:
-                _record_ui_test_result(test_results, "Pending Orders Data Display", True,
-                                     f"Found {rows} pending orders in table")
-            else:
-                _record_ui_test_result(test_results, "Pending Orders Data Display", False,
-                                     "No pending orders data found in table")
-
-        except Exception as e:
-            _record_ui_test_result(test_results, "Pending Orders Data Display", False,
-                                 f"Could not test data display: {str(e)}")
-
-        # Test 3.3: Test CSV import UI
-        try:
-            # Look for import button or file upload
-            import_button = await mph.find_element_by_text("Import")
-            if import_button:
-                await mph.click_element(import_button)
-
-                # Look for file upload input
-                file_input = await mph.find_element("input[type='file']")
-                if file_input:
-                    _record_ui_test_result(test_results, "CSV Import UI", True,
-                                         "Found CSV import functionality in UI")
+                # Check for pending orders section
+                if "Pending Orders" in page_content:
+                    _record_ui_test_result(test_results, "Data Management Page Load", True,
+                                         "Data management page contains Pending Orders section")
                 else:
-                    _record_ui_test_result(test_results, "CSV Import UI", False,
-                                         "Import button found but no file input")
+                    _record_ui_test_result(test_results, "Data Management Page Load", False,
+                                         "Data management page missing Pending Orders section")
             else:
-                _record_ui_test_result(test_results, "CSV Import UI", False,
-                                     "Could not find CSV import button in UI")
+                _record_ui_test_result(test_results, "Data Management Page Load", False,
+                                     f"Data management page returned status {response.status_code}")
 
         except Exception as e:
-            _record_ui_test_result(test_results, "CSV Import UI", False,
-                                 f"Could not test CSV import UI: {str(e)}")
+            _record_ui_test_result(test_results, "Data Management Page Load", False,
+                                 f"Failed to load data management page: {str(e)}")
 
-    except ImportError:
-        logger.warning("Playwright MCP helpers not available, skipping UI tests")
-        _record_ui_test_result(test_results, "UI Components Test", False,
-                             "Playwright MCP helpers not available")
+        # Test 3.2: Check if pending orders import endpoint works via form
+        try:
+            # Test CSV import API directly
+            sample_csv = "sku_id,quantity,destination,expected_date\nTEST-001,100,kentucky,2025-03-01"
+
+            files = {'file': ('test_pending.csv', sample_csv, 'text/csv')}
+            response = requests.post(f"{base_url}/api/import/pending-orders", files=files)
+
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('success'):
+                    _record_ui_test_result(test_results, "CSV Import API Test", True,
+                                         f"CSV import successful: {result.get('records_imported', 0)} records")
+                else:
+                    _record_ui_test_result(test_results, "CSV Import API Test", False,
+                                         f"CSV import failed: {result.get('error', 'Unknown error')}")
+            else:
+                _record_ui_test_result(test_results, "CSV Import API Test", False,
+                                     f"CSV import endpoint returned status {response.status_code}")
+
+        except Exception as e:
+            _record_ui_test_result(test_results, "CSV Import API Test", False,
+                                 f"CSV import test failed: {str(e)}")
+
+        # Test 3.3: Test enhanced transfer recommendations UI integration
+        try:
+            response = requests.get(f"{base_url}/frontend/transfer-planning.html")
+
+            if response.status_code == 200:
+                page_content = response.text
+
+                # Check for pending orders columns in transfer planning
+                pending_indicators = [
+                    "Pending CA", "Pending KY", "CA Coverage After", "KY Coverage After"
+                ]
+
+                found_indicators = sum(1 for indicator in pending_indicators if indicator in page_content)
+
+                if found_indicators >= 2:
+                    _record_ui_test_result(test_results, "Transfer Planning Enhancement", True,
+                                         f"Found {found_indicators}/4 pending order indicators in UI")
+                else:
+                    _record_ui_test_result(test_results, "Transfer Planning Enhancement", False,
+                                         f"Only found {found_indicators}/4 pending order indicators in UI")
+            else:
+                _record_ui_test_result(test_results, "Transfer Planning Enhancement", False,
+                                     f"Transfer planning page returned status {response.status_code}")
+
+        except Exception as e:
+            _record_ui_test_result(test_results, "Transfer Planning Enhancement", False,
+                                 f"Transfer planning test failed: {str(e)}")
+
+    except Exception as e:
+        logger.error(f"UI component testing failed: {str(e)}")
+        _record_ui_test_result(test_results, "UI Component Testing", False,
+                             f"Exception during UI testing: {str(e)}")
+
     except Exception as e:
         logger.error(f"UI components testing failed: {str(e)}")
         _record_ui_test_result(test_results, "UI Components Test", False,

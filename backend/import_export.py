@@ -521,39 +521,162 @@ class ImportExportManager:
     
     def export_transfer_recommendations_excel(self, recommendations: List[Dict]) -> bytes:
         """
-        Export transfer recommendations to professionally formatted Excel file
-        
+        Export transfer recommendations to professionally formatted Excel file with pending orders
+
         Args:
             recommendations: List of transfer recommendation dictionaries
-            
+
         Returns:
             bytes: Excel file content ready for download
         """
-        
+
         # Create workbook with multiple sheets
         wb = Workbook()
-        
+
         # Remove default sheet
         wb.remove(wb.active)
-        
-        # Create Transfer Orders sheet
-        self._create_transfer_orders_sheet(wb, recommendations)
-        
+
+        # Create Transfer Orders sheet with enhanced data
+        self._create_enhanced_transfer_orders_sheet(wb, recommendations)
+
+        # Create Pending Orders sheet
+        self._create_pending_orders_sheet(wb)
+
+        # Create Coverage Analysis sheet
+        self._create_coverage_analysis_sheet(wb)
+
         # Create Summary sheet
         self._create_summary_sheet(wb, recommendations)
-        
+
         # Create Inventory Status sheet
         self._create_inventory_status_sheet(wb)
-        
+
         # Save to bytes
         output = io.BytesIO()
         wb.save(output)
         output.seek(0)
-        
+
         return output.getvalue()
     
+    def _create_enhanced_transfer_orders_sheet(self, wb: Workbook, recommendations: List[Dict]):
+        """Create enhanced transfer orders sheet with pending orders and coverage analysis"""
+
+        ws = wb.create_sheet("Transfer Orders")
+
+        # Define styles
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        priority_fills = {
+            "CRITICAL": PatternFill(start_color="DC3545", end_color="DC3545", fill_type="solid"),
+            "HIGH": PatternFill(start_color="FD7E14", end_color="FD7E14", fill_type="solid"),
+            "MEDIUM": PatternFill(start_color="FFC107", end_color="FFC107", fill_type="solid"),
+            "LOW": PatternFill(start_color="28A745", end_color="28A745", fill_type="solid")
+        }
+
+        # Enhanced headers with pending orders and coverage data
+        headers = [
+            "SKU", "Description", "Priority", "Current KY Qty", "Available CA Qty",
+            "Pending CA", "Pending KY", "CA Coverage After", "KY Coverage After",
+            "Monthly Demand", "Coverage (Months)", "Recommended Transfer",
+            "ABC/XYZ Class", "Stockout Override", "Reason", "Transfer Multiple"
+        ]
+
+        # Write headers
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+        # Get pending orders data
+        pending_data = self._get_pending_orders_summary()
+
+        # Write data with enhanced information
+        for row, rec in enumerate(recommendations, 2):
+            sku_id = rec['sku_id']
+
+            ws.cell(row=row, column=1, value=sku_id)
+            ws.cell(row=row, column=2, value=rec['description'])
+
+            # Priority with color coding
+            priority_cell = ws.cell(row=row, column=3, value=rec['priority'])
+            if rec['priority'] in priority_fills:
+                priority_cell.fill = priority_fills[rec['priority']]
+                if rec['priority'] in ['CRITICAL', 'HIGH', 'LOW']:
+                    priority_cell.font = Font(color="FFFFFF", bold=True)
+                else:
+                    priority_cell.font = Font(bold=True)
+
+            ws.cell(row=row, column=4, value=rec['current_kentucky_qty'])
+            ws.cell(row=row, column=5, value=rec['current_burnaby_qty'])
+
+            # Pending orders data
+            pending_ca = pending_data.get(sku_id, {}).get('burnaby_pending', 0)
+            pending_ky = pending_data.get(sku_id, {}).get('kentucky_pending', 0)
+            ws.cell(row=row, column=6, value=pending_ca)
+            ws.cell(row=row, column=7, value=pending_ky)
+
+            # Coverage after transfer calculations
+            monthly_demand = rec.get('corrected_monthly_demand', 0)
+            transfer_qty = rec.get('recommended_transfer_qty', 0)
+
+            if monthly_demand > 0:
+                ca_coverage_after = (rec['current_burnaby_qty'] - transfer_qty + pending_ca) / monthly_demand
+                ky_coverage_after = (rec['current_kentucky_qty'] + transfer_qty + pending_ky) / monthly_demand
+            else:
+                ca_coverage_after = 0
+                ky_coverage_after = 0
+
+            ws.cell(row=row, column=8, value=round(ca_coverage_after, 1))
+            ws.cell(row=row, column=9, value=round(ky_coverage_after, 1))
+
+            ws.cell(row=row, column=10, value=round(monthly_demand))
+            ws.cell(row=row, column=11, value=round(rec['coverage_months'], 1))
+            ws.cell(row=row, column=12, value=transfer_qty)
+            ws.cell(row=row, column=13, value=f"{rec['abc_class']}{rec['xyz_class']}")
+
+            # Stockout override indicator
+            stockout_override = "YES" if rec.get('stockout_override_applied', False) else "NO"
+            override_cell = ws.cell(row=row, column=14, value=stockout_override)
+            if stockout_override == "YES":
+                override_cell.fill = PatternFill(start_color="FFE6CC", end_color="FFE6CC", fill_type="solid")
+                override_cell.font = Font(bold=True)
+
+            ws.cell(row=row, column=15, value=rec['reason'])
+            ws.cell(row=row, column=16, value=rec['transfer_multiple'])
+
+        # Auto-adjust column widths
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+
+            adjusted_width = min(max_length + 2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
+
+        # Freeze header row
+        ws.freeze_panes = "A2"
+
+        # Add borders
+        thin_border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+
+        for row in ws.iter_rows(min_row=1, max_row=len(recommendations)+1):
+            for cell in row:
+                cell.border = thin_border
+
     def _create_transfer_orders_sheet(self, wb: Workbook, recommendations: List[Dict]):
-        """Create the main transfer orders sheet with professional formatting"""
+        """Create the main transfer orders sheet with professional formatting (legacy method)"""
         
         ws = wb.create_sheet("Transfer Orders")
         
@@ -905,23 +1028,67 @@ class ImportExportManager:
             if 'notes' not in df_clean.columns:
                 df_clean['notes'] = None
 
-            # Handle expected arrival date - check multiple possible column names
+            # Handle expected arrival date with enhanced validation for mixed imports
             expected_date_col = None
-            for col in ['expected_date', 'expected_arrival', 'arrival_date']:
+            potential_date_cols = ['expected_date', 'expected_arrival', 'arrival_date', 'expected arrival', 'arrival date']
+
+            for col in potential_date_cols:
+                # Check both exact and case-insensitive matches
                 if col in df_clean.columns:
                     expected_date_col = col
                     break
+                elif col.lower() in [c.lower() for c in df_clean.columns]:
+                    # Find the actual column name (case-insensitive)
+                    for actual_col in df_clean.columns:
+                        if actual_col.lower() == col.lower():
+                            expected_date_col = actual_col
+                            break
+                    if expected_date_col:
+                        break
 
+            # Enhanced date handling with detailed validation feedback
             if expected_date_col:
-                # Parse existing expected dates
+                self.validation_warnings.append(f"Found expected date column: '{expected_date_col}'")
+
+                # Parse existing expected dates with enhanced validation
+                original_values = df_clean[expected_date_col].copy()
                 df_clean['expected_arrival'] = pd.to_datetime(df_clean[expected_date_col], errors='coerce').dt.date
-                # Fill missing dates with calculated date
-                mask = df_clean['expected_arrival'].isna()
-                df_clean.loc[mask, 'expected_arrival'] = today + pd.Timedelta(days=default_lead_time)
+
+                # Count and report different date scenarios
+                valid_dates = ~df_clean['expected_arrival'].isna()
+                invalid_dates = df_clean[expected_date_col].notna() & df_clean['expected_arrival'].isna()
+                missing_dates = df_clean[expected_date_col].isna()
+
+                valid_count = valid_dates.sum()
+                invalid_count = invalid_dates.sum()
+                missing_count = missing_dates.sum()
+
+                # Provide detailed feedback
+                if valid_count > 0:
+                    self.validation_warnings.append(f"Successfully parsed {valid_count} expected dates")
+
+                if invalid_count > 0:
+                    invalid_examples = original_values[invalid_dates].dropna().unique()[:3]
+                    self.validation_warnings.append(
+                        f"Found {invalid_count} invalid date formats (will use default): {', '.join(map(str, invalid_examples))}"
+                    )
+
+                if missing_count > 0:
+                    self.validation_warnings.append(f"Found {missing_count} empty date fields (will use default)")
+
+                # Fill missing or invalid dates with calculated date
+                needs_default = df_clean['expected_arrival'].isna()
+                df_clean.loc[needs_default, 'expected_arrival'] = today + pd.Timedelta(days=default_lead_time)
+                df_clean.loc[needs_default, 'is_estimated'] = True
+
+                # Mark provided dates as confirmed
+                df_clean.loc[~needs_default, 'is_estimated'] = False
+
             else:
                 # No expected date column - calculate all
                 df_clean['expected_arrival'] = today + pd.Timedelta(days=default_lead_time)
-                self.validation_warnings.append("No expected date column found - using today + 120 days")
+                df_clean['is_estimated'] = True
+                self.validation_warnings.append("No expected date column found - using today + 120 days for all orders")
 
             # Convert quantities to integers
             df_clean['quantity'] = df_clean['quantity'].astype(int)
@@ -962,7 +1129,7 @@ class ImportExportManager:
                         row.get('lead_time_days', default_lead_time),
                         row.get('order_type', 'supplier'),
                         row.get('notes'),
-                        1  # is_estimated = True for CSV imports without explicit dates
+                        bool(row.get('is_estimated', True))  # Use calculated is_estimated flag
                     ))
                     imported_count += 1
 
@@ -974,11 +1141,20 @@ class ImportExportManager:
                 result["records_imported"] = imported_count
                 result["errors"] = self.validation_errors
                 result["warnings"] = self.validation_warnings
+                # Enhanced summary with detailed import statistics
+                estimated_dates_count = len(df_clean[df_clean['is_estimated'] == True])
+                confirmed_dates_count = len(df_clean[df_clean['is_estimated'] == False])
+
                 result["summary"] = {
                     "total_records": imported_count,
                     "skus_processed": len(df_clean['sku_id'].unique()),
                     "destinations": list(df_clean['destination'].unique()),
-                    "auto_calculated_dates": len(df_clean) if expected_date_col is None else len(df_clean[df_clean['expected_arrival'] == today + pd.Timedelta(days=default_lead_time)])
+                    "confirmed_dates": confirmed_dates_count,
+                    "estimated_dates": estimated_dates_count,
+                    "date_column_found": expected_date_col is not None,
+                    "date_column_name": expected_date_col if expected_date_col else None,
+                    "mixed_import": expected_date_col is not None and estimated_dates_count > 0 and confirmed_dates_count > 0,
+                    "lead_time_used": default_lead_time
                 }
 
                 logger.info(f"Successfully imported {imported_count} pending orders from {filename}")
@@ -1000,6 +1176,299 @@ class ImportExportManager:
                 "error": f"Import failed: {str(e)}",
                 "import_timestamp": datetime.now().isoformat()
             }
+
+    def _get_pending_orders_summary(self) -> Dict[str, Dict]:
+        """
+        Get summary of pending orders grouped by SKU and destination
+
+        Returns:
+            Dict[sku_id, Dict]: Pending orders data by SKU
+        """
+        try:
+            db = database.get_database_connection()
+            cursor = db.cursor(pymysql.cursors.DictCursor)
+
+            query = """
+            SELECT
+                sku_id,
+                destination,
+                SUM(quantity) as total_quantity,
+                COUNT(*) as order_count,
+                MIN(expected_arrival) as earliest_arrival,
+                MAX(expected_arrival) as latest_arrival,
+                AVG(DATEDIFF(expected_arrival, CURDATE())) as avg_days_until_arrival
+            FROM pending_inventory
+            WHERE status IN ('ordered', 'shipped', 'pending')
+            GROUP BY sku_id, destination
+            """
+
+            cursor.execute(query)
+            results = cursor.fetchall()
+
+            # Organize data by SKU
+            summary = {}
+            for row in results:
+                sku_id = row['sku_id']
+                if sku_id not in summary:
+                    summary[sku_id] = {'burnaby_pending': 0, 'kentucky_pending': 0}
+
+                if row['destination'] == 'burnaby':
+                    summary[sku_id]['burnaby_pending'] = row['total_quantity']
+                    summary[sku_id]['burnaby_earliest'] = row['earliest_arrival']
+                elif row['destination'] == 'kentucky':
+                    summary[sku_id]['kentucky_pending'] = row['total_quantity']
+                    summary[sku_id]['kentucky_earliest'] = row['earliest_arrival']
+
+            cursor.close()
+            db.close()
+            return summary
+
+        except Exception as e:
+            logger.error(f"Error getting pending orders summary: {str(e)}")
+            return {}
+
+    def _create_pending_orders_sheet(self, wb: Workbook):
+        """Create pending orders sheet showing all current pending orders"""
+
+        ws = wb.create_sheet("Pending Orders")
+
+        # Header styling
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+
+        # Headers for pending orders
+        headers = [
+            "SKU", "Description", "Supplier", "Quantity", "Destination",
+            "Order Date", "Expected Arrival", "Days Until Arrival",
+            "Lead Time (Days)", "Order Type", "Status", "Is Estimated", "Notes"
+        ]
+
+        # Write headers
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+        try:
+            db = database.get_database_connection()
+            cursor = db.cursor(pymysql.cursors.DictCursor)
+
+            query = """
+            SELECT
+                pi.*,
+                s.description,
+                s.supplier,
+                DATEDIFF(pi.expected_arrival, CURDATE()) as days_until_arrival
+            FROM pending_inventory pi
+            LEFT JOIN skus s ON pi.sku_id = s.sku_id
+            WHERE pi.status IN ('ordered', 'shipped', 'pending')
+            ORDER BY pi.expected_arrival ASC, pi.sku_id
+            """
+
+            cursor.execute(query)
+            pending_orders = cursor.fetchall()
+
+            # Status color coding
+            status_fills = {
+                "ordered": PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid"),
+                "shipped": PatternFill(start_color="E1F5FE", end_color="E1F5FE", fill_type="solid"),
+                "pending": PatternFill(start_color="F3E5F5", end_color="F3E5F5", fill_type="solid")
+            }
+
+            # Write data
+            for row_idx, order in enumerate(pending_orders, 2):
+                ws.cell(row=row_idx, column=1, value=order['sku_id'])
+                ws.cell(row=row_idx, column=2, value=order['description'])
+                ws.cell(row=row_idx, column=3, value=order['supplier'])
+                ws.cell(row=row_idx, column=4, value=order['quantity'])
+                ws.cell(row=row_idx, column=5, value=order['destination'].title())
+                ws.cell(row=row_idx, column=6, value=order['order_date'])
+                ws.cell(row=row_idx, column=7, value=order['expected_arrival'])
+                ws.cell(row=row_idx, column=8, value=order['days_until_arrival'])
+                ws.cell(row=row_idx, column=9, value=order['lead_time_days'])
+                ws.cell(row=row_idx, column=10, value=order['order_type'].title())
+
+                # Status cell with color coding
+                status_cell = ws.cell(row=row_idx, column=11, value=order['status'].title())
+                if order['status'] in status_fills:
+                    status_cell.fill = status_fills[order['status']]
+
+                estimated_text = "Yes" if order['is_estimated'] else "No"
+                estimated_cell = ws.cell(row=row_idx, column=12, value=estimated_text)
+                if order['is_estimated']:
+                    estimated_cell.fill = PatternFill(start_color="FFE6CC", end_color="FFE6CC", fill_type="solid")
+
+                ws.cell(row=row_idx, column=13, value=order['notes'] or "")
+
+            cursor.close()
+            db.close()
+
+        except Exception as e:
+            logger.error(f"Error creating pending orders sheet: {str(e)}")
+            # Add error row
+            ws.cell(row=2, column=1, value=f"Error loading data: {str(e)}")
+
+        # Auto-adjust column widths
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
+
+        # Freeze header row
+        ws.freeze_panes = "A2"
+
+    def _create_coverage_analysis_sheet(self, wb: Workbook):
+        """Create coverage analysis sheet showing current vs projected coverage"""
+
+        ws = wb.create_sheet("Coverage Analysis")
+
+        # Header styling
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+
+        # Headers
+        headers = [
+            "SKU", "Description", "ABC/XYZ", "Monthly Demand",
+            "Current CA Qty", "Current KY Qty", "Pending CA", "Pending KY",
+            "Current CA Coverage", "Current KY Coverage", "Projected CA Coverage", "Projected KY Coverage",
+            "Coverage Improvement CA", "Coverage Improvement KY", "Status"
+        ]
+
+        # Write headers
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+        try:
+            db = database.get_database_connection()
+            cursor = db.cursor(pymysql.cursors.DictCursor)
+
+            # Get inventory and demand data with pending orders
+            query = """
+            SELECT
+                s.sku_id,
+                s.description,
+                CONCAT(s.abc_code, s.xyz_code) as abc_xyz,
+                COALESCE(ms.burnaby_sales, 0) + COALESCE(ms.kentucky_sales, 0) as monthly_demand,
+                COALESCE(ic.burnaby_qty, 0) as current_burnaby_qty,
+                COALESCE(ic.kentucky_qty, 0) as current_kentucky_qty,
+                COALESCE(pb.pending_burnaby, 0) as pending_burnaby,
+                COALESCE(pk.pending_kentucky, 0) as pending_kentucky
+            FROM skus s
+            LEFT JOIN inventory_current ic ON s.sku_id = ic.sku_id
+            LEFT JOIN monthly_sales ms ON s.sku_id = ms.sku_id
+            LEFT JOIN (
+                SELECT sku_id, SUM(quantity) as pending_burnaby
+                FROM pending_inventory
+                WHERE destination = 'burnaby' AND status IN ('ordered', 'shipped', 'pending')
+                GROUP BY sku_id
+            ) pb ON s.sku_id = pb.sku_id
+            LEFT JOIN (
+                SELECT sku_id, SUM(quantity) as pending_kentucky
+                FROM pending_inventory
+                WHERE destination = 'kentucky' AND status IN ('ordered', 'shipped', 'pending')
+                GROUP BY sku_id
+            ) pk ON s.sku_id = pk.sku_id
+            WHERE s.status = 'Active'
+            ORDER BY s.sku_id
+            """
+
+            cursor.execute(query)
+            results = cursor.fetchall()
+
+            # Write data with calculations
+            for row_idx, row in enumerate(results, 2):
+                monthly_demand = max(row['monthly_demand'], 0.1)  # Avoid division by zero
+
+                ws.cell(row=row_idx, column=1, value=row['sku_id'])
+                ws.cell(row=row_idx, column=2, value=row['description'])
+                ws.cell(row=row_idx, column=3, value=row['abc_xyz'])
+                ws.cell(row=row_idx, column=4, value=round(monthly_demand))
+
+                current_ca = row['current_burnaby_qty']
+                current_ky = row['current_kentucky_qty']
+                pending_ca = row['pending_burnaby']
+                pending_ky = row['pending_kentucky']
+
+                ws.cell(row=row_idx, column=5, value=current_ca)
+                ws.cell(row=row_idx, column=6, value=current_ky)
+                ws.cell(row=row_idx, column=7, value=pending_ca)
+                ws.cell(row=row_idx, column=8, value=pending_ky)
+
+                # Current coverage
+                current_ca_coverage = current_ca / monthly_demand
+                current_ky_coverage = current_ky / monthly_demand
+
+                # Projected coverage (with pending orders)
+                projected_ca_coverage = (current_ca + pending_ca) / monthly_demand
+                projected_ky_coverage = (current_ky + pending_ky) / monthly_demand
+
+                ws.cell(row=row_idx, column=9, value=round(current_ca_coverage, 1))
+                ws.cell(row=row_idx, column=10, value=round(current_ky_coverage, 1))
+                ws.cell(row=row_idx, column=11, value=round(projected_ca_coverage, 1))
+                ws.cell(row=row_idx, column=12, value=round(projected_ky_coverage, 1))
+
+                # Coverage improvements
+                ca_improvement = projected_ca_coverage - current_ca_coverage
+                ky_improvement = projected_ky_coverage - current_ky_coverage
+
+                improvement_ca_cell = ws.cell(row=row_idx, column=13, value=round(ca_improvement, 1))
+                improvement_ky_cell = ws.cell(row=row_idx, column=14, value=round(ky_improvement, 1))
+
+                # Color code improvements
+                if ca_improvement > 0:
+                    improvement_ca_cell.fill = PatternFill(start_color="C8E6C9", end_color="C8E6C9", fill_type="solid")
+                if ky_improvement > 0:
+                    improvement_ky_cell.fill = PatternFill(start_color="C8E6C9", end_color="C8E6C9", fill_type="solid")
+
+                # Overall status
+                if pending_ca + pending_ky > 0:
+                    if projected_ky_coverage < 1.0:  # Still low coverage
+                        status = "LOW COVERAGE"
+                        status_fill = PatternFill(start_color="FFCDD2", end_color="FFCDD2", fill_type="solid")
+                    else:
+                        status = "IMPROVING"
+                        status_fill = PatternFill(start_color="C8E6C9", end_color="C8E6C9", fill_type="solid")
+                else:
+                    status = "NO PENDING"
+                    status_fill = PatternFill(start_color="F5F5F5", end_color="F5F5F5", fill_type="solid")
+
+                status_cell = ws.cell(row=row_idx, column=15, value=status)
+                status_cell.fill = status_fill
+
+            cursor.close()
+            db.close()
+
+        except Exception as e:
+            logger.error(f"Error creating coverage analysis sheet: {str(e)}")
+            ws.cell(row=2, column=1, value=f"Error loading data: {str(e)}")
+
+        # Auto-adjust column widths
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 20)
+            ws.column_dimensions[column_letter].width = adjusted_width
+
+        # Freeze header row
+        ws.freeze_panes = "A2"
+
 
 # Global instance
 import_export_manager = ImportExportManager()
