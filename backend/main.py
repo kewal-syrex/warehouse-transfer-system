@@ -643,23 +643,32 @@ async def export_sku_sales_history(sku_id: str):
         sales_data = cursor.fetchall()
         db.close()
 
-        # Generate CSV content
-        csv_lines = [
-            'Month,Kentucky Sales,Canada Sales,Total Sales,Kentucky Stockout Days,Canada Stockout Days,Corrected Demand'
-        ]
+        # Generate CSV content with proper formatting
+        import csv
+        import io
 
+        output = io.StringIO()
+        writer = csv.writer(output, lineterminator='\n', quoting=csv.QUOTE_MINIMAL)
+
+        # Write header
+        writer.writerow([
+            'Month', 'Kentucky Sales', 'Canada Sales', 'Total Sales',
+            'Kentucky Stockout Days', 'Canada Stockout Days', 'Corrected Demand'
+        ])
+
+        # Write data rows
         for row in sales_data:
-            csv_lines.append(
-                f"{row['year_month']},"
-                f"{row['kentucky_sales'] or 0},"
-                f"{row['burnaby_sales'] or 0},"
-                f"{row['total_sales'] or 0},"
-                f"{row['kentucky_stockout_days'] or 0},"
-                f"{row['burnaby_stockout_days'] or 0},"
-                f"{row['corrected_demand_kentucky'] or ''}"
-            )
+            writer.writerow([
+                str(row['year_month'] or ''),
+                str(row['kentucky_sales'] or 0),
+                str(row['burnaby_sales'] or 0),
+                str(row['total_sales'] or 0),
+                str(row['kentucky_stockout_days'] or 0),
+                str(row['burnaby_stockout_days'] or 0),
+                str(row['corrected_demand_kentucky'] or '')
+            ])
 
-        csv_content = '\\n'.join(csv_lines)
+        csv_content = output.getvalue()
 
         # Create response with proper headers
         from fastapi.responses import Response
@@ -754,14 +763,22 @@ async def export_all_sales_history(columns: str = "total,kentucky,canada,stockou
         if 'stockout' in selected_columns:
             headers.extend(['Kentucky Stockout Days', 'Canada Stockout Days', 'Corrected Demand'])
 
-        # Generate CSV content
-        csv_lines = [','.join(headers)]
+        # Generate CSV content with proper formatting
+        import csv
+        import io
 
+        output = io.StringIO()
+        writer = csv.writer(output, lineterminator='\n', quoting=csv.QUOTE_MINIMAL)
+
+        # Write header
+        writer.writerow(headers)
+
+        # Write data rows
         for row in all_sales_data:
             line_data = [
-                f'"{row["sku_id"]}"',
-                f'"{row["description"]}"',
-                row['year_month']
+                str(row["sku_id"] or ''),
+                str(row["description"] or ''),
+                str(row['year_month'] or '')
             ]
 
             if 'total' in selected_columns:
@@ -777,9 +794,9 @@ async def export_all_sales_history(columns: str = "total,kentucky,canada,stockou
                     str(row['corrected_demand_kentucky'] or '')
                 ])
 
-            csv_lines.append(','.join(line_data))
+            writer.writerow(line_data)
 
-        csv_content = '\\n'.join(csv_lines)
+        csv_content = output.getvalue()
 
         # Create response with proper headers
         from fastapi.responses import Response

@@ -912,6 +912,155 @@ class TransferCalculator:
             # Fallback to basic calculation
             return self.calculate_transfer_recommendation(sku_data)
 
+    def calculate_enhanced_transfer_with_economic_validation(self, sku_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Calculate transfer recommendation with economic validation to prevent source warehouse stockouts
+
+        This enhanced method adds critical business logic to prevent transfers that would
+        leave the source warehouse (Burnaby) understocked relative to its own demand.
+
+        Key Features:
+        - Economic validation: prevents transfers when CA demand > KY demand * 1.5
+        - Enhanced retention logic with proper Burnaby demand calculation
+        - Comprehensive coverage calculations for both warehouses
+        - Detailed business justification for all recommendations
+
+        Args:
+            sku_data: Dictionary containing SKU information including sales and inventory data
+
+        Returns:
+            Dictionary with enhanced transfer recommendation including economic validation
+
+        Raises:
+            ValueError: If required SKU data is missing or invalid
+        """
+        try:
+            # Extract SKU data with proper null handling
+            sku_id = sku_data['sku_id']
+            burnaby_qty = sku_data.get('burnaby_qty') or 0
+            kentucky_qty = sku_data.get('kentucky_qty') or 0
+            kentucky_sales = sku_data.get('kentucky_sales') or 0
+            burnaby_sales = sku_data.get('burnaby_sales') or 0
+            stockout_days = sku_data.get('kentucky_stockout_days') or 0
+            burnaby_stockout_days = sku_data.get('burnaby_stockout_days') or 0
+            abc_class = sku_data.get('abc_code', 'C')
+            xyz_class = sku_data.get('xyz_code', 'Z')
+            transfer_multiple = sku_data.get('transfer_multiple', 50)
+
+            # Step 1: Calculate corrected demand for BOTH warehouses
+            current_month = datetime.now().strftime('%Y-%m')
+
+            kentucky_corrected_demand = self.corrector.correct_monthly_demand_enhanced(
+                sku_id, kentucky_sales, stockout_days, current_month
+            )
+
+            burnaby_corrected_demand = self.corrector.correct_monthly_demand_enhanced(
+                sku_id, burnaby_sales, burnaby_stockout_days, current_month
+            )
+
+            # Step 2: Economic Validation - Don't transfer if CA demand significantly higher than KY
+            economic_validation_passed = True
+            economic_reason = ""
+
+            if burnaby_corrected_demand > kentucky_corrected_demand * 1.5:
+                economic_validation_passed = False
+                economic_reason = f"CA demand ({burnaby_corrected_demand:.0f}) too high vs KY demand ({kentucky_corrected_demand:.0f}). Transfer would risk CA stockout."
+
+            # Step 3: Calculate Burnaby minimum retention (never go below 2 months)
+            burnaby_min_retain = burnaby_corrected_demand * self.BURNABY_MIN_COVERAGE_MONTHS
+            available_for_transfer = max(0, burnaby_qty - burnaby_min_retain)
+
+            # Step 4: Calculate transfer need for Kentucky
+            coverage_months = self.get_coverage_target(abc_class, xyz_class)
+            target_inventory = kentucky_corrected_demand * coverage_months
+            transfer_need = max(0, target_inventory - kentucky_qty)
+
+            # Step 5: Determine final transfer quantity
+            if not economic_validation_passed:
+                # Economic validation failed - no transfer
+                final_transfer_qty = 0
+                priority = "LOW"
+                reason = economic_reason
+            elif available_for_transfer <= 0:
+                # Insufficient inventory after retention
+                final_transfer_qty = 0
+                priority = "LOW" if kentucky_qty > kentucky_corrected_demand else "MEDIUM"
+                reason = f"Insufficient CA inventory for transfer. CA needs {burnaby_min_retain:.0f} for 2-month coverage, only has {burnaby_qty}"
+            else:
+                # Normal transfer calculation
+                recommended_qty = min(transfer_need, available_for_transfer)
+                final_transfer_qty = self.round_to_multiple(recommended_qty, transfer_multiple)
+
+                # Calculate priority based on Kentucky situation
+                if kentucky_qty == 0:
+                    priority = "CRITICAL"
+                elif kentucky_qty < kentucky_corrected_demand:
+                    priority = "HIGH"
+                elif kentucky_qty < kentucky_corrected_demand * 2:
+                    priority = "MEDIUM"
+                else:
+                    priority = "LOW"
+
+                # Generate comprehensive reason
+                if final_transfer_qty > 0:
+                    reason = f"Transfer {final_transfer_qty} units. CA retains {burnaby_min_retain:.0f} for 2-month coverage. Economic validation passed."
+                else:
+                    reason = f"No transfer needed. KY has {kentucky_qty} units vs {kentucky_corrected_demand:.0f} monthly demand."
+
+            # Step 6: Calculate coverage after transfer
+            burnaby_coverage_after = (burnaby_qty - final_transfer_qty) / max(burnaby_corrected_demand, 1)
+            kentucky_coverage_after = (kentucky_qty + final_transfer_qty) / max(kentucky_corrected_demand, 1)
+
+            # Step 7: Return comprehensive recommendation
+            return {
+                'sku_id': sku_id,
+                'description': sku_data.get('description', ''),
+                'current_burnaby_qty': burnaby_qty,
+                'current_kentucky_qty': kentucky_qty,
+                'corrected_monthly_demand': kentucky_corrected_demand,
+                'burnaby_corrected_demand': burnaby_corrected_demand,
+                'recommended_transfer_qty': final_transfer_qty,
+                'transfer_multiple': transfer_multiple,
+                'priority': priority,
+                'reason': reason,
+                'abc_class': abc_class,
+                'xyz_class': xyz_class,
+                'stockout_days': stockout_days,
+                'coverage_months': kentucky_qty / max(kentucky_corrected_demand, 1),
+                'target_coverage_months': coverage_months,
+                'burnaby_coverage_after_transfer': round(burnaby_coverage_after, 1),
+                'kentucky_coverage_after_transfer': round(kentucky_coverage_after, 1),
+                'economic_validation_passed': economic_validation_passed,
+                'available_from_burnaby': available_for_transfer,
+                'burnaby_min_retain': burnaby_min_retain
+            }
+
+        except Exception as e:
+            logger.error(f"Enhanced transfer calculation with economic validation failed for SKU {sku_id}: {e}")
+            # Return safe fallback
+            return {
+                'sku_id': sku_id,
+                'description': sku_data.get('description', ''),
+                'current_burnaby_qty': burnaby_qty,
+                'current_kentucky_qty': kentucky_qty,
+                'corrected_monthly_demand': 0,
+                'burnaby_corrected_demand': 0,
+                'recommended_transfer_qty': 0,
+                'transfer_multiple': transfer_multiple,
+                'priority': "LOW",
+                'reason': f"Calculation error: {str(e)}",
+                'abc_class': abc_class,
+                'xyz_class': xyz_class,
+                'stockout_days': 0,
+                'coverage_months': 0,
+                'target_coverage_months': self.get_coverage_target(abc_class, xyz_class),
+                'burnaby_coverage_after_transfer': 0,
+                'kentucky_coverage_after_transfer': 0,
+                'economic_validation_passed': False,
+                'available_from_burnaby': 0,
+                'burnaby_min_retain': 0
+            }
+
     def calculate_enhanced_transfer_with_pending(self, sku_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Calculate transfer recommendation with full pending orders and stockout override support
@@ -1604,9 +1753,9 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
         List of transfer recommendations sorted by priority
     """
     try:
-        # Get all active SKUs with current inventory and latest sales
+        # Get all active SKUs with current inventory and latest sales for BOTH warehouses
         query = """
-        SELECT 
+        SELECT
             s.sku_id,
             s.description,
             s.abc_code,
@@ -1615,7 +1764,9 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
             ic.burnaby_qty,
             ic.kentucky_qty,
             COALESCE(ms.kentucky_sales, 0) as kentucky_sales,
-            COALESCE(ms.kentucky_stockout_days, 0) as kentucky_stockout_days
+            COALESCE(ms.kentucky_stockout_days, 0) as kentucky_stockout_days,
+            COALESCE(ms.burnaby_sales, 0) as burnaby_sales,
+            COALESCE(ms.burnaby_stockout_days, 0) as burnaby_stockout_days
         FROM skus s
         LEFT JOIN inventory_current ic ON s.sku_id = ic.sku_id
         LEFT JOIN monthly_sales ms ON s.sku_id = ms.sku_id AND ms.`year_month` = '2024-03'
@@ -1632,10 +1783,8 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
         recommendations = []
 
         for sku_data in sku_data_list:
-            if use_enhanced:
-                recommendation = calculator.calculate_enhanced_transfer_recommendation(sku_data)
-            else:
-                recommendation = calculator.calculate_transfer_recommendation(sku_data)
+            # Use the new economic validation method to prevent stockouts
+            recommendation = calculator.calculate_enhanced_transfer_with_economic_validation(sku_data)
 
             if recommendation:
                 recommendations.append(recommendation)
