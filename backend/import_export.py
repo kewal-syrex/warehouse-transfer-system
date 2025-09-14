@@ -783,20 +783,221 @@ class ImportExportManager:
     
     def import_csv_file(self, file_content: bytes, filename: str) -> Dict[str, Any]:
         """Import CSV file with validation"""
-        
+
         try:
             # Read CSV
             df = pd.read_csv(io.StringIO(file_content.decode('utf-8')))
-            
+
             # Process similar to Excel import
             return self._auto_detect_and_import(df, filename)
-            
+
         except Exception as e:
             logger.error(f"CSV import failed: {str(e)}")
             return {
                 "success": False,
                 "filename": filename,
                 "error": f"CSV import failed: {str(e)}",
+                "import_timestamp": datetime.now().isoformat()
+            }
+
+    def import_pending_orders_csv(self, file_content: bytes, filename: str) -> Dict[str, Any]:
+        """
+        Import pending orders from CSV with flexible date handling
+
+        Supports flexible CSV formats:
+        - Required: sku_id, quantity, destination
+        - Optional: expected_date, order_date, order_type, notes
+        - Auto-calculates dates when missing (Today + 120 days for expected_arrival)
+
+        Args:
+            file_content: Raw CSV file bytes
+            filename: Original filename for error reporting
+
+        Returns:
+            Dict with import results, validation errors, and statistics
+        """
+        try:
+            # Reset validation tracking
+            self.validation_errors = []
+            self.validation_warnings = []
+
+            # Read CSV
+            df = pd.read_csv(io.StringIO(file_content.decode('utf-8')))
+
+            # Required columns
+            required_columns = ['sku_id', 'quantity', 'destination']
+            optional_columns = ['expected_date', 'expected_arrival', 'order_date', 'order_type', 'notes', 'lead_time_days']
+
+            result = {
+                "success": False,
+                "filename": filename,
+                "import_timestamp": datetime.now().isoformat(),
+                "records_imported": 0,
+                "errors": [],
+                "warnings": [],
+                "summary": {}
+            }
+
+            # Validate required columns (case-insensitive)
+            df_cols_lower = {col.lower(): col for col in df.columns}
+            missing_cols = []
+
+            for req_col in required_columns:
+                if req_col.lower() not in df_cols_lower:
+                    missing_cols.append(req_col)
+
+            if missing_cols:
+                error_msg = f"Missing required columns: {', '.join(missing_cols)}"
+                self.validation_errors.append(error_msg)
+                result["errors"] = self.validation_errors
+                return result
+
+            # Map columns to standard names (case-insensitive)
+            column_mapping = {}
+            for col in df.columns:
+                col_lower = col.lower()
+                if col_lower in [req.lower() for req in required_columns + optional_columns]:
+                    # Find the standard name
+                    for std_col in required_columns + optional_columns:
+                        if col_lower == std_col.lower():
+                            if col != std_col:
+                                column_mapping[col] = std_col
+                            break
+
+            # Rename columns
+            if column_mapping:
+                df = df.rename(columns=column_mapping)
+
+            # Clean data
+            df_clean = df.dropna(subset=['sku_id'])
+            df_clean = df_clean[df_clean['sku_id'].str.strip() != '']
+
+            # Validate destinations
+            valid_destinations = ['burnaby', 'kentucky']
+            df_clean['destination'] = df_clean['destination'].str.lower().str.strip()
+            invalid_destinations = df_clean[~df_clean['destination'].isin(valid_destinations)]
+
+            if not invalid_destinations.empty:
+                self.validation_warnings.append(
+                    f"Invalid destinations found (will be skipped): {', '.join(invalid_destinations['destination'].unique())}"
+                )
+                df_clean = df_clean[df_clean['destination'].isin(valid_destinations)]
+
+            # Validate quantities
+            df_clean['quantity'] = pd.to_numeric(df_clean['quantity'], errors='coerce')
+            df_clean = df_clean.dropna(subset=['quantity'])
+            df_clean = df_clean[df_clean['quantity'] > 0]
+
+            # Handle dates with flexibility
+            today = datetime.now().date()
+            default_lead_time = 120  # days
+
+            # Set defaults for missing optional columns
+            if 'order_date' not in df_clean.columns:
+                df_clean['order_date'] = today
+
+            if 'lead_time_days' not in df_clean.columns:
+                df_clean['lead_time_days'] = default_lead_time
+
+            if 'order_type' not in df_clean.columns:
+                df_clean['order_type'] = 'supplier'
+
+            if 'notes' not in df_clean.columns:
+                df_clean['notes'] = None
+
+            # Handle expected arrival date - check multiple possible column names
+            expected_date_col = None
+            for col in ['expected_date', 'expected_arrival', 'arrival_date']:
+                if col in df_clean.columns:
+                    expected_date_col = col
+                    break
+
+            if expected_date_col:
+                # Parse existing expected dates
+                df_clean['expected_arrival'] = pd.to_datetime(df_clean[expected_date_col], errors='coerce').dt.date
+                # Fill missing dates with calculated date
+                mask = df_clean['expected_arrival'].isna()
+                df_clean.loc[mask, 'expected_arrival'] = today + pd.Timedelta(days=default_lead_time)
+            else:
+                # No expected date column - calculate all
+                df_clean['expected_arrival'] = today + pd.Timedelta(days=default_lead_time)
+                self.validation_warnings.append("No expected date column found - using today + 120 days")
+
+            # Convert quantities to integers
+            df_clean['quantity'] = df_clean['quantity'].astype(int)
+            df_clean['lead_time_days'] = pd.to_numeric(df_clean['lead_time_days'], errors='coerce').fillna(default_lead_time).astype(int)
+
+            # Validate SKUs exist in database
+            try:
+                db = database.get_database_connection()
+                cursor = db.cursor()
+
+                # Get list of valid SKUs
+                cursor.execute("SELECT sku_id FROM skus WHERE status = 'Active'")
+                valid_skus = {row[0] for row in cursor.fetchall()}
+
+                # Filter out invalid SKUs
+                invalid_skus = df_clean[~df_clean['sku_id'].isin(valid_skus)]['sku_id'].unique()
+                if len(invalid_skus) > 0:
+                    self.validation_warnings.append(
+                        f"Invalid SKUs found (will be skipped): {', '.join(invalid_skus[:5])}" +
+                        (f" and {len(invalid_skus)-5} more" if len(invalid_skus) > 5 else "")
+                    )
+                    df_clean = df_clean[df_clean['sku_id'].isin(valid_skus)]
+
+                # Insert records
+                imported_count = 0
+                for _, row in df_clean.iterrows():
+                    insert_query = """
+                    INSERT INTO pending_inventory
+                    (sku_id, quantity, destination, expected_arrival, order_date, lead_time_days, order_type, notes, is_estimated, status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+                    """
+                    cursor.execute(insert_query, (
+                        row['sku_id'],
+                        row['quantity'],
+                        row['destination'],
+                        row['expected_arrival'],
+                        row.get('order_date', today),
+                        row.get('lead_time_days', default_lead_time),
+                        row.get('order_type', 'supplier'),
+                        row.get('notes'),
+                        1  # is_estimated = True for CSV imports without explicit dates
+                    ))
+                    imported_count += 1
+
+                db.commit()
+                db.close()
+
+                # Success
+                result["success"] = True
+                result["records_imported"] = imported_count
+                result["errors"] = self.validation_errors
+                result["warnings"] = self.validation_warnings
+                result["summary"] = {
+                    "total_records": imported_count,
+                    "skus_processed": len(df_clean['sku_id'].unique()),
+                    "destinations": list(df_clean['destination'].unique()),
+                    "auto_calculated_dates": len(df_clean) if expected_date_col is None else len(df_clean[df_clean['expected_arrival'] == today + pd.Timedelta(days=default_lead_time)])
+                }
+
+                logger.info(f"Successfully imported {imported_count} pending orders from {filename}")
+                return result
+
+            except Exception as e:
+                db.rollback() if 'db' in locals() else None
+                db.close() if 'db' in locals() else None
+                self.validation_errors.append(f"Database error: {str(e)}")
+                logger.error(f"Database error importing pending orders: {str(e)}")
+                result["errors"] = self.validation_errors
+                return result
+
+        except Exception as e:
+            logger.error(f"Pending orders CSV import failed: {str(e)}")
+            return {
+                "success": False,
+                "filename": filename,
+                "error": f"Import failed: {str(e)}",
                 "import_timestamp": datetime.now().isoformat()
             }
 

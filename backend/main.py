@@ -857,6 +857,35 @@ async def import_csv_file(file: UploadFile = File(...)):
             detail=f"CSV import failed: {str(e)}"
         )
 
+@app.post("/api/import/pending-orders",
+         summary="Import Pending Orders CSV",
+         description="Upload and import pending orders from CSV file with flexible date handling",
+         tags=["Import/Export"])
+async def import_pending_orders_csv(file: UploadFile = File(...)):
+    """Import pending orders from CSV with automatic date calculations"""
+
+    if not file.filename or not file.filename.lower().endswith('.csv'):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid file format. Please upload a CSV file"
+        )
+
+    try:
+        file_content = await file.read()
+
+        result = import_export.import_export_manager.import_pending_orders_csv(
+            file_content,
+            file.filename
+        )
+
+        return result
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Pending orders CSV import failed: {str(e)}"
+        )
+
 @app.get("/api/export/excel/transfer-orders",
          summary="Export Transfer Orders to Excel",
          description="Generate professional Excel file with transfer recommendations and analysis",

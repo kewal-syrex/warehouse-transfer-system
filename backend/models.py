@@ -150,22 +150,47 @@ class StockoutDate(Base):
 
 class PendingInventory(Base):
     __tablename__ = 'pending_inventory'
-    
+
     id = Column(Integer, primary_key=True, autoincrement=True)
     sku_id = Column(String(50), ForeignKey('skus.sku_id', ondelete='CASCADE'), nullable=False)
     quantity = Column(Integer, nullable=False)
     destination = Column(Enum(Warehouse), nullable=False)
     order_date = Column(Date, nullable=False)
-    expected_arrival = Column(Date, nullable=False)
+    expected_arrival = Column(Date)  # Made nullable for flexible date handling
     actual_arrival = Column(Date)
     order_type = Column(Enum(OrderType), default=OrderType.SUPPLIER)
     status = Column(Enum(OrderStatus), default=OrderStatus.ORDERED)
+    lead_time_days = Column(Integer, default=120)  # Default 4 months
+    is_estimated = Column(Boolean, default=True)   # Whether arrival date is estimated
     notes = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
     # Relationships
     sku = relationship("SKU", back_populates="pending_inventory")
+
+    @property
+    def calculated_arrival_date(self):
+        """Calculate arrival date based on expected_arrival or order_date + lead_time"""
+        from datetime import timedelta
+        if self.expected_arrival:
+            return self.expected_arrival
+        return self.order_date + timedelta(days=self.lead_time_days)
+
+    @property
+    def days_until_arrival(self):
+        """Calculate days until arrival from today"""
+        from datetime import date
+        arrival_date = self.calculated_arrival_date
+        return (arrival_date - date.today()).days
+
+    @property
+    def is_overdue(self):
+        """Check if order is overdue"""
+        from datetime import date
+        if self.status in ['received', 'cancelled']:
+            return False
+        return self.calculated_arrival_date < date.today()
 
 class TransferHistory(Base):
     __tablename__ = 'transfer_history'
@@ -308,3 +333,95 @@ class DashboardResponse(BaseModel):
     metrics: DashboardMetrics
     alerts: List[dict]
     timestamp: str
+
+# Pending Inventory Pydantic Models
+class PendingInventoryBase(BaseModel):
+    """
+    Base model for pending inventory operations
+    """
+    sku_id: str = Field(..., description="SKU identifier")
+    quantity: int = Field(..., gt=0, description="Quantity to be received")
+    destination: str = Field(..., description="Destination warehouse (burnaby/kentucky)")
+    order_date: date = Field(..., description="Date the order was placed")
+    expected_arrival: Optional[date] = Field(None, description="Expected arrival date (optional)")
+    order_type: str = Field(default="supplier", description="Order type (supplier/transfer)")
+    status: str = Field(default="ordered", description="Order status")
+    lead_time_days: int = Field(default=120, ge=1, le=365, description="Lead time in days")
+    is_estimated: bool = Field(default=True, description="Whether arrival date is estimated")
+    notes: Optional[str] = Field(None, max_length=1000, description="Additional notes")
+
+    @validator('destination')
+    def validate_destination(cls, v):
+        if v.lower() not in ['burnaby', 'kentucky']:
+            raise ValueError('Destination must be burnaby or kentucky')
+        return v.lower()
+
+    @validator('order_type')
+    def validate_order_type(cls, v):
+        if v.lower() not in ['supplier', 'transfer']:
+            raise ValueError('Order type must be supplier or transfer')
+        return v.lower()
+
+    @validator('status')
+    def validate_status(cls, v):
+        if v.lower() not in ['ordered', 'shipped', 'received', 'cancelled']:
+            raise ValueError('Status must be ordered, shipped, received, or cancelled')
+        return v.lower()
+
+class PendingInventoryCreate(PendingInventoryBase):
+    """
+    Model for creating new pending inventory records
+    """
+    pass
+
+class PendingInventoryUpdate(BaseModel):
+    """
+    Model for updating pending inventory records
+    All fields are optional - only provided fields will be updated
+    """
+    quantity: Optional[int] = Field(None, gt=0, description="Quantity to be received")
+    destination: Optional[str] = Field(None, description="Destination warehouse")
+    order_date: Optional[date] = Field(None, description="Date the order was placed")
+    expected_arrival: Optional[date] = Field(None, description="Expected arrival date")
+    order_type: Optional[str] = Field(None, description="Order type (supplier/transfer)")
+    status: Optional[str] = Field(None, description="Order status")
+    lead_time_days: Optional[int] = Field(None, ge=1, le=365, description="Lead time in days")
+    is_estimated: Optional[bool] = Field(None, description="Whether arrival date is estimated")
+    notes: Optional[str] = Field(None, max_length=1000, description="Additional notes")
+
+class PendingInventoryResponse(PendingInventoryBase):
+    """
+    Model for pending inventory responses
+    """
+    id: int = Field(..., description="Unique identifier")
+    actual_arrival: Optional[date] = Field(None, description="Actual arrival date")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    updated_at: datetime = Field(..., description="Last update timestamp")
+
+    # Computed fields
+    calculated_arrival_date: date = Field(..., description="Calculated arrival date")
+    days_until_arrival: int = Field(..., description="Days until arrival")
+    is_overdue: bool = Field(..., description="Whether order is overdue")
+
+    class Config:
+        from_attributes = True
+
+class PendingInventorySummary(BaseModel):
+    """
+    Summary model for pending inventory by SKU
+    """
+    sku_id: str = Field(..., description="SKU identifier")
+    description: str = Field(..., description="SKU description")
+    burnaby_pending: int = Field(default=0, description="Pending quantity for Burnaby")
+    kentucky_pending: int = Field(default=0, description="Pending quantity for Kentucky")
+    total_pending: int = Field(default=0, description="Total pending quantity")
+    supplier_orders: int = Field(default=0, description="Number of supplier orders")
+    transfer_orders: int = Field(default=0, description="Number of transfer orders")
+    earliest_arrival: Optional[date] = Field(None, description="Earliest expected arrival")
+
+class BulkPendingInventoryCreate(BaseModel):
+    """
+    Model for bulk creating pending inventory records
+    """
+    orders: List[PendingInventoryCreate] = Field(..., description="List of pending orders to create")
+    validate_skus: bool = Field(default=True, description="Whether to validate SKU existence")

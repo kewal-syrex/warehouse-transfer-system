@@ -506,6 +506,11 @@ class TransferCalculator:
     Enhanced with seasonal patterns and viral growth detection
     """
 
+    # Burnaby retention configuration parameters
+    BURNABY_MIN_COVERAGE_MONTHS = 2.0    # Never go below this threshold
+    BURNABY_TARGET_COVERAGE_MONTHS = 6.0  # Default target retention
+    BURNABY_COVERAGE_WITH_PENDING = 1.5   # When pending arrivals < 45 days
+
     def __init__(self):
         self.corrector = StockoutCorrector()
         self.classifier = ABCXYZClassifier()
@@ -548,7 +553,168 @@ class TransferCalculator:
             return 0  # Below minimum transfer threshold
         
         return math.ceil(quantity / multiple) * multiple
-    
+
+    def get_pending_orders_data(self, sku_id: str) -> Dict[str, Any]:
+        """
+        Get pending orders data for a specific SKU from database views
+
+        Args:
+            sku_id: SKU identifier
+
+        Returns:
+            Dictionary with pending orders information
+        """
+        try:
+            db = database.get_database_connection()
+            import pymysql
+            cursor = db.cursor(pymysql.cursors.DictCursor)
+
+            # Query the pending quantities view
+            query = """
+            SELECT
+                burnaby_pending,
+                kentucky_pending,
+                total_pending,
+                earliest_arrival
+            FROM v_pending_quantities
+            WHERE sku_id = %s
+            """
+
+            cursor.execute(query, (sku_id,))
+            result = cursor.fetchone()
+            cursor.close()
+            db.close()
+
+            if result:
+                # Calculate days until arrival
+                days_until_arrival = None
+                if result['earliest_arrival']:
+                    days_until_arrival = (result['earliest_arrival'] - datetime.now().date()).days
+
+                return {
+                    'burnaby_pending': result['burnaby_pending'] or 0,
+                    'kentucky_pending': result['kentucky_pending'] or 0,
+                    'total_pending': result['total_pending'] or 0,
+                    'earliest_arrival': result['earliest_arrival'],
+                    'days_until_arrival': days_until_arrival
+                }
+
+            return {
+                'burnaby_pending': 0,
+                'kentucky_pending': 0,
+                'total_pending': 0,
+                'earliest_arrival': None,
+                'days_until_arrival': None
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get pending orders for {sku_id}: {e}")
+            return {
+                'burnaby_pending': 0,
+                'kentucky_pending': 0,
+                'total_pending': 0,
+                'earliest_arrival': None,
+                'days_until_arrival': None
+            }
+
+    def check_stockout_override(self, sku_id: str, warehouse: str = 'kentucky') -> Dict[str, Any]:
+        """
+        Check if a SKU is marked as out-of-stock in stockout_dates table
+
+        Args:
+            sku_id: SKU identifier
+            warehouse: Warehouse to check ('kentucky' or 'burnaby')
+
+        Returns:
+            Dictionary with override information
+        """
+        try:
+            db = database.get_database_connection()
+            import pymysql
+            cursor = db.cursor(pymysql.cursors.DictCursor)
+
+            # Check for active stockouts (no date_back_in or future date)
+            query = """
+            SELECT COUNT(*) as active_stockouts
+            FROM stockout_dates
+            WHERE sku_id = %s
+            AND warehouse = %s
+            AND (date_back_in IS NULL OR date_back_in > CURDATE())
+            """
+
+            cursor.execute(query, (sku_id, warehouse))
+            result = cursor.fetchone()
+            cursor.close()
+            db.close()
+
+            active_stockouts = result['active_stockouts'] if result else 0
+
+            return {
+                'is_overridden': active_stockouts > 0,
+                'override_reason': f"Active stockout in {warehouse}" if active_stockouts > 0 else None
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to check stockout override for {sku_id}: {e}")
+            return {
+                'is_overridden': False,
+                'override_reason': None
+            }
+
+    def calculate_burnaby_retention(self, burnaby_qty: int, burnaby_demand: float,
+                                   pending_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Calculate how much inventory Burnaby should retain based on pending orders
+
+        Args:
+            burnaby_qty: Current Burnaby inventory
+            burnaby_demand: Monthly demand for Burnaby
+            pending_data: Pending orders data from get_pending_orders_data()
+
+        Returns:
+            Dictionary with retention calculation details
+        """
+        try:
+            days_until_arrival = pending_data.get('days_until_arrival')
+            burnaby_pending = pending_data.get('burnaby_pending', 0)
+
+            # Determine retention strategy based on pending arrivals
+            if days_until_arrival is not None and days_until_arrival < 45 and burnaby_pending > 0:
+                # Reduce retention when pending orders are imminent
+                burnaby_min_retain = burnaby_demand * self.BURNABY_COVERAGE_WITH_PENDING
+                retention_reason = f"Reduced retention due to pending arrival in {days_until_arrival} days"
+            else:
+                # Standard retention
+                burnaby_min_retain = burnaby_demand * self.BURNABY_MIN_COVERAGE_MONTHS
+                retention_reason = "Standard retention policy"
+
+            # Calculate available for transfer
+            available_for_transfer = max(0, burnaby_qty - burnaby_min_retain)
+
+            # Calculate coverage after considering pending
+            total_available = burnaby_qty + burnaby_pending
+            coverage_with_pending = total_available / max(burnaby_demand, 1)
+
+            return {
+                'burnaby_min_retain': int(burnaby_min_retain),
+                'available_for_transfer': int(available_for_transfer),
+                'retention_reason': retention_reason,
+                'coverage_with_pending': round(coverage_with_pending, 1),
+                'burnaby_pending': burnaby_pending
+            }
+
+        except Exception as e:
+            logger.error(f"Burnaby retention calculation failed: {e}")
+            # Safe fallback
+            burnaby_min_retain = burnaby_demand * self.BURNABY_MIN_COVERAGE_MONTHS
+            return {
+                'burnaby_min_retain': int(burnaby_min_retain),
+                'available_for_transfer': max(0, int(burnaby_qty - burnaby_min_retain)),
+                'retention_reason': "Fallback retention calculation",
+                'coverage_with_pending': burnaby_qty / max(burnaby_demand, 1),
+                'burnaby_pending': 0
+            }
+
     def calculate_transfer_recommendation(self, sku_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Calculate transfer recommendation for a single SKU
@@ -745,6 +911,269 @@ class TransferCalculator:
             logger.error(f"Enhanced calculation failed for SKU {sku_data.get('sku_id', 'unknown')}: {e}")
             # Fallback to basic calculation
             return self.calculate_transfer_recommendation(sku_data)
+
+    def calculate_enhanced_transfer_with_pending(self, sku_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Calculate transfer recommendation with full pending orders and stockout override support
+
+        This method incorporates:
+        - Pending orders data from v_pending_quantities view
+        - Burnaby retention logic with configurable coverage
+        - Stockout overrides for Kentucky quantities
+        - Enhanced seasonal and growth patterns
+        - Comprehensive priority scoring
+
+        Args:
+            sku_data: Dictionary containing SKU information
+
+        Returns:
+            Dictionary with comprehensive transfer recommendation
+        """
+        try:
+            sku_id = sku_data['sku_id']
+            burnaby_qty = sku_data.get('burnaby_qty', 0)
+            kentucky_qty = sku_data.get('kentucky_qty', 0)
+            kentucky_sales = sku_data.get('kentucky_sales', 0)
+            burnaby_sales = sku_data.get('burnaby_sales', 0)
+            stockout_days = sku_data.get('kentucky_stockout_days', 0)
+            burnaby_stockout_days = sku_data.get('burnaby_stockout_days', 0)
+            abc_class = sku_data.get('abc_code', 'C')
+            xyz_class = sku_data.get('xyz_code', 'Z')
+            transfer_multiple = sku_data.get('transfer_multiple', 50)
+
+            # Step 1: Get pending orders data
+            pending_data = self.get_pending_orders_data(sku_id)
+
+            # Step 2: Check for stockout overrides
+            kentucky_override = self.check_stockout_override(sku_id, 'kentucky')
+            burnaby_override = self.check_stockout_override(sku_id, 'burnaby')
+
+            # Step 3: Apply stockout overrides to quantities
+            effective_kentucky_qty = 0 if kentucky_override['is_overridden'] else kentucky_qty
+            effective_burnaby_qty = 0 if burnaby_override['is_overridden'] else burnaby_qty
+
+            # Step 4: Calculate enhanced demand for Kentucky
+            kentucky_corrected_demand = self.corrector.correct_monthly_demand_enhanced(
+                sku_id, kentucky_sales, stockout_days, datetime.now().strftime('%Y-%m')
+            )
+
+            # Calculate Burnaby demand for retention calculation
+            burnaby_corrected_demand = self.corrector.correct_monthly_demand_enhanced(
+                sku_id, burnaby_sales, burnaby_stockout_days, datetime.now().strftime('%Y-%m')
+            )
+
+            # Step 5: Calculate Burnaby retention with pending orders
+            burnaby_retention = self.calculate_burnaby_retention(
+                effective_burnaby_qty, burnaby_corrected_demand, pending_data
+            )
+
+            # Step 6: Apply seasonal and growth patterns
+            current_month = datetime.now().month
+            seasonal_pattern = self.seasonal_detector.detect_seasonal_pattern(sku_id)
+            seasonal_multiplier = self.seasonal_detector.get_seasonal_multiplier(seasonal_pattern, current_month)
+
+            growth_status = self.growth_detector.detect_viral_growth(sku_id)
+            growth_multiplier = self.growth_detector.get_growth_multiplier(growth_status)
+
+            # Apply enhancements to demand
+            enhanced_kentucky_demand = kentucky_corrected_demand * seasonal_multiplier * growth_multiplier
+
+            # Step 7: Calculate target inventory considering pending orders
+            coverage_months = self.get_coverage_target(abc_class, xyz_class)
+            target_inventory = enhanced_kentucky_demand * coverage_months
+
+            # Account for pending Kentucky orders
+            kentucky_pending = pending_data.get('kentucky_pending', 0)
+            current_position = effective_kentucky_qty + kentucky_pending
+
+            # Step 8: Calculate transfer need
+            transfer_need = max(0, target_inventory - current_position)
+
+            # Step 9: Apply Burnaby availability constraint
+            available_from_burnaby = burnaby_retention['available_for_transfer']
+            recommended_qty = min(transfer_need, available_from_burnaby)
+
+            # Step 10: Round to multiple and apply minimum threshold
+            final_transfer_qty = self.round_to_multiple(recommended_qty, transfer_multiple)
+
+            # Step 11: Calculate priority with comprehensive scoring
+            score_data = {
+                'kentucky_stockout_days': stockout_days,
+                'kentucky_qty': effective_kentucky_qty,
+                'corrected_demand': enhanced_kentucky_demand,
+                'abc_code': abc_class,
+                'growth_status': growth_status
+            }
+            priority_analysis = self.calculate_priority_score(score_data)
+
+            # Step 12: Calculate coverage metrics
+            current_coverage = effective_kentucky_qty / max(enhanced_kentucky_demand, 1)
+            coverage_after_transfer = (effective_kentucky_qty + final_transfer_qty) / max(enhanced_kentucky_demand, 1)
+            coverage_after_pending = (current_position + final_transfer_qty) / max(enhanced_kentucky_demand, 1)
+
+            # Step 13: Generate comprehensive reason
+            reason_factors = {
+                'pending_orders': pending_data,
+                'stockout_overrides': {
+                    'kentucky': kentucky_override,
+                    'burnaby': burnaby_override
+                },
+                'burnaby_retention': burnaby_retention,
+                'stockout_days': stockout_days,
+                'growth_status': growth_status,
+                'seasonal_info': {
+                    'pattern': seasonal_pattern,
+                    'multiplier': seasonal_multiplier
+                },
+                'current_coverage': current_coverage,
+                'target_coverage': coverage_months,
+                'abc_class': abc_class,
+                'kentucky_qty': effective_kentucky_qty
+            }
+            comprehensive_reason = self.generate_comprehensive_transfer_reason(reason_factors)
+
+            # Step 14: Assemble comprehensive result
+            result = {
+                'sku_id': sku_id,
+                'description': sku_data.get('description', ''),
+
+                # Current state
+                'current_kentucky_qty': kentucky_qty,
+                'effective_kentucky_qty': effective_kentucky_qty,
+                'current_burnaby_qty': burnaby_qty,
+                'effective_burnaby_qty': effective_burnaby_qty,
+
+                # Pending orders
+                'kentucky_pending': kentucky_pending,
+                'burnaby_pending': pending_data.get('burnaby_pending', 0),
+                'days_until_arrival': pending_data.get('days_until_arrival'),
+
+                # Demand calculations
+                'corrected_monthly_demand': round(enhanced_kentucky_demand, 2),
+                'seasonal_multiplier': round(seasonal_multiplier, 2),
+                'growth_multiplier': round(growth_multiplier, 2),
+
+                # Transfer recommendation
+                'recommended_transfer_qty': final_transfer_qty,
+                'available_from_burnaby': available_from_burnaby,
+                'burnaby_min_retain': burnaby_retention['burnaby_min_retain'],
+
+                # Coverage analysis
+                'coverage_months': round(current_coverage, 1),
+                'coverage_after_transfer': round(coverage_after_transfer, 1),
+                'coverage_after_pending': round(coverage_after_pending, 1),
+                'target_coverage_months': coverage_months,
+
+                # Priority and classification
+                'priority': priority_analysis['priority_level'],
+                'priority_score': priority_analysis.get('total_score', 0),
+                'abc_class': abc_class,
+                'xyz_class': xyz_class,
+
+                # Additional metadata
+                'seasonal_pattern': seasonal_pattern,
+                'growth_status': growth_status,
+                'stockout_days': stockout_days,
+                'transfer_multiple': transfer_multiple,
+                'reason': comprehensive_reason,
+                'enhanced_calculation': True,
+                'pending_orders_included': True,
+                'stockout_overrides_applied': kentucky_override['is_overridden'] or burnaby_override['is_overridden'],
+
+                # Override details
+                'kentucky_override': kentucky_override,
+                'burnaby_override': burnaby_override,
+                'burnaby_retention_details': burnaby_retention
+            }
+
+            # Update database with detected patterns
+            self._update_sku_patterns(sku_id, seasonal_pattern, growth_status)
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Comprehensive enhanced calculation failed for SKU {sku_data.get('sku_id', 'unknown')}: {e}")
+            # Fallback to existing enhanced calculation
+            return self.calculate_enhanced_transfer_recommendation(sku_data)
+
+    def generate_comprehensive_transfer_reason(self, factors: Dict[str, Any]) -> str:
+        """
+        Generate detailed transfer reason incorporating all enhancement factors
+
+        Args:
+            factors: Dictionary containing all reason factors
+
+        Returns:
+            Comprehensive reason string
+        """
+        try:
+            reason_parts = []
+
+            # Stockout override information
+            kentucky_override = factors.get('stockout_overrides', {}).get('kentucky', {})
+            if kentucky_override.get('is_overridden'):
+                reason_parts.append("🚨 Kentucky marked as out-of-stock (quantity overridden to 0)")
+
+            # Stockout correction information
+            stockout_days = factors.get('stockout_days', 0)
+            if stockout_days > 20:
+                reason_parts.append(f"📊 Severe stockout correction applied ({stockout_days} days out)")
+            elif stockout_days > 10:
+                reason_parts.append(f"📊 Stockout correction applied ({stockout_days} days out)")
+
+            # Pending orders impact
+            pending_orders = factors.get('pending_orders', {})
+            kentucky_pending = pending_orders.get('kentucky_pending', 0)
+            days_until_arrival = pending_orders.get('days_until_arrival')
+
+            if kentucky_pending > 0 and days_until_arrival:
+                if days_until_arrival < 15:
+                    reason_parts.append(f"📦 Pending order ({kentucky_pending} units) arriving in {days_until_arrival} days")
+                elif days_until_arrival < 45:
+                    reason_parts.append(f"📦 Pending order ({kentucky_pending} units) arriving in {days_until_arrival} days")
+
+            # Burnaby retention impact
+            burnaby_retention = factors.get('burnaby_retention', {})
+            retention_reason = burnaby_retention.get('retention_reason', '')
+            if 'Reduced retention' in retention_reason:
+                reason_parts.append("🏭 Burnaby retention reduced due to imminent pending arrival")
+
+            # Growth pattern
+            growth_status = factors.get('growth_status', 'normal')
+            if growth_status == 'viral':
+                reason_parts.append("📈 Viral growth detected - increased priority")
+            elif growth_status == 'declining':
+                reason_parts.append("📉 Declining trend noted")
+
+            # Seasonal information
+            seasonal_info = factors.get('seasonal_info', {})
+            seasonal_pattern = seasonal_info.get('pattern', 'year_round')
+            seasonal_multiplier = seasonal_info.get('multiplier', 1.0)
+
+            if seasonal_pattern != 'year_round' and seasonal_multiplier > 1.1:
+                reason_parts.append(f"🌟 Seasonal peak approaching ({seasonal_pattern} pattern)")
+
+            # Coverage analysis
+            current_coverage = factors.get('current_coverage', 0)
+            target_coverage = factors.get('target_coverage', 6)
+            abc_class = factors.get('abc_class', 'C')
+
+            if factors.get('kentucky_qty', 0) == 0:
+                reason_parts.append("🔴 Currently out of stock")
+            elif current_coverage < 1:
+                reason_parts.append(f"⚠️ Below 1 month coverage (Class {abc_class}: target {target_coverage:.1f} months)")
+            elif current_coverage < target_coverage:
+                reason_parts.append(f"📊 Below target coverage (Class {abc_class}: target {target_coverage:.1f} months)")
+
+            # Combine all reasons
+            if reason_parts:
+                return " | ".join(reason_parts)
+            else:
+                return "📊 Maintain optimal stock level with pending orders consideration"
+
+        except Exception as e:
+            logger.error(f"Failed to generate comprehensive reason: {e}")
+            return "📊 Enhanced transfer calculation with pending orders"
 
     def _calculate_enhanced_priority(self, kentucky_qty: int, enhanced_demand: float,
                                    growth_status: str, seasonal_pattern: str, stockout_days: int) -> str:
