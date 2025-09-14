@@ -1,0 +1,6 @@
+sku_id,quantity,destination,expected_date
+CHG-001,500,kentucky,2025-12-15
+WDG-003,300,burnaby,
+GAD-004,200,kentucky,2025-11-30
+CHG-001,150,burnaby,
+WDG-003,100,kentucky,2025-12-01

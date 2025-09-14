@@ -123,18 +123,93 @@
             opacity: 0.9;
         }
         
+        /* SKU Modal Enhancements */
+        .reason-wrap {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            word-break: break-word;
+            max-width: 200px;
+        }
+
+        .modal-xl .modal-body {
+            padding: 1.5rem;
+        }
+
+        .pending-inventory-section {
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .pending-item {
+            background-color: white;
+            border-radius: 6px;
+            padding: 0.75rem;
+            margin-bottom: 0.5rem;
+            border-left: 4px solid #007bff;
+        }
+
+        .pending-item.estimated {
+            border-left-color: #ffc107;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 300px;
+            margin: 1rem 0;
+            background-color: #ffffff;
+            border-radius: 8px;
+            padding: 1rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .export-buttons {
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid #dee2e6;
+        }
+
+        .basic-info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .info-card {
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            padding: 1rem;
+            border: 1px solid #e9ecef;
+        }
+
+        .info-card h6 {
+            color: #495057;
+            margin-bottom: 0.75rem;
+            font-weight: 600;
+        }
+
         /* Responsive adjustments */
         @media (max-width: 768px) {
             .action-btn-group {
                 justify-content: center;
             }
-            
+
             .table-responsive {
                 font-size: 0.85rem;
             }
-            
+
             .editable-qty {
                 width: 60px;
+            }
+
+            .chart-container {
+                height: 250px;
+            }
+
+            .basic-info-grid {
+                grid-template-columns: 1fr;
             }
         }
     </style>
@@ -324,7 +399,7 @@
 
     <!-- SKU Detail Modal -->
     <div class="modal fade" id="sku-detail-modal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog modal-xl">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">SKU Details</h5>
@@ -350,6 +425,9 @@
     <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
     <script src="https://cdn.datatables.net/buttons/2.4.1/js/dataTables.buttons.min.js"></script>
     <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.bootstrap5.min.js"></script>
+    <!-- Chart.js for sales visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 
     <script>
         // Global variables
@@ -480,9 +558,9 @@
                     </td>
                     <td>${rec.abc_class}${rec.xyz_class}</td>
                     <td>
-                        <span class="text-truncate d-inline-block" style="max-width: 200px;" title="${rec.reason}">
+                        <div class="reason-wrap" title="${rec.reason}">
                             ${rec.reason}
-                        </span>
+                        </div>
                     </td>
                     <td>
                         <button class="btn btn-sm btn-outline-primary" onclick="showSkuDetails('${rec.sku_id}')">
@@ -543,80 +621,509 @@
             }
         }
 
-        // Display SKU details in modal
+        /**
+         * Display enhanced SKU details in modal with comprehensive information
+         *
+         * Features:
+         * - 3-column responsive grid layout
+         * - Pending inventory with days until arrival calculations
+         * - Sales history with total column
+         * - Interactive Chart.js visualization with stockout indicators
+         * - CSV export functionality for individual SKU
+         *
+         * @param {Object} skuData - Complete SKU data from API response
+         * @param {Object} skuData.sku - SKU master data (ID, description, ABC/XYZ codes)
+         * @param {Array<Object>} skuData.sales_history - Monthly sales data for both warehouses
+         * @param {Array<Object>} skuData.pending_inventory - Pending orders with arrival dates
+         */
         function displaySkuDetails(skuData) {
+            // Calculate total sales for each month
+            const salesWithTotals = skuData.sales_history.map(s => ({
+                ...s,
+                total_sales: (s.burnaby_sales || 0) + (s.kentucky_sales || 0)
+            }));
+
+            // Calculate pending inventory arrival days
+            const pendingWithDays = skuData.pending_inventory.map(p => {
+                if (p.expected_arrival) {
+                    const expectedDate = new Date(p.expected_arrival);
+                    const today = new Date();
+                    const diffTime = expectedDate - today;
+                    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                    return { ...p, days_until_arrival: diffDays };
+                }
+                return { ...p, days_until_arrival: null };
+            });
+
             const content = `
-                <div class="row">
-                    <div class="col-md-6">
-                        <h6>Basic Information</h6>
-                        <table class="table table-sm">
-                            <tr><th>SKU ID:</th><td>${skuData.sku.sku_id}</td></tr>
+                <!-- Basic Information Grid -->
+                <div class="basic-info-grid">
+                    <div class="info-card">
+                        <h6><i class="fas fa-info-circle me-2"></i>Basic Information</h6>
+                        <table class="table table-sm mb-0">
+                            <tr><th>SKU ID:</th><td><strong>${skuData.sku.sku_id}</strong></td></tr>
                             <tr><th>Description:</th><td>${skuData.sku.description}</td></tr>
                             <tr><th>Supplier:</th><td>${skuData.sku.supplier || 'N/A'}</td></tr>
-                            <tr><th>ABC/XYZ:</th><td>${skuData.sku.abc_code}${skuData.sku.xyz_code}</td></tr>
+                            <tr><th>ABC/XYZ:</th><td><span class="badge bg-info">${skuData.sku.abc_code}${skuData.sku.xyz_code}</span></td></tr>
                             <tr><th>Transfer Multiple:</th><td>${skuData.sku.transfer_multiple}</td></tr>
                         </table>
                     </div>
-                    <div class="col-md-6">
-                        <h6>Current Inventory</h6>
-                        <table class="table table-sm">
-                            <tr><th>Burnaby:</th><td>${skuData.sku.burnaby_qty || 0}</td></tr>
-                            <tr><th>Kentucky:</th><td>${skuData.sku.kentucky_qty || 0}</td></tr>
+
+                    <div class="info-card">
+                        <h6><i class="fas fa-warehouse me-2"></i>Current Inventory</h6>
+                        <table class="table table-sm mb-0">
+                            <tr><th>Burnaby:</th><td><strong>${skuData.sku.burnaby_qty || 0}</strong> units</td></tr>
+                            <tr><th>Kentucky:</th><td><strong>${skuData.sku.kentucky_qty || 0}</strong> units</td></tr>
                             <tr><th>Last Updated:</th><td>${skuData.sku.last_updated || 'N/A'}</td></tr>
                         </table>
                     </div>
-                </div>
-                
-                <h6 class="mt-3">Sales History</h6>
-                <div class="table-responsive">
-                    <table class="table table-sm">
-                        <thead>
-                            <tr>
-                                <th>Month</th>
-                                <th>CA Sales</th>
-                                <th>US Sales</th>
-                                <th>Stockout Days</th>
-                                <th>Corrected Demand</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${skuData.sales_history.map(s => `
-                                <tr>
-                                    <td>${s.year_month}</td>
-                                    <td>${s.burnaby_sales}</td>
-                                    <td>${s.kentucky_sales}</td>
-                                    <td>${s.kentucky_stockout_days}</td>
-                                    <td>${s.corrected_demand_kentucky || 'N/A'}</td>
-                                </tr>
+
+                    ${pendingWithDays.length > 0 ? `
+                    <div class="info-card">
+                        <h6><i class="fas fa-truck me-2"></i>Pending Inventory</h6>
+                        <div class="pending-inventory-section">
+                            ${pendingWithDays.map(p => `
+                                <div class="pending-item ${p.is_estimated ? 'estimated' : ''}">
+                                    <div class="row align-items-center">
+                                        <div class="col-6">
+                                            <strong>${p.quantity}</strong> units → ${p.destination}
+                                        </div>
+                                        <div class="col-6 text-end">
+                                            ${p.days_until_arrival !== null ?
+                                                `<span class="badge ${p.days_until_arrival <= 7 ? 'bg-success' : p.days_until_arrival <= 30 ? 'bg-warning' : 'bg-secondary'}">
+                                                    ${p.days_until_arrival > 0 ? p.days_until_arrival + ' days' : 'Overdue'}
+                                                </span>` :
+                                                '<span class="badge bg-secondary">TBD</span>'
+                                            }
+                                        </div>
+                                    </div>
+                                    <small class="text-muted">
+                                        Expected: ${p.expected_arrival || 'Estimated'}
+                                        ${p.is_estimated ? '(estimated)' : '(confirmed)'}
+                                    </small>
+                                </div>
                             `).join('')}
-                        </tbody>
-                    </table>
-                </div>
-                
-                ${skuData.pending_inventory.length > 0 ? `
-                    <h6 class="mt-3">Pending Inventory</h6>
-                    <div class="table-responsive">
-                        <table class="table table-sm">
-                            <thead>
-                                <tr><th>Quantity</th><th>Destination</th><th>Order Date</th><th>Expected</th><th>Status</th></tr>
-                            </thead>
-                            <tbody>
-                                ${skuData.pending_inventory.map(p => `
-                                    <tr>
-                                        <td>${p.quantity}</td>
-                                        <td>${p.destination}</td>
-                                        <td>${p.order_date}</td>
-                                        <td>${p.expected_arrival}</td>
-                                        <td>${p.status}</td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
+                        </div>
                     </div>
-                ` : ''}
+                    ` : ''}
+                </div>
+
+                <!-- Sales History with Chart -->
+                <div class="row">
+                    <div class="col-md-8">
+                        <h6 class="mt-3"><i class="fas fa-chart-line me-2"></i>Sales Trend Analysis</h6>
+                        <div class="chart-container">
+                            <canvas id="sales-chart"></canvas>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <h6 class="mt-3"><i class="fas fa-table me-2"></i>Sales Summary</h6>
+                        <div class="table-responsive" style="max-height: 350px; overflow-y: auto;">
+                            <table class="table table-sm">
+                                <thead class="table-light sticky-top">
+                                    <tr>
+                                        <th>Month</th>
+                                        <th>CA</th>
+                                        <th>US</th>
+                                        <th>Total</th>
+                                        <th>SO</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${salesWithTotals.map(s => `
+                                        <tr ${s.kentucky_stockout_days > 0 ? 'class="table-warning"' : ''}>
+                                            <td><small>${s.year_month}</small></td>
+                                            <td>${s.burnaby_sales}</td>
+                                            <td>${s.kentucky_sales}</td>
+                                            <td><strong>${s.total_sales}</strong></td>
+                                            <td>${s.kentucky_stockout_days > 0 ? '<span class="badge bg-warning">' + s.kentucky_stockout_days + '</span>' : '-'}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Export Buttons -->
+                <div class="export-buttons">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6><i class="fas fa-download me-2"></i>Export Options</h6>
+                            <div class="btn-group" role="group">
+                                <button type="button" class="btn btn-outline-primary btn-sm" onclick="exportSkuSalesHistory('${skuData.sku.sku_id}')">
+                                    <i class="fas fa-file-csv me-1"></i>Export This SKU
+                                </button>
+                                <button type="button" class="btn btn-outline-success btn-sm" onclick="showExportAllModal()">
+                                    <i class="fas fa-file-excel me-1"></i>Export All SKUs
+                                </button>
+                            </div>
+                        </div>
+                        <div class="col-md-6 text-end">
+                            <small class="text-muted">
+                                <i class="fas fa-info-circle me-1"></i>
+                                Export includes sales history, stockout data, and corrected demand calculations
+                            </small>
+                        </div>
+                    </div>
+                </div>
             `;
-            
+
             document.getElementById('sku-detail-content').innerHTML = content;
+
+            // Render the sales chart after DOM is updated
+            setTimeout(() => renderSalesChart(salesWithTotals, skuData.sku.sku_id), 100);
+        }
+
+        /**
+         * Render interactive sales trend chart with stockout indicators
+         *
+         * Features:
+         * - Multi-line chart showing Kentucky, Canada, and total sales
+         * - Chronological ordering (oldest to newest, left to right)
+         * - Stockout period highlighting with red background
+         * - Tooltip with stockout day information
+         * - Responsive design with proper axis labels
+         *
+         * @param {Array<Object>} salesData - Monthly sales data with totals
+         * @param {string} salesData[].year_month - Month in YYYY-MM format
+         * @param {number} salesData[].kentucky_sales - Kentucky warehouse sales
+         * @param {number} salesData[].burnaby_sales - Burnaby warehouse sales
+         * @param {number} salesData[].total_sales - Combined sales total
+         * @param {number} salesData[].kentucky_stockout_days - Days out of stock
+         * @param {string} skuId - SKU identifier for chart title
+         */
+        function renderSalesChart(salesData, skuId) {
+            const canvas = document.getElementById('sales-chart');
+            if (!canvas) return;
+
+            // Destroy existing chart if it exists
+            if (window.salesChart) {
+                window.salesChart.destroy();
+            }
+
+            const ctx = canvas.getContext('2d');
+
+            // Prepare chart data - reverse arrays so newest month appears on the right
+            const labels = salesData.map(s => s.year_month).reverse();
+            const kentuckySales = salesData.map(s => s.kentucky_sales || 0).reverse();
+            const burnabySales = salesData.map(s => s.burnaby_sales || 0).reverse();
+            const totalSales = salesData.map(s => s.total_sales || 0).reverse();
+            const stockoutDays = salesData.map(s => s.kentucky_stockout_days || 0).reverse();
+
+            // Create stockout background annotations - adjust for reversed data
+            const stockoutAnnotations = {};
+            salesData.forEach((s, originalIndex) => {
+                if (s.kentucky_stockout_days > 0) {
+                    // Calculate reversed index position
+                    const reversedIndex = salesData.length - 1 - originalIndex;
+                    stockoutAnnotations[`stockout-${reversedIndex}`] = {
+                        type: 'box',
+                        xMin: reversedIndex - 0.4,
+                        xMax: reversedIndex + 0.4,
+                        yMin: 0,
+                        yMax: Math.max(...totalSales) * 1.1,
+                        backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                        borderColor: 'rgba(220, 53, 69, 0.3)',
+                        borderWidth: 1
+                    };
+                }
+            });
+
+            // Chart configuration
+            const config = {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Kentucky Sales',
+                            data: kentuckySales,
+                            borderColor: '#007bff',
+                            backgroundColor: 'rgba(0, 123, 255, 0.1)',
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0.2
+                        },
+                        {
+                            label: 'Canada Sales',
+                            data: burnabySales,
+                            borderColor: '#28a745',
+                            backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0.2
+                        },
+                        {
+                            label: 'Total Sales',
+                            data: totalSales,
+                            borderColor: '#6f42c1',
+                            backgroundColor: 'rgba(111, 66, 193, 0.1)',
+                            borderWidth: 3,
+                            fill: false,
+                            tension: 0.2
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: `Sales Trend - ${skuId}`,
+                            font: { size: 14, weight: 'bold' }
+                        },
+                        legend: {
+                            position: 'top',
+                            labels: { usePointStyle: true }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                afterBody: function(tooltipItems) {
+                                    const index = tooltipItems[0].dataIndex;
+                                    const stockouts = stockoutDays[index];
+                                    return stockouts > 0 ? [`⚠️ Stockout: ${stockouts} days`] : [];
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Month' },
+                            grid: { display: true, color: 'rgba(0,0,0,0.1)' }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            title: { display: true, text: 'Units Sold' },
+                            grid: { display: true, color: 'rgba(0,0,0,0.1)' }
+                        }
+                    },
+                    interaction: {
+                        mode: 'nearest',
+                        axis: 'x',
+                        intersect: false
+                    }
+                }
+            };
+
+            // Create the chart
+            window.salesChart = new Chart(ctx, config);
+
+            // Add stockout markers as points - adjust for reversed data
+            salesData.forEach((s, originalIndex) => {
+                if (s.kentucky_stockout_days > 0) {
+                    const reversedIndex = salesData.length - 1 - originalIndex;
+                    const annotation = document.createElement('div');
+                    annotation.style.position = 'absolute';
+                    annotation.style.color = '#dc3545';
+                    annotation.style.fontSize = '12px';
+                    annotation.style.fontWeight = 'bold';
+                    annotation.innerHTML = '⚠️';
+                    annotation.title = `Stockout: ${s.kentucky_stockout_days} days`;
+                }
+            });
+        }
+
+        /**
+         * Export individual SKU sales history to CSV file
+         *
+         * Downloads a comprehensive CSV report containing:
+         * - Monthly sales data for both warehouses
+         * - Total sales calculations
+         * - Stockout days tracking
+         * - Corrected demand calculations
+         *
+         * @param {string} skuId - SKU identifier to export
+         * @throws {Error} Shows alert dialog if export fails
+         * @example
+         * exportSkuSalesHistory('WDG-003'); // Downloads: sales-history-WDG-003-20250914.csv
+         */
+        async function exportSkuSalesHistory(skuId) {
+            try {
+                showLoading(true, 'Exporting SKU Sales History', 'Generating CSV file for ' + skuId);
+
+                const response = await fetch(`/api/export/sales-history/${skuId}`);
+                if (!response.ok) {
+                    throw new Error(`Export failed: ${response.statusText}`);
+                }
+
+                // Get filename from response headers or create default
+                const contentDisposition = response.headers.get('content-disposition');
+                const filename = contentDisposition
+                    ? contentDisposition.split('filename=')[1].replace(/"/g, '')
+                    : `sales-history-${skuId}-${new Date().toISOString().split('T')[0]}.csv`;
+
+                // Download the file
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+
+                showLoading(false);
+                alert(`Sales history exported successfully: ${filename}`);
+
+            } catch (error) {
+                console.error('SKU export error:', error);
+                showLoading(false);
+                alert(`Export failed: ${error.message}`);
+            }
+        }
+
+        /**
+         * Display modal for configurable bulk export of all SKUs
+         *
+         * Features:
+         * - Column selection checkboxes (Total, Kentucky, Canada, Stockout data)
+         * - Dynamic modal creation with Bootstrap 5 styling
+         * - Form validation for minimum column selection
+         *
+         * @example
+         * showExportAllModal(); // Opens bulk export configuration modal
+         */
+        function showExportAllModal() {
+            const modalHTML = `
+                <div class="modal fade" id="export-all-modal" tabindex="-1">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title"><i class="fas fa-download me-2"></i>Export All SKUs Sales History</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <p>Select which columns to include in the export:</p>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="export-total" checked>
+                                    <label class="form-check-label" for="export-total">
+                                        <strong>Total Sales</strong> (CA + US combined)
+                                    </label>
+                                </div>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="export-kentucky" checked>
+                                    <label class="form-check-label" for="export-kentucky">
+                                        <strong>Kentucky Sales</strong> (US warehouse)
+                                    </label>
+                                </div>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="export-canada" checked>
+                                    <label class="form-check-label" for="export-canada">
+                                        <strong>Canada Sales</strong> (Burnaby warehouse)
+                                    </label>
+                                </div>
+                                <div class="form-check mb-3">
+                                    <input class="form-check-input" type="checkbox" id="export-stockout" checked>
+                                    <label class="form-check-label" for="export-stockout">
+                                        <strong>Stockout Days</strong> and corrected demand
+                                    </label>
+                                </div>
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle me-2"></i>
+                                    <strong>Note:</strong> Export will include all SKUs in the system with their complete sales history.
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                                <button type="button" class="btn btn-primary" onclick="exportAllSalesHistory()">
+                                    <i class="fas fa-download me-1"></i>Export CSV
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Remove existing modal if present
+            const existingModal = document.getElementById('export-all-modal');
+            if (existingModal) {
+                existingModal.remove();
+            }
+
+            // Add modal to DOM and show it
+            document.body.insertAdjacentHTML('beforeend', modalHTML);
+            const modal = new bootstrap.Modal(document.getElementById('export-all-modal'));
+            modal.show();
+
+            // Clean up modal after hiding
+            document.getElementById('export-all-modal').addEventListener('hidden.bs.modal', function() {
+                this.remove();
+            });
+        }
+
+        /**
+         * Export comprehensive sales history for all SKUs with configurable columns
+         *
+         * Process:
+         * 1. Reads selected column preferences from modal checkboxes
+         * 2. Validates at least one column is selected
+         * 3. Calls backend API with column parameters
+         * 4. Downloads generated CSV file
+         * 5. Closes the export configuration modal
+         *
+         * @async
+         * @throws {Error} Shows alert dialog if no columns selected or export fails
+         * @example
+         * exportAllSalesHistory(); // Exports based on selected checkboxes
+         */
+        async function exportAllSalesHistory() {
+            try {
+                // Get selected columns
+                const columns = [];
+                if (document.getElementById('export-total').checked) columns.push('total');
+                if (document.getElementById('export-kentucky').checked) columns.push('kentucky');
+                if (document.getElementById('export-canada').checked) columns.push('canada');
+                if (document.getElementById('export-stockout').checked) columns.push('stockout');
+
+                if (columns.length === 0) {
+                    alert('Please select at least one column to export.');
+                    return;
+                }
+
+                // Hide the export modal
+                const modal = bootstrap.Modal.getInstance(document.getElementById('export-all-modal'));
+                modal.hide();
+
+                showLoading(true, 'Exporting All SKUs Sales History', 'Generating comprehensive CSV file...');
+
+                // Build query parameters
+                const params = new URLSearchParams({ columns: columns.join(',') });
+                const response = await fetch(`/api/export/all-sales-history?${params}`);
+
+                if (!response.ok) {
+                    throw new Error(`Export failed: ${response.statusText}`);
+                }
+
+                // Get filename from response headers
+                const contentDisposition = response.headers.get('content-disposition');
+                const filename = contentDisposition
+                    ? contentDisposition.split('filename=')[1].replace(/"/g, '')
+                    : `all-sales-history-${new Date().toISOString().split('T')[0]}.csv`;
+
+                // Download the file
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+
+                showLoading(false);
+                alert(`All SKUs sales history exported successfully: ${filename}\n\nColumns included: ${columns.join(', ')}`);
+
+            } catch (error) {
+                console.error('Bulk export error:', error);
+                showLoading(false);
+                alert(`Export failed: ${error.message}`);
+            }
         }
 
         // Filter and action functions

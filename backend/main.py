@@ -572,19 +572,231 @@ async def get_sku_details(sku_id: str):
         """, (sku_id,))
         
         pending = cursor.fetchall()
-        
+
         db.close()
-        
+
         return {
             "sku": sku,
             "sales_history": sales_history,
             "pending_inventory": pending
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
+
+@app.get("/api/export/sales-history/{sku_id}",
+         summary="Export Individual SKU Sales History",
+         description="Export comprehensive sales history for a specific SKU as CSV",
+         tags=["Import/Export"],
+         responses={
+             200: {
+                 "description": "CSV file with sales history data",
+                 "content": {"text/csv": {"example": "Month,Kentucky Sales,Canada Sales,Total Sales,Stockout Days,Corrected Demand\\n2024-01,150,200,350,0,350"}}
+             },
+             404: {"description": "SKU not found"}
+         })
+async def export_sku_sales_history(sku_id: str):
+    """
+    Export detailed sales history for a specific SKU including:
+    - Monthly sales data for both warehouses
+    - Total sales calculation
+    - Stockout days information
+    - Corrected demand calculations
+
+    Args:
+        sku_id: The SKU identifier to export
+
+    Returns:
+        CSV file with comprehensive sales history
+
+    Raises:
+        HTTPException: 404 if SKU not found, 500 for processing errors
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+
+        # Verify SKU exists
+        cursor.execute("SELECT sku_id, description FROM skus WHERE sku_id = %s", (sku_id,))
+        sku_info = cursor.fetchone()
+        if not sku_info:
+            db.close()
+            raise HTTPException(status_code=404, detail=f"SKU '{sku_id}' not found")
+
+        # Get sales history with all data
+        cursor.execute("""
+            SELECT
+                `year_month`,
+                burnaby_sales,
+                kentucky_sales,
+                (burnaby_sales + kentucky_sales) as total_sales,
+                burnaby_stockout_days,
+                kentucky_stockout_days,
+                corrected_demand_kentucky
+            FROM monthly_sales
+            WHERE sku_id = %s
+            ORDER BY `year_month` DESC
+        """, (sku_id,))
+
+        sales_data = cursor.fetchall()
+        db.close()
+
+        # Generate CSV content
+        csv_lines = [
+            'Month,Kentucky Sales,Canada Sales,Total Sales,Kentucky Stockout Days,Canada Stockout Days,Corrected Demand'
+        ]
+
+        for row in sales_data:
+            csv_lines.append(
+                f"{row['year_month']},"
+                f"{row['kentucky_sales'] or 0},"
+                f"{row['burnaby_sales'] or 0},"
+                f"{row['total_sales'] or 0},"
+                f"{row['kentucky_stockout_days'] or 0},"
+                f"{row['burnaby_stockout_days'] or 0},"
+                f"{row['corrected_demand_kentucky'] or ''}"
+            )
+
+        csv_content = '\\n'.join(csv_lines)
+
+        # Create response with proper headers
+        from fastapi.responses import Response
+        filename = f"sales-history-{sku_id}-{datetime.now().strftime('%Y%m%d')}.csv"
+
+        return Response(
+            content=csv_content,
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"SKU export error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to export SKU sales history: {str(e)}")
+
+@app.get("/api/export/all-sales-history",
+         summary="Export All SKUs Sales History",
+         description="Export sales history for all SKUs with configurable column selection",
+         tags=["Import/Export"],
+         responses={
+             200: {
+                 "description": "CSV file with all SKUs sales history",
+                 "content": {"text/csv": {"example": "SKU,Description,Month,Total Sales,Kentucky Sales,Canada Sales,Stockout Days"}}
+             }
+         })
+async def export_all_sales_history(columns: str = "total,kentucky,canada,stockout"):
+    """
+    Export comprehensive sales history for all SKUs with flexible column selection.
+
+    Args:
+        columns: Comma-separated list of column types to include:
+                - total: Total sales (CA + US combined)
+                - kentucky: Kentucky/US sales only
+                - canada: Canada/Burnaby sales only
+                - stockout: Stockout days and corrected demand
+
+    Returns:
+        CSV file with selected columns for all SKUs
+
+    Raises:
+        HTTPException: 400 for invalid parameters, 500 for processing errors
+    """
+    try:
+        # Parse and validate column selection
+        selected_columns = [col.strip().lower() for col in columns.split(',')]
+        valid_columns = {'total', 'kentucky', 'canada', 'stockout'}
+
+        if not selected_columns or not all(col in valid_columns for col in selected_columns):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid columns. Must be comma-separated list from: {', '.join(valid_columns)}"
+            )
+
+        db = database.get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+
+        # Get all SKUs with sales data
+        cursor.execute("""
+            SELECT DISTINCT
+                s.sku_id,
+                s.description,
+                ms.`year_month`,
+                ms.burnaby_sales,
+                ms.kentucky_sales,
+                (ms.burnaby_sales + ms.kentucky_sales) as total_sales,
+                ms.burnaby_stockout_days,
+                ms.kentucky_stockout_days,
+                ms.corrected_demand_kentucky
+            FROM skus s
+            INNER JOIN monthly_sales ms ON s.sku_id = ms.sku_id
+            WHERE s.status = 'Active'
+            ORDER BY s.sku_id, ms.`year_month` DESC
+        """)
+
+        all_sales_data = cursor.fetchall()
+        db.close()
+
+        if not all_sales_data:
+            raise HTTPException(status_code=404, detail="No sales data found")
+
+        # Build CSV headers based on selected columns
+        headers = ['SKU', 'Description', 'Month']
+
+        if 'total' in selected_columns:
+            headers.append('Total Sales')
+        if 'kentucky' in selected_columns:
+            headers.append('Kentucky Sales')
+        if 'canada' in selected_columns:
+            headers.append('Canada Sales')
+        if 'stockout' in selected_columns:
+            headers.extend(['Kentucky Stockout Days', 'Canada Stockout Days', 'Corrected Demand'])
+
+        # Generate CSV content
+        csv_lines = [','.join(headers)]
+
+        for row in all_sales_data:
+            line_data = [
+                f'"{row["sku_id"]}"',
+                f'"{row["description"]}"',
+                row['year_month']
+            ]
+
+            if 'total' in selected_columns:
+                line_data.append(str(row['total_sales'] or 0))
+            if 'kentucky' in selected_columns:
+                line_data.append(str(row['kentucky_sales'] or 0))
+            if 'canada' in selected_columns:
+                line_data.append(str(row['burnaby_sales'] or 0))
+            if 'stockout' in selected_columns:
+                line_data.extend([
+                    str(row['kentucky_stockout_days'] or 0),
+                    str(row['burnaby_stockout_days'] or 0),
+                    str(row['corrected_demand_kentucky'] or '')
+                ])
+
+            csv_lines.append(','.join(line_data))
+
+        csv_content = '\\n'.join(csv_lines)
+
+        # Create response with proper headers
+        from fastapi.responses import Response
+        column_suffix = '-'.join(selected_columns)
+        filename = f"all-sales-history-{column_suffix}-{datetime.now().strftime('%Y%m%d')}.csv"
+
+        return Response(
+            content=csv_content,
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Bulk export error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to export all sales history: {str(e)}")
 
 @app.put("/api/skus/{sku_id}",
          summary="Update SKU Master Data",
