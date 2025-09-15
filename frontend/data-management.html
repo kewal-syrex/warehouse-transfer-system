@@ -381,6 +381,18 @@
                                 </div>
                                 <input type="file" id="pending-file-input" accept=".xlsx,.xls,.csv" style="display: none;">
 
+                                <!-- Replace Mode Checkbox -->
+                                <div class="form-check mt-3">
+                                    <input class="form-check-input" type="checkbox" id="replace-existing-orders">
+                                    <label class="form-check-label" for="replace-existing-orders">
+                                        <strong>Replace existing pending orders</strong>
+                                        <div class="form-text">
+                                            <i class="fas fa-exclamation-triangle text-warning me-1"></i>
+                                            <small>If checked, this will delete all existing pending orders before importing new ones</small>
+                                        </div>
+                                    </label>
+                                </div>
+
                                 <!-- Import Progress -->
                                 <div id="pending-upload-progress" class="upload-progress">
                                     <div class="progress">
@@ -445,9 +457,14 @@
                             <div class="col-12">
                                 <div class="d-flex justify-content-between align-items-center mb-3">
                                     <h6><i class="fas fa-list me-2"></i>Recent Pending Orders</h6>
-                                    <button class="btn btn-outline-secondary btn-sm" onclick="showAllPendingOrders()">
-                                        <i class="fas fa-external-link-alt me-1"></i>View All
-                                    </button>
+                                    <div class="btn-group">
+                                        <button class="btn btn-outline-secondary btn-sm" onclick="showAllPendingOrders()">
+                                            <i class="fas fa-external-link-alt me-1"></i>View All
+                                        </button>
+                                        <button class="btn btn-outline-danger btn-sm" onclick="clearAllPendingOrders()" title="Clear all pending orders">
+                                            <i class="fas fa-trash me-1"></i>Clear All
+                                        </button>
+                                    </div>
                                 </div>
                                 <div class="table-responsive">
                                     <table class="table table-sm" id="pending-orders-preview">
@@ -1117,14 +1134,20 @@
             progressBar.style.width = '10%';
 
             try {
+                // Check if replace mode is enabled
+                const replaceMode = document.getElementById('replace-existing-orders').checked;
+
                 // Create FormData for file upload
                 const formData = new FormData();
                 formData.append('file', file);
 
                 progressBar.style.width = '30%';
 
+                // Build URL with replace parameter
+                const url = `/api/pending-orders/import-csv?replace_existing=${replaceMode}`;
+
                 // Upload to pending orders import endpoint
-                const response = await fetch('/api/pending-orders/import-csv', {
+                const response = await fetch(url, {
                     method: 'POST',
                     body: formData
                 });
@@ -1271,9 +1294,16 @@
                                 <td>${statusBadge}</td>
                                 <td class="${daysUntil < 0 ? 'text-danger' : daysUntil <= 30 ? 'text-warning' : 'text-muted'}">${daysUntil} days</td>
                                 <td>
-                                    <button class="btn btn-outline-primary btn-sm" onclick="editPendingOrder(${order.id})">
-                                        <i class="fas fa-edit"></i>
-                                    </button>
+                                    <div class="btn-group" role="group">
+                                        <button class="btn btn-outline-primary btn-sm" onclick="editPendingOrder(${order.id})"
+                                                title="Edit pending order">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <button class="btn btn-outline-danger btn-sm" onclick="deletePendingOrder(${order.id})"
+                                                title="Delete pending order">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
                                 </td>
                             </tr>
                         `;
@@ -1298,9 +1328,328 @@
             alert('Full pending orders management interface coming soon!');
         }
 
-        function editPendingOrder(orderId) {
-            // This would open an edit modal for the specific pending order
-            alert(`Edit pending order ${orderId} - feature coming soon!`);
+        async function editPendingOrder(orderId) {
+            /**
+             * Open edit modal for a specific pending order
+             *
+             * @param {number} orderId - ID of the pending order to edit
+             */
+            try {
+                // Fetch current order details
+                const response = await fetch(`/api/pending-orders/${orderId}`);
+
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch order details: ${response.statusText}`);
+                }
+
+                const result = await response.json();
+                const order = result.data;
+
+                // Show edit modal with current values
+                showEditPendingOrderModal(order);
+
+            } catch (error) {
+                console.error('Error fetching pending order:', error);
+                alert(`Failed to load order details: ${error.message}`);
+            }
+        }
+
+        function showEditPendingOrderModal(order) {
+            /**
+             * Display the edit modal with current order data pre-filled
+             *
+             * @param {Object} order - The pending order data to edit
+             */
+            const modalHtml = `
+                <div class="modal fade" id="editPendingOrderModal" tabindex="-1">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">Edit Pending Order</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <form id="editPendingOrderForm">
+                                    <input type="hidden" id="edit-order-id" value="${order.id}">
+
+                                    <div class="mb-3">
+                                        <label for="edit-sku-id" class="form-label">SKU ID</label>
+                                        <input type="text" class="form-control" id="edit-sku-id" value="${order.sku_id}" readonly>
+                                        <div class="form-text">SKU cannot be changed after creation</div>
+                                    </div>
+
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="edit-quantity" class="form-label">Quantity *</label>
+                                                <input type="number" class="form-control" id="edit-quantity"
+                                                       value="${order.quantity}" min="1" required>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="edit-destination" class="form-label">Destination *</label>
+                                                <select class="form-select" id="edit-destination" required>
+                                                    <option value="burnaby" ${order.destination === 'burnaby' ? 'selected' : ''}>Burnaby (CA)</option>
+                                                    <option value="kentucky" ${order.destination === 'kentucky' ? 'selected' : ''}>Kentucky (US)</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="edit-expected-date" class="form-label">Expected Arrival</label>
+                                                <input type="date" class="form-control" id="edit-expected-date"
+                                                       value="${order.expected_arrival}">
+                                                <div class="form-text">Leave blank for estimated date (Today + 120 days)</div>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="edit-status" class="form-label">Status</label>
+                                                <select class="form-select" id="edit-status">
+                                                    <option value="ordered" ${order.status === 'ordered' ? 'selected' : ''}>Ordered</option>
+                                                    <option value="shipped" ${order.status === 'shipped' ? 'selected' : ''}>Shipped</option>
+                                                    <option value="pending" ${order.status === 'pending' ? 'selected' : ''}>Pending</option>
+                                                    <option value="received" ${order.status === 'received' ? 'selected' : ''}>Received</option>
+                                                    <option value="cancelled" ${order.status === 'cancelled' ? 'selected' : ''}>Cancelled</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="form-check mb-3">
+                                        <input class="form-check-input" type="checkbox" id="edit-is-estimated"
+                                               ${order.is_estimated ? 'checked' : ''}>
+                                        <label class="form-check-label" for="edit-is-estimated">
+                                            Date is estimated (affects confidence weighting)
+                                        </label>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label for="edit-notes" class="form-label">Notes</label>
+                                        <textarea class="form-control" id="edit-notes" rows="2">${order.notes || ''}</textarea>
+                                    </div>
+                                </form>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                                <button type="button" class="btn btn-primary" onclick="savePendingOrderChanges()">
+                                    <i class="fas fa-save me-1"></i>Save Changes
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Remove any existing modal
+            const existingModal = document.getElementById('editPendingOrderModal');
+            if (existingModal) {
+                existingModal.remove();
+            }
+
+            // Add modal to page
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+            // Show modal
+            const modal = new bootstrap.Modal(document.getElementById('editPendingOrderModal'));
+            modal.show();
+
+            // Clean up after modal is hidden
+            document.getElementById('editPendingOrderModal').addEventListener('hidden.bs.modal', function() {
+                this.remove();
+            });
+        }
+
+        async function savePendingOrderChanges() {
+            /**
+             * Save changes to the pending order via API
+             */
+            try {
+                const orderId = document.getElementById('edit-order-id').value;
+                const quantity = parseInt(document.getElementById('edit-quantity').value);
+                const destination = document.getElementById('edit-destination').value;
+                const expectedDate = document.getElementById('edit-expected-date').value;
+                const status = document.getElementById('edit-status').value;
+                const isEstimated = document.getElementById('edit-is-estimated').checked;
+                const notes = document.getElementById('edit-notes').value;
+
+                // Validate required fields
+                if (!quantity || quantity < 1) {
+                    alert('Please enter a valid quantity (minimum 1)');
+                    return;
+                }
+
+                if (!destination) {
+                    alert('Please select a destination');
+                    return;
+                }
+
+                // Prepare update data
+                const updateData = {
+                    quantity: quantity,
+                    destination: destination,
+                    expected_arrival: expectedDate || null,
+                    status: status,
+                    is_estimated: isEstimated,
+                    notes: notes || null
+                };
+
+                // Show loading state
+                const saveBtn = document.querySelector('#editPendingOrderModal .btn-primary');
+                const originalText = saveBtn.innerHTML;
+                saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Saving...';
+                saveBtn.disabled = true;
+
+                // Send update request
+                const response = await fetch(`/api/pending-orders/${orderId}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(updateData)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Update failed: ${response.statusText}`);
+                }
+
+                const result = await response.json();
+
+                // Hide modal
+                const modal = bootstrap.Modal.getInstance(document.getElementById('editPendingOrderModal'));
+                modal.hide();
+
+                // Refresh the pending orders table
+                await refreshPendingOrdersPreview();
+
+                // Show success message
+                showSuccess(`Successfully updated pending order for ${result.data.sku_id}`);
+
+            } catch (error) {
+                console.error('Error saving pending order changes:', error);
+                alert(`Failed to save changes: ${error.message}`);
+            } finally {
+                // Restore button state
+                const saveBtn = document.querySelector('#editPendingOrderModal .btn-primary');
+                if (saveBtn) {
+                    saveBtn.innerHTML = '<i class="fas fa-save me-1"></i>Save Changes';
+                    saveBtn.disabled = false;
+                }
+            }
+        }
+
+        async function deletePendingOrder(orderId) {
+            /**
+             * Delete a pending order with confirmation
+             *
+             * @param {number} orderId - ID of the pending order to delete
+             */
+            try {
+                // First fetch order details for confirmation
+                const response = await fetch(`/api/pending-orders/${orderId}`);
+
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch order details: ${response.statusText}`);
+                }
+
+                const result = await response.json();
+                const order = result.data;
+
+                // Show confirmation dialog
+                const confirmed = confirm(
+                    `Are you sure you want to delete this pending order?\n\n` +
+                    `SKU: ${order.sku_id}\n` +
+                    `Quantity: ${order.quantity}\n` +
+                    `Destination: ${order.destination}\n` +
+                    `Expected: ${order.expected_arrival || 'Estimated'}\n\n` +
+                    `This action cannot be undone.`
+                );
+
+                if (!confirmed) {
+                    return;
+                }
+
+                // Delete the order
+                const deleteResponse = await fetch(`/api/pending-orders/${orderId}`, {
+                    method: 'DELETE'
+                });
+
+                if (!deleteResponse.ok) {
+                    throw new Error(`Delete failed: ${deleteResponse.statusText}`);
+                }
+
+                const deleteResult = await deleteResponse.json();
+
+                // Refresh the pending orders table and summary
+                await refreshPendingOrdersPreview();
+                await refreshPendingOrdersSummary();
+
+                // Show success message
+                showSuccess(`Successfully deleted pending order for ${order.sku_id}`);
+
+            } catch (error) {
+                console.error('Error deleting pending order:', error);
+                alert(`Failed to delete pending order: ${error.message}`);
+            }
+        }
+
+        async function clearAllPendingOrders() {
+            /**
+             * Clear all pending orders with confirmation
+             */
+            try {
+                // Get current count for confirmation
+                const summaryResponse = await fetch('/api/pending-orders/summary');
+                const summaryData = await summaryResponse.json();
+                const totalOrders = summaryData.total_orders || 0;
+
+                if (totalOrders === 0) {
+                    alert('No pending orders to delete.');
+                    return;
+                }
+
+                // Show confirmation dialog
+                const confirmed = confirm(
+                    `Are you sure you want to delete ALL pending orders?\n\n` +
+                    `This will permanently delete ${totalOrders} pending orders.\n\n` +
+                    `This action cannot be undone.`
+                );
+
+                if (!confirmed) {
+                    return;
+                }
+
+                // Show loading state
+                showLoading(true, 'Clearing Orders', 'Deleting all pending orders...');
+
+                // Delete all pending orders
+                const deleteResponse = await fetch('/api/pending-orders/clear-all', {
+                    method: 'DELETE'
+                });
+
+                if (!deleteResponse.ok) {
+                    throw new Error(`Clear operation failed: ${deleteResponse.statusText}`);
+                }
+
+                const result = await deleteResponse.json();
+
+                // Refresh the pending orders table and summary
+                await refreshPendingOrdersPreview();
+                await refreshPendingOrdersSummary();
+
+                // Show success message
+                showSuccess(`Successfully deleted ${result.deleted_count} pending orders`);
+
+            } catch (error) {
+                console.error('Error clearing all pending orders:', error);
+                alert(`Failed to clear pending orders: ${error.message}`);
+            } finally {
+                showLoading(false);
+            }
         }
 
         // Initialize pending orders functionality when page loads

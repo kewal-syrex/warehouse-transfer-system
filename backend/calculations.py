@@ -16,6 +16,186 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+def get_pending_quantities(sku_id: str, destination: str) -> dict:
+    """
+    Get time-weighted pending quantities for transfer calculations
+
+    This function implements time-weighted pending quantity logic where:
+    - Immediate arrivals (0-30 days) count 100% toward current position
+    - Near-term arrivals (31-60 days) count 80%
+    - Medium-term arrivals (61-90 days) count 60%
+    - Long-term arrivals (>90 days) count 40%
+
+    Args:
+        sku_id: SKU identifier
+        destination: 'burnaby' or 'kentucky'
+
+    Returns:
+        dict: {
+            'immediate': qty (0-30 days, weight=1.0),
+            'near_term': qty (31-60 days, weight=0.8),
+            'medium_term': qty (61-90 days, weight=0.6),
+            'long_term': qty (>90 days, weight=0.4),
+            'total_weighted': float,
+            'earliest_arrival': date,
+            'latest_arrival': date,
+            'shipment_count': int
+        }
+
+    Example:
+        >>> get_pending_quantities('SKU1', 'kentucky')
+        {
+            'immediate': 50,    # 30 days
+            'near_term': 150,   # 60 days
+            'long_term': 200,   # 120 days
+            'total_weighted': 250.0,  # 50*1.0 + 150*0.8 + 200*0.4
+            'earliest_arrival': datetime.date(2025, 10, 14),
+            'latest_arrival': datetime.date(2026, 1, 12),
+            'shipment_count': 3
+        }
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor(database.pymysql.cursors.DictCursor)
+
+        # Query to get pending orders with days until arrival
+        query = """
+        SELECT
+            quantity,
+            expected_arrival,
+            is_estimated,
+            DATEDIFF(expected_arrival, CURDATE()) as days_until_arrival
+        FROM pending_inventory
+        WHERE sku_id = %s
+            AND destination = %s
+            AND status IN ('ordered', 'shipped', 'pending')
+            AND expected_arrival >= CURDATE()
+        ORDER BY expected_arrival ASC
+        """
+
+        cursor.execute(query, (sku_id, destination))
+        pending_orders = cursor.fetchall()
+
+        cursor.close()
+        db.close()
+
+        if not pending_orders:
+            return {
+                'immediate': 0,
+                'near_term': 0,
+                'medium_term': 0,
+                'long_term': 0,
+                'total_weighted': 0.0,
+                'earliest_arrival': None,
+                'latest_arrival': None,
+                'shipment_count': 0
+            }
+
+        # Initialize counters
+        immediate_qty = 0      # 0-30 days
+        near_term_qty = 0      # 31-60 days
+        medium_term_qty = 0    # 61-90 days
+        long_term_qty = 0      # >90 days
+
+        earliest_arrival = None
+        latest_arrival = None
+
+        for order in pending_orders:
+            days_until = order['days_until_arrival']
+            quantity = order['quantity']
+            arrival_date = order['expected_arrival']
+
+            # Track earliest and latest arrival dates
+            if earliest_arrival is None or arrival_date < earliest_arrival:
+                earliest_arrival = arrival_date
+            if latest_arrival is None or arrival_date > latest_arrival:
+                latest_arrival = arrival_date
+
+            # Apply confidence weighting for estimated dates
+            confidence_weight = 0.8 if order['is_estimated'] else 1.0
+            weighted_qty = quantity * confidence_weight
+
+            # Categorize by time window
+            if days_until <= 30:
+                immediate_qty += weighted_qty
+            elif days_until <= 60:
+                near_term_qty += weighted_qty
+            elif days_until <= 90:
+                medium_term_qty += weighted_qty
+            else:
+                long_term_qty += weighted_qty
+
+        # Calculate total weighted quantity for transfer calculations
+        # Time weights: immediate=1.0, near=0.8, medium=0.6, long=0.4
+        total_weighted = (
+            immediate_qty * 1.0 +
+            near_term_qty * 0.8 +
+            medium_term_qty * 0.6 +
+            long_term_qty * 0.4
+        )
+
+        return {
+            'immediate': round(immediate_qty),
+            'near_term': round(near_term_qty),
+            'medium_term': round(medium_term_qty),
+            'long_term': round(long_term_qty),
+            'total_weighted': round(total_weighted, 2),
+            'earliest_arrival': earliest_arrival,
+            'latest_arrival': latest_arrival,
+            'shipment_count': len(pending_orders)
+        }
+
+    except Exception as e:
+        logger.error(f"Error calculating pending quantities for {sku_id} ({destination}): {e}")
+        # Return empty result on error to avoid breaking transfer calculations
+        return {
+            'immediate': 0,
+            'near_term': 0,
+            'medium_term': 0,
+            'long_term': 0,
+            'total_weighted': 0.0,
+            'earliest_arrival': None,
+            'latest_arrival': None,
+            'shipment_count': 0
+        }
+
+
+def calculate_burnaby_coverage_multiplier(sku_id: str) -> float:
+    """
+    Calculate Burnaby coverage multiplier based on pending arrivals
+
+    Adjusts minimum retention requirements based on when new inventory
+    is expected to arrive at Burnaby warehouse.
+
+    Args:
+        sku_id: SKU identifier to check pending orders for
+
+    Returns:
+        float: Coverage multiplier (0.8 = aggressive, 1.0 = normal, 1.5 = conservative)
+
+    Example:
+        >>> calculate_burnaby_coverage_multiplier('SKU1')
+        0.8  # Can be more aggressive - inventory arriving in 30 days
+    """
+    try:
+        pending = get_pending_quantities(sku_id, 'burnaby')
+
+        if pending['immediate'] > 0:
+            # Inventory arriving within 30 days - can be more aggressive
+            return 0.8
+        elif pending['near_term'] > 0:
+            # Inventory arriving in 31-60 days - normal retention
+            return 1.0
+        else:
+            # No near-term inventory - be conservative
+            return 1.5
+
+    except Exception as e:
+        logger.error(f"Error calculating Burnaby coverage multiplier for {sku_id}: {e}")
+        # Default to conservative on error
+        return 1.5
+
+
 class StockoutCorrector:
     """
     Handles stockout detection and demand correction calculations
@@ -747,16 +927,23 @@ class TransferCalculator:
             # Calculate target inventory
             coverage_months = self.get_coverage_target(abc_class, xyz_class)
             target_inventory = corrected_demand * coverage_months
-            
-            # Account for pending inventory (simplified - assume none for now)
-            pending_qty = 0
-            
-            # Calculate transfer need
+
+            # Account for pending inventory with time-weighted quantities
+            kentucky_pending = get_pending_quantities(sku_id, 'kentucky')
+            pending_qty = kentucky_pending['total_weighted']
+
+            # Calculate transfer need considering weighted pending orders
             current_position = kentucky_qty + pending_qty
             transfer_need = target_inventory - current_position
-            
-            # Check Burnaby availability
-            available_to_transfer = min(transfer_need, burnaby_qty)
+
+            # Calculate Burnaby availability considering pending orders and retention requirements
+            burnaby_coverage_multiplier = calculate_burnaby_coverage_multiplier(sku_id)
+            burnaby_demand = corrected_demand  # Use same corrected demand for Burnaby retention
+            burnaby_min_retain = burnaby_demand * 2 * burnaby_coverage_multiplier  # 2 months base coverage
+
+            # Available for transfer from Burnaby (never go below minimum retention)
+            burnaby_available = max(0, burnaby_qty - burnaby_min_retain)
+            available_to_transfer = min(transfer_need, burnaby_available)
             
             # Round to multiple
             recommended_qty = self.round_to_multiple(available_to_transfer, transfer_multiple)
@@ -782,6 +969,9 @@ class TransferCalculator:
             
             reason = "; ".join(reason_parts) if reason_parts else "Maintain optimal stock level"
             
+            # Get Burnaby pending data for coverage calculations
+            burnaby_pending = get_pending_quantities(sku_id, 'burnaby')
+
             return {
                 'sku_id': sku_id,
                 'description': sku_data.get('description', ''),
@@ -796,7 +986,34 @@ class TransferCalculator:
                 'abc_class': abc_class,
                 'xyz_class': xyz_class,
                 'transfer_multiple': transfer_multiple,
-                'stockout_days': stockout_days
+                'stockout_days': stockout_days,
+
+                # Pending orders data
+                'pending_kentucky_qty': kentucky_pending['total_weighted'],
+                'pending_burnaby_qty': burnaby_pending['total_weighted'],
+                'pending_kentucky_timeline': {
+                    'immediate': kentucky_pending['immediate'],
+                    'near_term': kentucky_pending['near_term'],
+                    'medium_term': kentucky_pending['medium_term'],
+                    'long_term': kentucky_pending['long_term'],
+                    'earliest_arrival': kentucky_pending['earliest_arrival'],
+                    'shipment_count': kentucky_pending['shipment_count']
+                },
+                'pending_burnaby_timeline': {
+                    'immediate': burnaby_pending['immediate'],
+                    'near_term': burnaby_pending['near_term'],
+                    'medium_term': burnaby_pending['medium_term'],
+                    'long_term': burnaby_pending['long_term'],
+                    'earliest_arrival': burnaby_pending['earliest_arrival'],
+                    'shipment_count': burnaby_pending['shipment_count']
+                },
+                'pending_impact_on_transfer': f"KY position adjusted by +{kentucky_pending['total_weighted']:.0f} (weighted), Burnaby coverage multiplier: {burnaby_coverage_multiplier}x",
+
+                # Enhanced coverage calculations
+                'current_position_with_pending': current_position,
+                'burnaby_coverage_multiplier': burnaby_coverage_multiplier,
+                'burnaby_min_retain': burnaby_min_retain,
+                'burnaby_available_for_transfer': burnaby_available
             }
             
         except Exception as e:
@@ -914,25 +1131,42 @@ class TransferCalculator:
 
     def calculate_enhanced_transfer_with_economic_validation(self, sku_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Calculate transfer recommendation with economic validation to prevent source warehouse stockouts
+        Calculate transfer recommendation with economic validation and pending orders integration
 
-        This enhanced method adds critical business logic to prevent transfers that would
-        leave the source warehouse (Burnaby) understocked relative to its own demand.
+        This enhanced method prevents transfers that would leave the source warehouse (Burnaby)
+        understocked while incorporating pending orders data for accurate transfer calculations.
 
         Key Features:
         - Economic validation: prevents transfers when CA demand > KY demand * 1.5
-        - Enhanced retention logic with proper Burnaby demand calculation
-        - Comprehensive coverage calculations for both warehouses
-        - Detailed business justification for all recommendations
+        - Pending orders integration: accounts for incoming inventory in transfer calculations
+        - Enhanced retention logic: adjusts Burnaby retention based on pending arrivals
+        - Time-weighted pending calculations: considers arrival timing for accurate positioning
+        - Comprehensive coverage calculations including pending orders
+        - Detailed business justification with pending orders context
+
+        Business Logic:
+        1. Retrieves pending orders data from v_pending_quantities view
+        2. Calculates current position as kentucky_qty + kentucky_pending
+        3. Adjusts Burnaby retention if significant pending arrivals expected
+        4. Determines transfer need considering pending orders already in transit
+        5. Provides comprehensive coverage metrics including pending orders impact
 
         Args:
             sku_data: Dictionary containing SKU information including sales and inventory data
 
         Returns:
-            Dictionary with enhanced transfer recommendation including economic validation
+            Dictionary with enhanced transfer recommendation including:
+            - All economic validation fields
+            - Pending orders data (kentucky_pending, burnaby_pending, days_until_arrival)
+            - Coverage calculations with and without pending orders
+            - Flag indicating if pending orders were successfully included
 
         Raises:
             ValueError: If required SKU data is missing or invalid
+
+        Note:
+            If pending orders data cannot be retrieved, continues with pending quantities = 0
+            and sets pending_orders_included = False for transparency
         """
         try:
             # Extract SKU data with proper null handling
@@ -947,7 +1181,24 @@ class TransferCalculator:
             xyz_class = sku_data.get('xyz_code', 'Z')
             transfer_multiple = sku_data.get('transfer_multiple', 50)
 
-            # Step 1: Calculate corrected demand for BOTH warehouses
+            # Step 1: Get pending orders data for comprehensive calculations
+            print(f"DEBUG: Processing SKU {sku_id} in calculate_enhanced_transfer_with_economic_validation")
+            try:
+                pending_data = self.get_pending_orders_data(sku_id)
+                kentucky_pending = float(pending_data.get('kentucky_pending', 0))
+                burnaby_pending = float(pending_data.get('burnaby_pending', 0))
+                days_until_arrival = pending_data.get('days_until_arrival')
+                pending_orders_included = True
+                print(f"DEBUG: {sku_id} pending data retrieved: KY={kentucky_pending}, BY={burnaby_pending}")
+            except Exception as e:
+                logger.warning(f"Could not retrieve pending orders for SKU {sku_id}: {e}")
+                # Fallback: continue without pending orders
+                kentucky_pending = 0
+                burnaby_pending = 0
+                days_until_arrival = None
+                pending_orders_included = False
+
+            # Step 2: Calculate corrected demand for BOTH warehouses
             current_month = datetime.now().strftime('%Y-%m')
 
             kentucky_corrected_demand = self.corrector.correct_monthly_demand_enhanced(
@@ -958,7 +1209,7 @@ class TransferCalculator:
                 sku_id, burnaby_sales, burnaby_stockout_days, current_month
             )
 
-            # Step 2: Economic Validation - Don't transfer if CA demand significantly higher than KY
+            # Step 3: Economic Validation - Don't transfer if CA demand significantly higher than KY
             economic_validation_passed = True
             economic_reason = ""
 
@@ -966,16 +1217,21 @@ class TransferCalculator:
                 economic_validation_passed = False
                 economic_reason = f"CA demand ({burnaby_corrected_demand:.0f}) too high vs KY demand ({kentucky_corrected_demand:.0f}). Transfer would risk CA stockout."
 
-            # Step 3: Calculate Burnaby minimum retention (never go below 2 months)
+            # Step 4: Calculate Burnaby minimum retention considering pending arrivals
             burnaby_min_retain = burnaby_corrected_demand * self.BURNABY_MIN_COVERAGE_MONTHS
+            # Adjust retention if significant pending arrivals expected for Burnaby
+            if burnaby_pending > burnaby_corrected_demand * 0.5:  # If pending > 50% of monthly demand
+                burnaby_min_retain *= 0.8  # Can be more aggressive with retention
+
             available_for_transfer = max(0, burnaby_qty - burnaby_min_retain)
 
-            # Step 4: Calculate transfer need for Kentucky
+            # Step 5: Calculate transfer need for Kentucky considering pending orders
             coverage_months = self.get_coverage_target(abc_class, xyz_class)
-            target_inventory = kentucky_corrected_demand * coverage_months
-            transfer_need = max(0, target_inventory - kentucky_qty)
+            target_inventory = float(kentucky_corrected_demand) * float(coverage_months)
+            current_position = float(kentucky_qty) + float(kentucky_pending)  # Include pending in current position
+            transfer_need = max(0, target_inventory - current_position)
 
-            # Step 5: Determine final transfer quantity
+            # Step 6: Determine final transfer quantity
             if not economic_validation_passed:
                 # Economic validation failed - no transfer
                 final_transfer_qty = 0
@@ -1007,11 +1263,13 @@ class TransferCalculator:
                 else:
                     reason = f"No transfer needed. KY has {kentucky_qty} units vs {kentucky_corrected_demand:.0f} monthly demand."
 
-            # Step 6: Calculate coverage after transfer
+            # Step 7: Calculate coverage after transfer
             burnaby_coverage_after = (burnaby_qty - final_transfer_qty) / max(burnaby_corrected_demand, 1)
             kentucky_coverage_after = (kentucky_qty + final_transfer_qty) / max(kentucky_corrected_demand, 1)
+            # Coverage including pending orders
+            kentucky_coverage_with_pending = (current_position + final_transfer_qty) / max(kentucky_corrected_demand, 1)
 
-            # Step 7: Return comprehensive recommendation
+            # Step 8: Return comprehensive recommendation including pending orders
             return {
                 'sku_id': sku_id,
                 'description': sku_data.get('description', ''),
@@ -1030,13 +1288,23 @@ class TransferCalculator:
                 'target_coverage_months': coverage_months,
                 'burnaby_coverage_after_transfer': round(burnaby_coverage_after, 1),
                 'kentucky_coverage_after_transfer': round(kentucky_coverage_after, 1),
+                'kentucky_coverage_with_pending': round(kentucky_coverage_with_pending, 1),
                 'economic_validation_passed': economic_validation_passed,
                 'available_from_burnaby': available_for_transfer,
-                'burnaby_min_retain': burnaby_min_retain
+                'burnaby_min_retain': burnaby_min_retain,
+
+                # Pending orders data
+                'kentucky_pending': kentucky_pending,
+                'burnaby_pending': burnaby_pending,
+                'days_until_arrival': days_until_arrival,
+                'pending_orders_included': pending_orders_included,
+                'current_position_with_pending': current_position
             }
 
         except Exception as e:
+            import traceback
             logger.error(f"Enhanced transfer calculation with economic validation failed for SKU {sku_id}: {e}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             # Return safe fallback
             return {
                 'sku_id': sku_id,
@@ -1056,9 +1324,17 @@ class TransferCalculator:
                 'target_coverage_months': self.get_coverage_target(abc_class, xyz_class),
                 'burnaby_coverage_after_transfer': 0,
                 'kentucky_coverage_after_transfer': 0,
+                'kentucky_coverage_with_pending': 0,
                 'economic_validation_passed': False,
                 'available_from_burnaby': 0,
-                'burnaby_min_retain': 0
+                'burnaby_min_retain': 0,
+
+                # Pending orders data (fallback values)
+                'kentucky_pending': 0,
+                'burnaby_pending': 0,
+                'days_until_arrival': None,
+                'pending_orders_included': False,
+                'current_position_with_pending': kentucky_qty
             }
 
     def calculate_enhanced_transfer_with_pending(self, sku_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -1753,6 +2029,7 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
         List of transfer recommendations sorted by priority
     """
     try:
+        print("DEBUG: calculate_all_transfer_recommendations called")
         # Get all active SKUs with current inventory and latest sales for BOTH warehouses
         query = """
         SELECT

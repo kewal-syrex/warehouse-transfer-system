@@ -507,8 +507,12 @@ async def get_transfer_recommendations():
         Data exported to Excel for warehouse execution
     """
     try:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error("DEBUG: transfer-recommendations endpoint called")
         # Generate recommendations using sophisticated calculation engine
         recommendations = calculations.calculate_all_transfer_recommendations()
+        logger.error(f"DEBUG: Got {len(recommendations)} recommendations")
         
         return {
             "recommendations": recommendations,
@@ -1139,10 +1143,19 @@ async def debug_test():
 
 @app.post("/api/pending-orders/import-csv",
          summary="Import Pending Orders from CSV File",
-         description="Upload a CSV file and import pending orders",
+         description="Upload a CSV file and import pending orders with optional replace mode",
          tags=["Pending Orders"])
-async def import_pending_orders_from_csv(file: UploadFile = File(...)):
-    """Import pending orders from CSV file upload"""
+async def import_pending_orders_from_csv(
+    file: UploadFile = File(...),
+    replace_existing: bool = False
+):
+    """
+    Import pending orders from CSV file upload
+
+    Args:
+        file: CSV file with pending orders data
+        replace_existing: If True, clear all existing pending orders before import
+    """
 
     if not file.filename or not file.filename.lower().endswith('.csv'):
         raise HTTPException(
@@ -1222,6 +1235,14 @@ async def import_pending_orders_from_csv(file: UploadFile = File(...)):
         db = database.get_database_connection()
         cursor = db.cursor()
 
+        # Handle replace mode - clear existing data if requested
+        cleared_count = 0
+        if replace_existing:
+            cursor.execute("SELECT COUNT(*) FROM pending_inventory")
+            cleared_count = cursor.fetchone()[0]
+            cursor.execute("DELETE FROM pending_inventory")
+            logger.info(f"Replace mode: cleared {cleared_count} existing pending orders")
+
         imported_count = 0
         error_count = 0
         errors = []
@@ -1271,13 +1292,24 @@ async def import_pending_orders_from_csv(file: UploadFile = File(...)):
         cursor.close()
         db.close()
 
-        return {
+        result = {
             "success": True,
             "imported_count": imported_count,
             "total_orders": len(orders),
             "estimated_dates_added": estimated_dates_added,
             "errors": errors if errors else []
         }
+
+        # Add replace mode information if used
+        if replace_existing:
+            result["replace_mode"] = True
+            result["cleared_count"] = cleared_count
+            result["message"] = f"Replace mode: cleared {cleared_count} existing orders, imported {imported_count} new orders"
+        else:
+            result["replace_mode"] = False
+            result["message"] = f"Append mode: imported {imported_count} new orders"
+
+        return result
 
     except HTTPException:
         raise
@@ -2698,6 +2730,178 @@ async def get_pending_order(order_id: int):
         raise HTTPException(
             status_code=500,
             detail=f"Failed to get pending order: {str(e)}"
+        )
+
+# ===================================================================
+# PENDING ORDERS BULK MANAGEMENT ENDPOINTS
+# ===================================================================
+
+@app.delete("/api/pending-orders/clear-all",
+           summary="Clear All Pending Orders",
+           description="Delete all pending orders with safety confirmation",
+           tags=["Pending Orders"])
+async def clear_all_pending_orders():
+    """
+    Clear all pending orders from the database
+
+    Returns count of deleted records for confirmation
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor()
+
+        # First get count for confirmation
+        cursor.execute("SELECT COUNT(*) FROM pending_inventory")
+        total_count = cursor.fetchone()[0]
+
+        if total_count == 0:
+            return {
+                "success": True,
+                "message": "No pending orders to delete",
+                "deleted_count": 0
+            }
+
+        # Delete all pending orders
+        cursor.execute("DELETE FROM pending_inventory")
+        deleted_count = cursor.rowcount
+
+        db.commit()
+        cursor.close()
+        db.close()
+
+        logger.info(f"Cleared all pending orders: {deleted_count} records deleted")
+
+        return {
+            "success": True,
+            "message": f"Successfully deleted {deleted_count} pending orders",
+            "deleted_count": deleted_count
+        }
+
+    except Exception as e:
+        if 'db' in locals():
+            db.rollback()
+            cursor.close()
+            db.close()
+        logger.error(f"Failed to clear all pending orders: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to clear pending orders: {str(e)}"
+        )
+
+@app.delete("/api/pending-orders/clear-batch/{batch_id}",
+           summary="Clear Pending Orders by Batch",
+           description="Delete all pending orders with specific batch ID",
+           tags=["Pending Orders"])
+async def clear_pending_orders_batch(batch_id: str):
+    """
+    Clear pending orders by batch ID
+
+    Args:
+        batch_id: Batch identifier to delete
+
+    Returns:
+        Count of deleted records
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor()
+
+        # First get count for confirmation
+        cursor.execute("SELECT COUNT(*) FROM pending_inventory WHERE batch_id = %s", (batch_id,))
+        count = cursor.fetchone()[0]
+
+        if count == 0:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No pending orders found with batch ID: {batch_id}"
+            )
+
+        # Delete by batch ID
+        cursor.execute("DELETE FROM pending_inventory WHERE batch_id = %s", (batch_id,))
+        deleted_count = cursor.rowcount
+
+        db.commit()
+        cursor.close()
+        db.close()
+
+        logger.info(f"Cleared pending orders for batch {batch_id}: {deleted_count} records deleted")
+
+        return {
+            "success": True,
+            "message": f"Successfully deleted {deleted_count} pending orders from batch {batch_id}",
+            "deleted_count": deleted_count,
+            "batch_id": batch_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if 'db' in locals():
+            db.rollback()
+            cursor.close()
+            db.close()
+        logger.error(f"Failed to clear batch {batch_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to clear batch: {str(e)}"
+        )
+
+@app.delete("/api/pending-orders/clear-sku/{sku_id}",
+           summary="Clear Pending Orders by SKU",
+           description="Delete all pending orders for a specific SKU",
+           tags=["Pending Orders"])
+async def clear_pending_orders_sku(sku_id: str):
+    """
+    Clear all pending orders for a specific SKU
+
+    Args:
+        sku_id: SKU identifier to clear orders for
+
+    Returns:
+        Count of deleted records
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor()
+
+        # First get count for confirmation
+        cursor.execute("SELECT COUNT(*) FROM pending_inventory WHERE sku_id = %s", (sku_id,))
+        count = cursor.fetchone()[0]
+
+        if count == 0:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No pending orders found for SKU: {sku_id}"
+            )
+
+        # Delete by SKU
+        cursor.execute("DELETE FROM pending_inventory WHERE sku_id = %s", (sku_id,))
+        deleted_count = cursor.rowcount
+
+        db.commit()
+        cursor.close()
+        db.close()
+
+        logger.info(f"Cleared pending orders for SKU {sku_id}: {deleted_count} records deleted")
+
+        return {
+            "success": True,
+            "message": f"Successfully deleted {deleted_count} pending orders for SKU {sku_id}",
+            "deleted_count": deleted_count,
+            "sku_id": sku_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if 'db' in locals():
+            db.rollback()
+            cursor.close()
+            db.close()
+        logger.error(f"Failed to clear SKU {sku_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to clear SKU orders: {str(e)}"
         )
 
 # ===================================================================

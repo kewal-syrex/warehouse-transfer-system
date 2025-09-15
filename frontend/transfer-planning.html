@@ -238,32 +238,32 @@
                 </span>
             </div>
             <div class="d-flex align-items-center">
-                <button class="btn btn-outline-light btn-sm me-2" onclick="refreshRecommendations()">
-                    <i class="fas fa-sync-alt"></i> Refresh
+                <!-- Navigation Links -->
+                <a href="data-management.html" class="btn btn-outline-light btn-sm me-2">
+                    <i class="fas fa-database me-1"></i>Data Management
+                </a>
+                <a href="stockout-management.html" class="btn btn-outline-light btn-sm me-2">
+                    <i class="fas fa-exclamation-triangle me-1"></i>Stockout Management
+                </a>
+                <a href="sku-listing.html" class="btn btn-outline-light btn-sm me-2">
+                    <i class="fas fa-list me-1"></i>SKU Listing
+                </a>
+
+                <!-- Export Buttons -->
+                <button class="btn btn-success btn-sm me-2" onclick="exportTransferOrderExcel()">
+                    <i class="fas fa-file-excel me-1"></i>Export Transfer Order (Excel)
                 </button>
-                <div class="dropdown">
-                    <button class="btn btn-success btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
-                        <i class="fas fa-download"></i> Export
-                    </button>
-                    <ul class="dropdown-menu">
-                        <li><a class="dropdown-item" href="#" onclick="exportTransferOrderExcel()">
-                            <i class="fas fa-file-excel text-success"></i> Excel Format
-                        </a></li>
-                        <li><a class="dropdown-item" href="#" onclick="exportTransferOrder()">
-                            <i class="fas fa-file-csv text-info"></i> CSV Format  
-                        </a></li>
-                        <li><hr class="dropdown-divider"></li>
-                        <li><a class="dropdown-item" href="data-management.html">
-                            <i class="fas fa-database text-primary"></i> Data Management
-                        </a></li>
-                        <li><a class="dropdown-item" href="stockout-management.html">
-                            <i class="fas fa-exclamation-triangle text-warning"></i> Stockout Management
-                        </a></li>
-                        <li><a class="dropdown-item" href="sku-listing.html">
-                            <i class="fas fa-list text-success"></i> SKU Listing
-                        </a></li>
-                    </ul>
-                </div>
+                <button class="btn btn-info btn-sm me-2" onclick="exportTransferOrder()">
+                    <i class="fas fa-file-csv me-1"></i>Export Transfer Order (CSV)
+                </button>
+                <button class="btn btn-warning btn-sm me-2" onclick="showExportAllModal()">
+                    <i class="fas fa-database me-1"></i>Export All SKUs
+                </button>
+
+                <!-- Refresh Button -->
+                <button class="btn btn-outline-light btn-sm" onclick="refreshRecommendations()">
+                    <i class="fas fa-sync-alt me-1"></i>Refresh
+                </button>
             </div>
         </div>
     </nav>
@@ -440,7 +440,15 @@
             loadRecommendations();
         });
 
-        // Initialize DataTable
+        /**
+         * Initialize the transfer recommendations DataTable
+         *
+         * Sets up column ordering, search functionality, and responsive display
+         * Configures special handling for action columns and numeric data
+         *
+         * @function initializeTable
+         * @returns {void}
+         */
         function initializeTable() {
             dataTable = $('#recommendations-table').DataTable({
                 "pageLength": 25,
@@ -459,7 +467,17 @@
             });
         }
 
-        // Load recommendations from API
+        /**
+         * Load transfer recommendations from the backend API
+         *
+         * Fetches all transfer recommendations with stockout-corrected calculations,
+         * updates summary statistics, and populates the DataTable
+         *
+         * @async
+         * @function loadRecommendations
+         * @returns {Promise<void>}
+         * @throws {Error} Shows alert if API call fails
+         */
         async function loadRecommendations() {
             showLoading(true);
             
@@ -484,7 +502,15 @@
             }
         }
 
-        // Update summary statistics
+        /**
+         * Update dashboard summary statistics
+         *
+         * Calculates and displays total SKUs, high priority items,
+         * total transfer quantity, and average coverage metrics
+         *
+         * @function updateSummaryStats
+         * @returns {void}
+         */
         function updateSummaryStats() {
             const total = recommendationsData.length;
             const critical = recommendationsData.filter(r => r.priority === 'CRITICAL').length;
@@ -497,7 +523,15 @@
             document.getElementById('avg-coverage').textContent = avgCoverage ? avgCoverage.toFixed(1) : '0.0';
         }
 
-        // Populate DataTable with recommendations
+        /**
+         * Populate DataTable with filtered transfer recommendations
+         *
+         * Clears existing data and populates table with current recommendationsData,
+         * applying any active filters and updating row display
+         *
+         * @function populateTable
+         * @returns {void}
+         */
         function populateTable() {
             dataTable.clear();
             
@@ -509,7 +543,20 @@
             dataTable.draw();
         }
 
-        // Create table row HTML
+        /**
+         * Create HTML table row for a transfer recommendation
+         *
+         * Generates complete table row with priority styling, editable quantities,
+         * coverage indicators, and action buttons
+         *
+         * @function createTableRow
+         * @param {Object} rec - Transfer recommendation data
+         * @param {string} rec.sku_id - SKU identifier
+         * @param {string} rec.priority - Priority level (CRITICAL, HIGH, MEDIUM, LOW)
+         * @param {number} rec.recommended_transfer_qty - Calculated transfer quantity
+         * @param {number} rec.coverage_months - Months of coverage after transfer
+         * @returns {string} HTML table row string
+         */
         function createTableRow(rec) {
             const priorityClass = `priority-${rec.priority.toLowerCase()}`;
             const stockoutBadge = rec.stockout_days > 0 ? `<span class="stockout-badge">SO:${rec.stockout_days}d</span>` : '';
@@ -528,12 +575,12 @@
                     <td>${rec.current_kentucky_qty}</td>
                     <td>${rec.current_burnaby_qty}</td>
                     <td>
-                        ${rec.burnaby_pending_qty || 0}
-                        ${rec.burnaby_pending_days ? `<small class="text-muted">(${rec.burnaby_pending_days}d)</small>` : ''}
+                        ${rec.burnaby_pending || 0}
+                        ${rec.days_until_arrival ? `<small class="text-muted">(${rec.days_until_arrival}d)</small>` : ''}
                     </td>
                     <td>
-                        ${rec.kentucky_pending_qty || 0}
-                        ${rec.kentucky_pending_days ? `<small class="text-muted">(${rec.kentucky_pending_days}d)</small>` : ''}
+                        ${rec.kentucky_pending || 0}
+                        ${rec.days_until_arrival ? `<small class="text-muted">(${rec.days_until_arrival}d)</small>` : ''}
                     </td>
                     <td>
                         ${rec.corrected_monthly_demand.toFixed(0)}
@@ -571,7 +618,17 @@
             `;
         }
 
-        // Update transfer quantity
+        /**
+         * Update transfer quantity for a specific SKU
+         *
+         * Validates and updates the recommended transfer quantity,
+         * ensuring proper rounding to transfer multiples
+         *
+         * @function updateTransferQty
+         * @param {string} skuId - SKU identifier to update
+         * @param {string|number} newQty - New transfer quantity (will be parsed to integer)
+         * @returns {void}
+         */
         function updateTransferQty(skuId, newQty) {
             const qty = parseInt(newQty);
             if (isNaN(qty) || qty < 0) {
@@ -588,7 +645,18 @@
             }
         }
 
-        // Show SKU details in modal
+        /**
+         * Show detailed SKU information in modal dialog
+         *
+         * Fetches complete SKU data including sales history, pending inventory,
+         * and displays in enhanced modal with charts and export options
+         *
+         * @async
+         * @function showSkuDetails
+         * @param {string} skuId - SKU identifier to display details for
+         * @returns {Promise<void>}
+         * @throws {Error} Shows alert if SKU data cannot be loaded
+         */
         async function showSkuDetails(skuId) {
             const modal = new bootstrap.Modal(document.getElementById('sku-detail-modal'));
             
@@ -710,23 +778,27 @@
 
                 <!-- Sales History with Chart -->
                 <div class="row">
-                    <div class="col-md-8">
+                    <div class="col-12">
                         <h6 class="mt-3"><i class="fas fa-chart-line me-2"></i>Sales Trend Analysis</h6>
                         <div class="chart-container">
                             <canvas id="sales-chart"></canvas>
                         </div>
                     </div>
-                    <div class="col-md-4">
-                        <h6 class="mt-3"><i class="fas fa-table me-2"></i>Sales Summary</h6>
-                        <div class="table-responsive" style="max-height: 350px; overflow-y: auto;">
-                            <table class="table table-sm">
+                </div>
+
+                <!-- Sales Summary Table (now below chart) -->
+                <div class="row mt-3">
+                    <div class="col-12">
+                        <h6><i class="fas fa-table me-2"></i>Sales History Summary</h6>
+                        <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
+                            <table class="table table-sm table-hover">
                                 <thead class="table-light sticky-top">
                                     <tr>
                                         <th>Month</th>
-                                        <th>CA</th>
-                                        <th>US</th>
+                                        <th>CA Sales</th>
+                                        <th>US Sales</th>
                                         <th>Total</th>
-                                        <th>SO</th>
+                                        <th>Stockout Days</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -750,19 +822,14 @@
                     <div class="row">
                         <div class="col-md-6">
                             <h6><i class="fas fa-download me-2"></i>Export Options</h6>
-                            <div class="btn-group" role="group">
-                                <button type="button" class="btn btn-outline-primary btn-sm" onclick="exportSkuSalesHistory('${skuData.sku.sku_id}')">
-                                    <i class="fas fa-file-csv me-1"></i>Export This SKU
-                                </button>
-                                <button type="button" class="btn btn-outline-success btn-sm" onclick="showExportAllModal()">
-                                    <i class="fas fa-file-excel me-1"></i>Export All SKUs
-                                </button>
-                            </div>
+                            <button type="button" class="btn btn-primary btn-sm" onclick="exportSkuSalesHistory('${skuData.sku.sku_id}')">
+                                <i class="fas fa-file-csv me-1"></i>Export This SKU Sales History
+                            </button>
                         </div>
                         <div class="col-md-6 text-end">
                             <small class="text-muted">
                                 <i class="fas fa-info-circle me-1"></i>
-                                Export includes sales history, stockout data, and corrected demand calculations
+                                Export includes complete sales history, stockout data, and corrected demand calculations for this SKU
                             </small>
                         </div>
                     </div>
@@ -1126,7 +1193,15 @@
             }
         }
 
-        // Filter and action functions
+        /**
+         * Apply selected filters to the transfer recommendations table
+         *
+         * Filters data based on priority level, ABC classification, and minimum quantity,
+         * then refreshes the DataTable display
+         *
+         * @function applyFilters
+         * @returns {void}
+         */
         function applyFilters() {
             const priority = document.getElementById('priority-filter').value;
             const abc = document.getElementById('abc-filter').value;
@@ -1155,6 +1230,15 @@
             dataTable.draw();
         }
 
+        /**
+         * Clear all active filters and reset table display
+         *
+         * Resets all filter controls to default values and repopulates
+         * the table with unfiltered data
+         *
+         * @function clearFilters
+         * @returns {void}
+         */
         function clearFilters() {
             document.getElementById('priority-filter').value = '';
             document.getElementById('abc-filter').value = '';
@@ -1162,6 +1246,15 @@
             populateTable();
         }
 
+        /**
+         * Select all high priority and critical SKUs for bulk operations
+         *
+         * Automatically checks the selection boxes for all CRITICAL and HIGH priority
+         * transfer recommendations
+         *
+         * @function selectHighPriority
+         * @returns {void}
+         */
         function selectHighPriority() {
             // Uncheck all first
             document.querySelectorAll('.row-select').forEach(cb => cb.checked = false);
@@ -1175,6 +1268,15 @@
             });
         }
 
+        /**
+         * Open bulk edit dialog for selected SKUs
+         *
+         * Allows modification of transfer quantities for multiple selected SKUs
+         * with options to set fixed amounts or percentage adjustments
+         *
+         * @function bulkEditSelected
+         * @returns {void}
+         */
         function bulkEditSelected() {
             const selected = Array.from(document.querySelectorAll('.row-select:checked')).map(cb => cb.value);
             if (selected.length === 0) {
@@ -1203,7 +1305,17 @@
             });
         }
 
-        // Export functions
+        /**
+         * Export transfer order in Excel format with professional formatting
+         *
+         * Creates formatted Excel file with transfer recommendations,
+         * including company branding, data validation, and conditional formatting
+         *
+         * @async
+         * @function exportTransferOrderExcel
+         * @returns {Promise<void>}
+         * @throws {Error} Shows alert if export fails
+         */
         async function exportTransferOrderExcel() {
             showLoading(true, 'Generating Excel File', 'Creating professional Excel export with formatting...');
             
@@ -1244,6 +1356,15 @@
             }
         }
 
+        /**
+         * Export transfer order in CSV format
+         *
+         * Downloads transfer recommendations as CSV file with current quantities
+         * and basic transfer information for warehouse processing
+         *
+         * @function exportTransferOrder
+         * @returns {void}
+         */
         function exportTransferOrder() {
             const selectedItems = recommendationsData.filter(rec => rec.recommended_transfer_qty > 0);
             
@@ -1276,7 +1397,18 @@
             window.URL.revokeObjectURL(url);
         }
 
-        // Utility functions
+        /**
+         * Show or hide loading overlay with custom messages
+         *
+         * Displays loading spinner with configurable title and message
+         * for better user experience during API operations
+         *
+         * @function showLoading
+         * @param {boolean} show - Whether to show (true) or hide (false) loading overlay
+         * @param {string} [title='Loading Transfer Recommendations...'] - Custom loading title
+         * @param {string} [message='Analyzing stockout data and calculating optimal quantities'] - Custom loading message
+         * @returns {void}
+         */
         function showLoading(show, title = 'Loading Transfer Recommendations...', message = 'Analyzing stockout data and calculating optimal quantities') {
             const overlay = document.getElementById('loading-overlay');
             if (show) {
@@ -1296,16 +1428,45 @@
             }
         }
 
+        /**
+         * Display error message to user
+         *
+         * Shows error alert dialog for API failures or validation errors
+         *
+         * @function showError
+         * @param {string} message - Error message to display to user
+         * @returns {void}
+         */
         function showError(message) {
             alert(message);
         }
 
+        /**
+         * Update displayed timestamps with formatted date/time
+         *
+         * Updates both last updated and generation time displays
+         * with properly formatted locale-specific timestamps
+         *
+         * @function updateTimestamp
+         * @param {string} timestamp - ISO timestamp string to format and display
+         * @returns {void}
+         */
         function updateTimestamp(timestamp) {
             const formatted = new Date(timestamp).toLocaleString();
             document.getElementById('last-updated').textContent = `Last updated: ${formatted}`;
             document.getElementById('generation-time').textContent = formatted;
         }
 
+        /**
+         * Refresh transfer recommendations from server
+         *
+         * Reloads all transfer recommendation data and updates display
+         * without requiring page refresh
+         *
+         * @async
+         * @function refreshRecommendations
+         * @returns {Promise<void>}
+         */
         async function refreshRecommendations() {
             await loadRecommendations();
         }
