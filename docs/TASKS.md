@@ -3294,6 +3294,18 @@ curl /api/transfer-recommendations
 
 #### **BLOCKING ISSUE RESOLVED:**
 - [x] **TASK-301**: Fix method fallback preventing pending orders from appearing in API ✅ **CRITICAL ISSUE RESOLVED**
+- [x] **TASK-302**: Fix Data Management Summary Display Issue ✅ **COMPLETED**
+
+#### **TASK-302: Fix Data Management Summary Display Issue** ✅ **COMPLETED**
+- **Priority**: HIGH ✅ **RESOLVED**
+- **Description**: Fixed pending orders summary showing zeros when data exists in Recent Pending Orders table
+- **Root Cause**: API returned SKU-level data but frontend expected aggregated statistics
+- **Solution**: Enhanced JavaScript to calculate summary statistics from existing API response format
+- **Files Modified**:
+  - `frontend/data-management.html`: Updated `refreshPendingOrdersSummary()` function (line 1233)
+  - `backend/main.py`: Cleaned up experimental aggregation changes, reverted to original SKU-level format
+- **Result**: Summary now correctly displays Total Orders: 8, Unique SKUs: 3, To Burnaby: 6, To Kentucky: 8
+- **Date Completed**: September 14, 2025
 
 ## 🎉 **PENDING ORDERS INTEGRATION - FULLY OPERATIONAL** ✅
 
