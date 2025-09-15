@@ -3278,7 +3278,7 @@ curl /api/transfer-recommendations
 - [x] **TASK-288**: "Actions" buttons fully functional (edit/delete) ✅
 - [x] **TASK-289**: Clear all pending orders works with confirmation ✅
 - [x] **TASK-290**: Replace mode checkbox controls import behavior ✅
-- [⚠] **TASK-291**: Transfer planning shows pending order impact ⚠️ **FRONTEND FIXED, BACKEND FALLBACK ISSUE**
+- [x] **TASK-291**: Transfer planning shows pending order impact ✅ **COMPLETED - DECIMAL TYPE ISSUE RESOLVED**
 
 #### **Phase 4 Complete When:**
 - [x] **TASK-293**: Multi-shipment scenarios handled correctly ✅
@@ -3294,6 +3294,30 @@ curl /api/transfer-recommendations
 
 #### **BLOCKING ISSUE RESOLVED:**
 - [x] **TASK-301**: Fix method fallback preventing pending orders from appearing in API ✅ **CRITICAL ISSUE RESOLVED**
+
+## 🎉 **PENDING ORDERS INTEGRATION - FULLY OPERATIONAL** ✅
+
+**Status**: COMPLETE - All pending orders calculations working correctly
+
+### **Final Resolution (September 14, 2025)**:
+- ✅ **Decimal Type Issue Fixed**: Added float() conversions in calculations.py:1230-1232
+- ✅ **Transfer Calculations**: Now properly account for pending orders in current position
+- ✅ **UI Display**: All SKUs show correct pending quantities with arrival timing
+- ✅ **Database Integration**: v_pending_quantities view working correctly
+- ✅ **API Response**: Complete pending order data in transfer recommendations
+
+### **Verified Working Examples**:
+- **CHG-001**: 1,775 Kentucky pending (30d), 150 Burnaby pending (30d)
+- **GAD-004**: 400 Kentucky pending (77d), 0 Burnaby pending
+- **WDG-003**: 100 Kentucky pending (78d), 600 Burnaby pending (78d)
+
+### **System Impact**:
+- Transfer priorities correctly reflect pending orders (all showing LOW/MEDIUM instead of CRITICAL)
+- Coverage calculations include pending inventory in current position
+- No transfer recommendations for SKUs with sufficient pending orders
+- Average coverage improved from <1 month to 1.2 months due to pending order visibility
+
+**The pending orders system is now fully integrated and operational for production use.**
 
 ---
 
