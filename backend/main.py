@@ -2378,42 +2378,41 @@ async def get_pending_orders(
         )
 
 @app.get("/api/pending-orders/summary",
-         summary="Get Pending Orders Summary",
-         description="Get summary of pending orders grouped by SKU",
+         summary="Get Pending Orders Summary Statistics",
+         description="Get aggregated statistics for pending orders",
          tags=["Pending Orders"])
 async def get_pending_orders_summary():
     """
-    Get pending orders summary by SKU using the pending quantities view
+    Get aggregated summary statistics for pending orders
+    Returns total orders, unique SKUs, and breakdown by destination
     """
     try:
         db = database.get_database_connection()
         cursor = db.cursor(pymysql.cursors.DictCursor)
 
-        query = """
+        # Get summary statistics from pending_orders table - updated for aggregation
+        summary_query = """
         SELECT
-            pq.*,
-            s.description,
-            s.supplier,
-            s.abc_code,
-            s.xyz_code,
-            ic.burnaby_qty as current_burnaby,
-            ic.kentucky_qty as current_kentucky
-        FROM v_pending_quantities pq
-        INNER JOIN skus s ON pq.sku_id = s.sku_id
-        LEFT JOIN inventory_current ic ON pq.sku_id = ic.sku_id
-        ORDER BY pq.total_pending DESC, pq.earliest_arrival ASC
+            COUNT(*) as total_orders,
+            COUNT(DISTINCT sku_id) as unique_skus,
+            SUM(CASE WHEN destination = 'burnaby' THEN 1 ELSE 0 END) as burnaby_orders,
+            SUM(CASE WHEN destination = 'kentucky' THEN 1 ELSE 0 END) as kentucky_orders
+        FROM pending_orders
+        WHERE status NOT IN ('cancelled', 'received')
         """
 
-        cursor.execute(query)
-        results = cursor.fetchall()
+        cursor.execute(summary_query)
+        summary = cursor.fetchone()
 
         cursor.close()
         db.close()
 
         return {
             "success": True,
-            "data": results,
-            "count": len(results)
+            "total_orders": summary.get('total_orders', 0),
+            "unique_skus": summary.get('unique_skus', 0),
+            "burnaby_orders": summary.get('burnaby_orders', 0),
+            "kentucky_orders": summary.get('kentucky_orders', 0)
         }
 
     except Exception as e:

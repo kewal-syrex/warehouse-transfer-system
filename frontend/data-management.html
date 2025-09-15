@@ -1238,13 +1238,37 @@
                     throw new Error('Failed to fetch pending orders summary');
                 }
 
-                const data = await response.json();
+                const result = await response.json();
+
+                // Calculate summary statistics from the SKU-level data
+                let totalOrders = 0;
+                let uniqueSkus = 0;
+                let burnabyOrders = 0;
+                let kentuckyOrders = 0;
+
+                if (result.success && result.data && Array.isArray(result.data)) {
+                    // Count unique SKUs
+                    uniqueSkus = result.data.length;
+
+                    // Sum up the order counts from each SKU's pending quantities
+                    result.data.forEach(sku => {
+                        totalOrders += (sku.supplier_orders || 0);
+
+                        // Count orders by destination (using burnaby_pending and kentucky_pending as proxy)
+                        if (sku.burnaby_pending && sku.burnaby_pending > 0) {
+                            burnabyOrders += (sku.supplier_orders || 1); // Estimate orders going to Burnaby
+                        }
+                        if (sku.kentucky_pending && sku.kentucky_pending > 0) {
+                            kentuckyOrders += (sku.supplier_orders || 1); // Estimate orders going to Kentucky
+                        }
+                    });
+                }
 
                 // Update summary statistics
-                document.getElementById('pending-total-orders').textContent = data.total_orders || 0;
-                document.getElementById('pending-unique-skus').textContent = data.unique_skus || 0;
-                document.getElementById('pending-burnaby-orders').textContent = data.burnaby_orders || 0;
-                document.getElementById('pending-kentucky-orders').textContent = data.kentucky_orders || 0;
+                document.getElementById('pending-total-orders').textContent = totalOrders;
+                document.getElementById('pending-unique-skus').textContent = uniqueSkus;
+                document.getElementById('pending-burnaby-orders').textContent = burnabyOrders;
+                document.getElementById('pending-kentucky-orders').textContent = kentuckyOrders;
 
             } catch (error) {
                 console.error('Error refreshing pending orders summary:', error);
