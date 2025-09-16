@@ -1241,35 +1241,15 @@
 
                 const result = await response.json();
 
-                // Calculate summary statistics from the SKU-level data
-                let totalOrders = 0;
-                let uniqueSkus = 0;
-                let burnabyOrders = 0;
-                let kentuckyOrders = 0;
-
-                if (result.success && result.data && Array.isArray(result.data)) {
-                    // Count unique SKUs
-                    uniqueSkus = result.data.length;
-
-                    // Sum up the order counts from each SKU's pending quantities
-                    result.data.forEach(sku => {
-                        totalOrders += (sku.supplier_orders || 0);
-
-                        // Count orders by destination (using burnaby_pending and kentucky_pending as proxy)
-                        if (sku.burnaby_pending && sku.burnaby_pending > 0) {
-                            burnabyOrders += (sku.supplier_orders || 1); // Estimate orders going to Burnaby
-                        }
-                        if (sku.kentucky_pending && sku.kentucky_pending > 0) {
-                            kentuckyOrders += (sku.supplier_orders || 1); // Estimate orders going to Kentucky
-                        }
-                    });
+                if (result.success) {
+                    // Update summary statistics directly from API response
+                    document.getElementById('pending-total-orders').textContent = result.total_orders || 0;
+                    document.getElementById('pending-unique-skus').textContent = result.unique_skus || 0;
+                    document.getElementById('pending-burnaby-orders').textContent = result.burnaby_orders || 0;
+                    document.getElementById('pending-kentucky-orders').textContent = result.kentucky_orders || 0;
+                } else {
+                    throw new Error('API returned unsuccessful response');
                 }
-
-                // Update summary statistics
-                document.getElementById('pending-total-orders').textContent = totalOrders;
-                document.getElementById('pending-unique-skus').textContent = uniqueSkus;
-                document.getElementById('pending-burnaby-orders').textContent = burnabyOrders;
-                document.getElementById('pending-kentucky-orders').textContent = kentuckyOrders;
 
             } catch (error) {
                 console.error('Error refreshing pending orders summary:', error);
@@ -1323,7 +1303,7 @@
                     tbody.innerHTML = orders.map(order => {
                         const orderDate = new Date(order.order_date).toLocaleDateString();
                         const expectedDate = new Date(order.calculated_arrival_date).toLocaleDateString();
-                        const daysUntil = Math.ceil((new Date(order.calculated_arrival_date) - new Date()) / (1000 * 60 * 60 * 24));
+                        const daysUntil = order.days_until_arrival;
 
                         // Visual indicator for estimated vs confirmed dates
                         const isEstimated = !order.expected_arrival;
@@ -1780,8 +1760,8 @@
                 showLoading(true, 'Clearing Orders', 'Deleting all pending orders...');
 
                 // Delete all pending orders
-                const deleteResponse = await fetch('/api/pending-orders/clear-all', {
-                    method: 'DELETE'
+                const deleteResponse = await fetch('/api/admin/clear-pending-orders', {
+                    method: 'POST'
                 });
 
                 if (!deleteResponse.ok) {

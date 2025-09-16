@@ -2349,7 +2349,9 @@ async def get_pending_orders(
     status: Optional[str] = None,
     destination: Optional[str] = None,
     order_type: Optional[str] = None,
-    overdue_only: bool = False
+    overdue_only: bool = False,
+    limit: Optional[int] = None,
+    offset: Optional[int] = 0
 ):
     """
     Retrieve pending orders with filtering options
@@ -2359,49 +2361,85 @@ async def get_pending_orders(
         destination: Filter by destination warehouse (burnaby/kentucky)
         order_type: Filter by order type (supplier/transfer)
         overdue_only: Show only overdue orders
+        limit: Maximum number of records to return
+        offset: Number of records to skip (for pagination)
 
     Returns:
-        List of pending orders with analysis data
+        List of pending orders with analysis data, total count, and pagination info
     """
     try:
         db = database.get_database_connection()
         cursor = db.cursor(pymysql.cursors.DictCursor)
 
-        # Base query using the analysis view
-        query = """
+        # Base query for counting total records
+        count_query = """
+        SELECT COUNT(*) as total FROM v_pending_orders_analysis
+        WHERE 1=1
+        """
+        count_params = []
+
+        # Base query for fetching data
+        data_query = """
         SELECT * FROM v_pending_orders_analysis
         WHERE 1=1
         """
-        params = []
+        data_params = []
 
-        # Apply filters
+        # Apply filters to both queries
+        filter_conditions = ""
+
         if status:
-            query += " AND status = %s"
-            params.append(status.lower())
+            filter_conditions += " AND status = %s"
+            count_params.append(status.lower())
+            data_params.append(status.lower())
 
         if destination:
-            query += " AND destination = %s"
-            params.append(destination.lower())
+            filter_conditions += " AND destination = %s"
+            count_params.append(destination.lower())
+            data_params.append(destination.lower())
 
         if order_type:
-            query += " AND order_type = %s"
-            params.append(order_type.lower())
+            filter_conditions += " AND order_type = %s"
+            count_params.append(order_type.lower())
+            data_params.append(order_type.lower())
 
         if overdue_only:
-            query += " AND is_overdue = TRUE"
+            filter_conditions += " AND is_overdue = TRUE"
 
-        query += " ORDER BY priority_score DESC, order_date ASC"
+        # Execute count query
+        cursor.execute(count_query + filter_conditions, count_params)
+        total_count = cursor.fetchone()['total']
 
-        cursor.execute(query, params)
+        # Execute data query with pagination
+        data_query += filter_conditions + " ORDER BY priority_score DESC, order_date ASC"
+
+        if limit:
+            data_query += " LIMIT %s"
+            data_params.append(limit)
+
+        if offset > 0:
+            data_query += " OFFSET %s"
+            data_params.append(offset)
+
+        cursor.execute(data_query, data_params)
         results = cursor.fetchall()
 
         cursor.close()
         db.close()
 
+        # Calculate pagination metadata
+        page_size = limit or total_count
+        current_page = (offset // page_size) + 1 if page_size > 0 else 1
+        total_pages = (total_count + page_size - 1) // page_size if page_size > 0 else 1
+
         return {
             "success": True,
             "data": results,
-            "count": len(results)
+            "count": len(results),
+            "total": total_count,
+            "page": current_page,
+            "pages": total_pages,
+            "page_size": page_size
         }
 
     except Exception as e:
@@ -2611,168 +2649,20 @@ async def bulk_create_pending_orders(bulk_data: models.BulkPendingInventoryCreat
             detail=f"Bulk creation failed: {str(e)}"
         )
 
-@app.put("/api/pending-orders/{order_id}",
-         summary="Update Pending Order",
-         description="Update an existing pending order",
-         tags=["Pending Orders"])
-async def update_pending_order(order_id: int, updates: models.PendingInventoryUpdate):
-    """
-    Update an existing pending order
-    """
-    try:
-        db = database.get_database_connection()
-        cursor = db.cursor()
-
-        # Check if order exists
-        cursor.execute("SELECT id FROM pending_inventory WHERE id = %s", (order_id,))
-        if not cursor.fetchone():
-            raise HTTPException(
-                status_code=404,
-                detail=f"Pending order {order_id} not found"
-            )
-
-        # Build update query dynamically
-        update_fields = []
-        update_values = []
-
-        for field, value in updates.dict(exclude_unset=True).items():
-            if value is not None:
-                update_fields.append(f"{field} = %s")
-                update_values.append(value)
-
-        if not update_fields:
-            raise HTTPException(
-                status_code=400,
-                detail="No fields to update"
-            )
-
-        update_query = f"""
-        UPDATE pending_inventory
-        SET {', '.join(update_fields)}, updated_at = NOW()
-        WHERE id = %s
-        """
-        update_values.append(order_id)
-
-        cursor.execute(update_query, update_values)
-
-        if cursor.rowcount == 0:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Pending order {order_id} not found"
-            )
-
-        db.commit()
-        cursor.close()
-        db.close()
-
-        return {
-            "success": True,
-            "message": f"Pending order {order_id} updated successfully",
-            "id": order_id
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        if 'db' in locals():
-            db.rollback()
-        logger.error(f"Failed to update pending order {order_id}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to update pending order: {str(e)}"
-        )
-
-@app.delete("/api/pending-orders/{order_id}",
-           summary="Delete Pending Order",
-           description="Delete a pending order",
-           tags=["Pending Orders"])
-async def delete_pending_order(order_id: int):
-    """
-    Delete a pending order
-    """
-    try:
-        db = database.get_database_connection()
-        cursor = db.cursor()
-
-        cursor.execute("DELETE FROM pending_inventory WHERE id = %s", (order_id,))
-
-        if cursor.rowcount == 0:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Pending order {order_id} not found"
-            )
-
-        db.commit()
-        cursor.close()
-        db.close()
-
-        return {
-            "success": True,
-            "message": f"Pending order {order_id} deleted successfully"
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        if 'db' in locals():
-            db.rollback()
-        logger.error(f"Failed to delete pending order {order_id}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to delete pending order: {str(e)}"
-        )
-
-@app.get("/api/pending-orders/{order_id}",
-         summary="Get Pending Order Details",
-         description="Get detailed information for a specific pending order",
-         tags=["Pending Orders"])
-async def get_pending_order(order_id: int):
-    """
-    Get detailed information for a specific pending order
-    """
-    try:
-        db = database.get_database_connection()
-        cursor = db.cursor(pymysql.cursors.DictCursor)
-
-        query = """
-        SELECT * FROM v_pending_orders_analysis
-        WHERE id = %s
-        """
-
-        cursor.execute(query, (order_id,))
-        result = cursor.fetchone()
-
-        if not result:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Pending order {order_id} not found"
-            )
-
-        cursor.close()
-        db.close()
-
-        return {
-            "success": True,
-            "data": result
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get pending order {order_id}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to get pending order: {str(e)}"
-        )
-
 # ===================================================================
 # PENDING ORDERS BULK MANAGEMENT ENDPOINTS
 # ===================================================================
 
-@app.delete("/api/pending-orders/clear-all",
+@app.get("/api/pending-orders/debug-test-route")
+async def test_route():
+    """Test route to verify routing works"""
+    print("DEBUG: test_route function called")
+    return {"message": "Test route works"}
+
+@app.post("/api/admin/clear-pending-orders",
            summary="Clear All Pending Orders",
            description="Delete all pending orders with safety confirmation",
-           tags=["Pending Orders"])
+           tags=["Admin"])
 async def clear_all_pending_orders():
     """
     Clear all pending orders from the database
@@ -2935,6 +2825,160 @@ async def clear_pending_orders_sku(sku_id: str):
         raise HTTPException(
             status_code=500,
             detail=f"Failed to clear SKU orders: {str(e)}"
+        )
+
+@app.delete("/api/pending-orders/{order_id}",
+           summary="Delete Pending Order",
+           description="Delete a pending order",
+           tags=["Pending Orders"])
+async def delete_pending_order(order_id: int):
+    """
+    Delete a pending order
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor()
+
+        cursor.execute("DELETE FROM pending_inventory WHERE id = %s", (order_id,))
+
+        if cursor.rowcount == 0:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Pending order {order_id} not found"
+            )
+
+        db.commit()
+        cursor.close()
+        db.close()
+
+        return {
+            "success": True,
+            "message": f"Pending order {order_id} deleted successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if 'db' in locals():
+            db.rollback()
+        logger.error(f"Failed to delete pending order {order_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete pending order: {str(e)}"
+        )
+
+@app.get("/api/pending-orders/{order_id}",
+         summary="Get Pending Order Details",
+         description="Get detailed information for a specific pending order",
+         tags=["Pending Orders"])
+async def get_pending_order(order_id: int):
+    """
+    Get detailed information for a specific pending order
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+
+        query = """
+        SELECT * FROM v_pending_orders_analysis
+        WHERE id = %s
+        """
+
+        cursor.execute(query, (order_id,))
+        result = cursor.fetchone()
+
+        if not result:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Pending order {order_id} not found"
+            )
+
+        cursor.close()
+        db.close()
+
+        return {
+            "success": True,
+            "data": result
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get pending order {order_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get pending order: {str(e)}"
+        )
+
+@app.put("/api/pending-orders/{order_id}",
+         summary="Update Pending Order",
+         description="Update an existing pending order",
+         tags=["Pending Orders"])
+async def update_pending_order(order_id: int, updates: models.PendingInventoryUpdate):
+    """
+    Update an existing pending order
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor()
+
+        # Check if order exists
+        cursor.execute("SELECT id FROM pending_inventory WHERE id = %s", (order_id,))
+        if not cursor.fetchone():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Pending order {order_id} not found"
+            )
+
+        # Build update query dynamically
+        update_fields = []
+        update_values = []
+
+        for field, value in updates.dict(exclude_unset=True).items():
+            if value is not None:
+                update_fields.append(f"{field} = %s")
+                update_values.append(value)
+
+        if not update_fields:
+            raise HTTPException(
+                status_code=400,
+                detail="No fields to update"
+            )
+
+        update_query = f"""
+        UPDATE pending_inventory
+        SET {', '.join(update_fields)}, updated_at = NOW()
+        WHERE id = %s
+        """
+        update_values.append(order_id)
+
+        cursor.execute(update_query, update_values)
+
+        if cursor.rowcount == 0:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Pending order {order_id} not found"
+            )
+
+        db.commit()
+        cursor.close()
+        db.close()
+
+        return {
+            "success": True,
+            "message": f"Pending order {order_id} updated successfully",
+            "id": order_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if 'db' in locals():
+            db.rollback()
+        logger.error(f"Failed to update pending order {order_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update pending order: {str(e)}"
         )
 
 # ===================================================================
