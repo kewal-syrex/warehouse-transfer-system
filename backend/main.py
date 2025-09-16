@@ -1177,6 +1177,8 @@ async def import_pending_orders_from_csv(
         reader = csv.DictReader(csv_file)
 
         orders = []
+        estimated_dates_added = 0
+
         for row in reader:
             # Parse required fields
             sku_id = row.get('sku_id', '').strip()
@@ -1188,33 +1190,67 @@ async def import_pending_orders_from_csv(
 
             try:
                 quantity = int(quantity_str)
+                # Skip orders with zero or negative quantities
+                if quantity <= 0:
+                    continue
             except ValueError:
                 continue
 
-            # Parse optional expected_date
-            expected_date_str = row.get('expected_date', '').strip()
+            # Parse order_date (required field)
+            order_date_str = row.get('order_date', '').strip()
+            if order_date_str:
+                try:
+                    order_date = datetime.strptime(order_date_str, '%Y-%m-%d').date()
+                    # Validate order date is not in the future
+                    if order_date > datetime.now().date():
+                        order_date = datetime.now().date()
+                except ValueError:
+                    # Default to today if invalid date
+                    order_date = datetime.now().date()
+            else:
+                # Default to today if no order_date provided (backward compatibility)
+                order_date = datetime.now().date()
+
+            # Parse optional expected_arrival
+            expected_date_str = row.get('expected_arrival', '').strip()
+            if not expected_date_str:
+                # Try alternative column names for backward compatibility
+                expected_date_str = row.get('expected_date', '').strip()
+
             if expected_date_str:
                 try:
-                    expected_arrival = datetime.strptime(expected_date_str, '%Y-%m-%d').date().isoformat()
-                    is_estimated = False
+                    expected_arrival = datetime.strptime(expected_date_str, '%Y-%m-%d').date()
+                    # Validate expected date is after order date
+                    if expected_arrival < order_date:
+                        expected_arrival = None
+                        expected_arrival_iso = None
+                        is_estimated = True
+                        estimated_dates_added += 1
+                    else:
+                        expected_arrival_iso = expected_arrival.isoformat()
+                        is_estimated = False
                 except ValueError:
-                    # Default to 120 days from now if invalid date
-                    expected_arrival = (datetime.now().date() + timedelta(days=120)).isoformat()
+                    expected_arrival = None
+                    expected_arrival_iso = None
                     is_estimated = True
+                    estimated_dates_added += 1
             else:
-                # Default to 120 days from now if no date provided
-                expected_arrival = (datetime.now().date() + timedelta(days=120)).isoformat()
+                # No expected date provided - will be calculated from order_date + 120 days
+                expected_arrival = None
+                expected_arrival_iso = None
                 is_estimated = True
+                estimated_dates_added += 1
 
             order = {
                 "sku_id": sku_id,
                 "quantity": quantity,
                 "destination": destination,
-                "order_date": datetime.now().date().isoformat(),
-                "expected_arrival": expected_arrival,
+                "order_date": order_date.isoformat(),
+                "expected_arrival": expected_arrival_iso,
                 "is_estimated": is_estimated,
                 "order_type": "supplier",
-                "status": "ordered"
+                "status": row.get('status', 'ordered').lower(),
+                "notes": row.get('notes', '').strip() or None
             }
             orders.append(order)
 
@@ -1247,7 +1283,6 @@ async def import_pending_orders_from_csv(
         error_count = 0
         errors = []
         batch_id = str(uuid.uuid4())
-        estimated_dates_added = 0
 
         # Validate SKUs
         all_skus = [order["sku_id"] for order in orders]
@@ -1266,8 +1301,8 @@ async def import_pending_orders_from_csv(
                     cursor.execute("""
                         INSERT INTO pending_inventory
                         (sku_id, quantity, destination, order_date, expected_arrival,
-                         order_type, status, lead_time_days, is_estimated, notes, batch_id)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         order_type, status, lead_time_days, is_estimated, notes)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """, (
                         order_data["sku_id"],
                         order_data["quantity"],
@@ -1278,8 +1313,7 @@ async def import_pending_orders_from_csv(
                         order_data["status"],
                         120,  # Default lead time
                         order_data["is_estimated"],
-                        None,  # notes
-                        batch_id
+                        order_data.get("notes")
                     ))
                     imported_count += 1
                     if order_data["is_estimated"]:
@@ -2397,7 +2431,7 @@ async def get_pending_orders_summary():
             COUNT(DISTINCT sku_id) as unique_skus,
             SUM(CASE WHEN destination = 'burnaby' THEN 1 ELSE 0 END) as burnaby_orders,
             SUM(CASE WHEN destination = 'kentucky' THEN 1 ELSE 0 END) as kentucky_orders
-        FROM pending_orders
+        FROM pending_inventory
         WHERE status NOT IN ('cancelled', 'received')
         """
 
