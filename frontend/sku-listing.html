@@ -273,7 +273,8 @@
                             <tr>
                                 <th>SKU ID</th>
                                 <th>Description</th>
-                                <th>Status</th>
+                                <th>SKU Status</th>
+                                <th>Stock Status</th>
                                 <th>Burnaby QTY</th>
                                 <th>Kentucky QTY</th>
                                 <th>Total QTY</th>
@@ -286,7 +287,7 @@
                         </thead>
                         <tbody id="skuTableBody">
                             <tr>
-                                <td colspan="11" class="text-center py-4">
+                                <td colspan="12" class="text-center py-4">
                                     <span class="loading-spinner me-2"></span>
                                     Loading SKU data...
                                 </td>
@@ -549,7 +550,7 @@
                 console.error('Error loading SKU data:', error);
                 $('#skuTableBody').html(`
                     <tr>
-                        <td colspan="11" class="text-center py-4 text-danger">
+                        <td colspan="12" class="text-center py-4 text-danger">
                             <i class="fas fa-exclamation-triangle me-2"></i>
                             Failed to load SKU data. Please refresh the page.
                         </td>
@@ -568,7 +569,7 @@
             if (skus.length === 0) {
                 tbody.html(`
                     <tr>
-                        <td colspan="11" class="text-center py-4">
+                        <td colspan="12" class="text-center py-4">
                             <i class="fas fa-search me-2"></i>
                             No SKUs found matching current filters.
                         </td>
@@ -578,17 +579,26 @@
                 return;
             }
 
+            // Debug: Log first few SKUs to verify data
+            console.log('SKU data sample:', skus.slice(0, 3));
+
             let html = '';
             skus.forEach(sku => {
                 const status = getStockStatus(sku.burnaby_qty, sku.kentucky_qty);
                 const totalQty = (sku.burnaby_qty || 0) + (sku.kentucky_qty || 0);
-                const unitPrice = sku.unit_price || 25.00; // Default price if not available
+                const unitPrice = sku.cost_per_unit || 0.00; // Use cost_per_unit from backend
                 const totalValue = totalQty * unitPrice;
+
+                // Debug: Log pricing data for first few SKUs
+                if (skus.indexOf(sku) < 3) {
+                    console.log(`SKU ${sku.sku_id}: cost_per_unit=${sku.cost_per_unit}, unitPrice=${unitPrice}`);
+                }
                 
                 html += `
                     <tr>
                         <td><strong>${sku.sku_id}</strong></td>
                         <td>${sku.description || 'N/A'}</td>
+                        <td>${getSkuStatusBadge(sku.status)}</td>
                         <td>${getStatusBadge(status)}</td>
                         <td>${formatNumber(sku.burnaby_qty || 0)}</td>
                         <td>${formatNumber(sku.kentucky_qty || 0)}</td>
@@ -619,14 +629,17 @@
             tbody.html(html);
             $('#recordCount').text(`${skus.length} SKUs`);
 
-            // Initialize DataTable
+            // Initialize DataTable with correct column count (12 total)
             dataTable = $('#skuTable').DataTable({
                 pageLength: 25,
                 lengthMenu: [10, 25, 50, 100],
                 order: [[0, 'asc']],
                 columnDefs: [
-                    { targets: [3, 4, 5], className: 'text-end' },
-                    { targets: [6, 7], className: 'text-end' }
+                    // Right-align numeric columns
+                    { targets: [4, 5, 6], className: 'text-end' }, // Burnaby QTY, Kentucky QTY, Total QTY
+                    { targets: [7, 8], className: 'text-end' },     // Unit Price, Total Value
+                    // Center-align badge columns
+                    { targets: [2, 3, 9], className: 'text-center' } // SKU Status, Stock Status, ABC/XYZ
                 ]
             });
         }
@@ -662,6 +675,15 @@
                 'out_of_stock': '<span class="status-badge status-out-of-stock">Out of Stock</span>'
             };
             return badges[status] || '<span class="status-badge">Unknown</span>';
+        }
+
+        function getSkuStatusBadge(status) {
+            const badges = {
+                'Active': '<span class="badge bg-success">Active</span>',
+                'Death Row': '<span class="badge bg-warning text-dark">Death Row</span>',
+                'Discontinued': '<span class="badge bg-secondary">Discontinued</span>'
+            };
+            return badges[status] || '<span class="badge bg-light text-dark">Unknown</span>';
         }
 
         function getAbcBadge(abcClass) {
