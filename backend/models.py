@@ -171,7 +171,20 @@ class PendingInventory(Base):
 
     @property
     def calculated_arrival_date(self):
-        """Calculate arrival date based on expected_arrival or order_date + lead_time"""
+        """
+        Calculate the final arrival date for pending inventory
+
+        Business Logic:
+        - If expected_arrival is provided by user: use that date (confirmed)
+        - If expected_arrival is None: calculate order_date + lead_time_days (estimated)
+        - Default lead_time_days is 120 days (4 months)
+
+        This property ensures consistent date calculation across the system
+        and provides a single source of truth for arrival dates.
+
+        Returns:
+            date: The calculated arrival date
+        """
         from datetime import timedelta
         if self.expected_arrival:
             return self.expected_arrival
@@ -367,6 +380,21 @@ class PendingInventoryBase(BaseModel):
         if v.lower() not in ['ordered', 'shipped', 'received', 'cancelled']:
             raise ValueError('Status must be ordered, shipped, received, or cancelled')
         return v.lower()
+
+    @validator('order_date')
+    def validate_order_date(cls, v):
+        from datetime import date
+        if v > date.today():
+            raise ValueError('Order date cannot be in the future')
+        return v
+
+    @validator('expected_arrival')
+    def validate_expected_arrival(cls, v, values):
+        if v is None:
+            return v
+        if 'order_date' in values and v < values['order_date']:
+            raise ValueError('Expected arrival date cannot be before order date')
+        return v
 
 class PendingInventoryCreate(PendingInventoryBase):
     """

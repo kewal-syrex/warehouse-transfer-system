@@ -126,23 +126,34 @@ class ImportExportManager:
     
     def _import_inventory_data(self, df: pd.DataFrame, sheet_name: str) -> Dict[str, Any]:
         """
-        Import inventory levels data from Excel sheet with flexible column support
+        Import inventory levels data from Excel sheet with comprehensive error logging
 
-        Supports partial imports with either Burnaby-only, Kentucky-only, or both quantities.
-        Missing quantity columns default to 0 to allow partial inventory updates.
+        Tracks each row's success/failure with specific error reasons and line numbers.
+        Pre-validates SKUs against master table to prevent foreign key violations.
+        Supports partial imports with detailed reporting.
 
         Args:
             df: DataFrame containing inventory data
             sheet_name: Name of the Excel sheet for error reporting
 
         Returns:
-            Dict containing import results, record count, and any errors
+            Dict containing detailed import results with line-by-line tracking
         """
 
         # Required column is just sku_id, quantity columns are flexible
         required_columns = ['sku_id']
-        optional_columns = ['burnaby_qty', 'kentucky_qty']
-        result = {"type": "inventory", "records": 0, "errors": []}
+        result = {
+            "type": "inventory",
+            "records": 0,
+            "errors": [],
+            "import_summary": {
+                "total_rows": 0,
+                "successful": 0,
+                "failed": 0,
+                "skipped": 0
+            },
+            "import_details": []
+        }
 
         # Check for sku_id column (required)
         missing_required = self._validate_required_columns(df, required_columns, sheet_name)
@@ -150,7 +161,6 @@ class ImportExportManager:
             return result
 
         # Check which quantity columns are available
-        available_cols = [col.lower() for col in df.columns]
         has_burnaby = any('burnaby' in col.lower() and 'qty' in col.lower() for col in df.columns)
         has_kentucky = any('kentucky' in col.lower() and 'qty' in col.lower() for col in df.columns)
 
@@ -189,81 +199,171 @@ class ImportExportManager:
             df_clean['kentucky_qty'] = 0
             self.validation_warnings.append(f"Kentucky quantities defaulted to 0 in {sheet_name}")
 
-        # Convert quantities to integers
+        # Convert quantities to integers and track conversion errors
         for qty_col in ['burnaby_qty', 'kentucky_qty']:
             df_clean[qty_col] = pd.to_numeric(df_clean[qty_col], errors='coerce').fillna(0).astype(int)
-        
-        # Import to database
+
+        # Track original row numbers (adding 2 to account for header row and 0-based indexing)
+        df_clean['original_row'] = df_clean.index + 2
+
+        result["import_summary"]["total_rows"] = len(df_clean)
+
+        # Pre-load all existing SKUs from master table and inventory table
         try:
             db = database.get_database_connection()
             cursor = db.cursor()
 
-            imported_count = 0
-            skipped_skus = []
-            for _, row in df_clean.iterrows():
-                # Check which columns were actually provided (not defaulted to 0)
+            # Get all SKUs that exist in master table
+            cursor.execute("SELECT sku_id FROM skus")
+            existing_master_skus = {row[0] for row in cursor.fetchall()}
+
+            # Get all SKUs that exist in inventory table
+            cursor.execute("SELECT sku_id FROM inventory_current")
+            existing_inventory_skus = {row[0] for row in cursor.fetchall()}
+
+            logger.info(f"Found {len(existing_master_skus)} SKUs in master table, {len(existing_inventory_skus)} in inventory table")
+
+        except Exception as e:
+            self.validation_errors.append(f"Failed to load existing SKUs: {str(e)}")
+            logger.error(f"Database error loading SKUs: {str(e)}")
+            db.close()
+            return result
+
+        # Track duplicates within the CSV file
+        sku_counts = df_clean['sku_id'].value_counts()
+        duplicate_skus = set(sku_counts[sku_counts > 1].index)
+
+        # Process each row with detailed tracking
+        imported_count = 0
+
+        for idx, row in df_clean.iterrows():
+            line_number = row['original_row']
+            sku_id = row['sku_id']
+
+            detail_entry = {
+                "line_number": line_number,
+                "sku_id": sku_id,
+                "burnaby_qty": row['burnaby_qty'],
+                "kentucky_qty": row['kentucky_qty'],
+                "status": "pending",
+                "error_category": None,
+                "error_message": None
+            }
+
+            try:
+                # Check for duplicate SKU in file
+                if sku_id in duplicate_skus:
+                    detail_entry["status"] = "failed"
+                    detail_entry["error_category"] = "DUPLICATE_IN_FILE"
+                    detail_entry["error_message"] = f"SKU {sku_id} appears multiple times in CSV file"
+                    result["import_summary"]["failed"] += 1
+                    result["import_details"].append(detail_entry)
+                    continue
+
+                # Validate SKU exists in master table
+                if sku_id not in existing_master_skus:
+                    detail_entry["status"] = "failed"
+                    detail_entry["error_category"] = "SKU_NOT_IN_MASTER"
+                    detail_entry["error_message"] = f"SKU {sku_id} does not exist in master SKU table"
+                    result["import_summary"]["failed"] += 1
+                    result["import_details"].append(detail_entry)
+                    continue
+
+                # Validate data quality
+                if row['burnaby_qty'] < 0 or row['kentucky_qty'] < 0:
+                    detail_entry["status"] = "failed"
+                    detail_entry["error_category"] = "INVALID_DATA"
+                    detail_entry["error_message"] = f"Negative quantities not allowed (Burnaby: {row['burnaby_qty']}, Kentucky: {row['kentucky_qty']})"
+                    result["import_summary"]["failed"] += 1
+                    result["import_details"].append(detail_entry)
+                    continue
+
+                # Check which columns were actually provided
                 update_burnaby = has_burnaby
                 update_kentucky = has_kentucky
                 update_both = update_burnaby and update_kentucky
 
-                # Check if this is a new or existing SKU
-                cursor.execute("SELECT sku_id FROM inventory_current WHERE sku_id = %s", (row['sku_id'],))
-                exists = cursor.fetchone()
-
-                if exists:
-                    # Existing SKU - UPDATE only the provided warehouse columns
+                # Check if SKU exists in inventory table
+                if sku_id in existing_inventory_skus:
+                    # Update existing inventory record
                     if update_both:
                         query = """
                         UPDATE inventory_current
                         SET burnaby_qty = %s, kentucky_qty = %s, last_updated = NOW()
                         WHERE sku_id = %s
                         """
-                        cursor.execute(query, (row['burnaby_qty'], row['kentucky_qty'], row['sku_id']))
+                        cursor.execute(query, (row['burnaby_qty'], row['kentucky_qty'], sku_id))
                     elif update_burnaby:
                         query = """
                         UPDATE inventory_current
                         SET burnaby_qty = %s, last_updated = NOW()
                         WHERE sku_id = %s
                         """
-                        cursor.execute(query, (row['burnaby_qty'], row['sku_id']))
+                        cursor.execute(query, (row['burnaby_qty'], sku_id))
                     elif update_kentucky:
                         query = """
                         UPDATE inventory_current
                         SET kentucky_qty = %s, last_updated = NOW()
                         WHERE sku_id = %s
                         """
-                        cursor.execute(query, (row['kentucky_qty'], row['sku_id']))
+                        cursor.execute(query, (row['kentucky_qty'], sku_id))
+
+                    detail_entry["status"] = "success"
+                    detail_entry["error_message"] = "Updated existing inventory record"
                     imported_count += 1
+                    result["import_summary"]["successful"] += 1
+
                 else:
-                    # New SKU - only insert if both quantities provided
+                    # Insert new inventory record (only if both quantities provided)
                     if update_both:
                         query = """
                         INSERT INTO inventory_current (sku_id, burnaby_qty, kentucky_qty, last_updated)
                         VALUES (%s, %s, %s, NOW())
                         """
-                        cursor.execute(query, (row['sku_id'], row['burnaby_qty'], row['kentucky_qty']))
+                        cursor.execute(query, (sku_id, row['burnaby_qty'], row['kentucky_qty']))
+
+                        detail_entry["status"] = "success"
+                        detail_entry["error_message"] = "Created new inventory record"
                         imported_count += 1
+                        result["import_summary"]["successful"] += 1
+
                     else:
                         # Skip new SKU with partial data
-                        skipped_skus.append(row['sku_id'])
+                        detail_entry["status"] = "skipped"
+                        detail_entry["error_category"] = "PARTIAL_DATA_NEW_SKU"
+                        detail_entry["error_message"] = f"New SKU requires both warehouse quantities (has Burnaby: {update_burnaby}, has Kentucky: {update_kentucky})"
+                        result["import_summary"]["skipped"] += 1
 
-            # Add warning for skipped SKUs if any
-            if skipped_skus:
-                self.validation_warnings.append(
-                    f"New SKUs with partial data skipped: {', '.join(skipped_skus[:5])}" +
-                    (f" and {len(skipped_skus)-5} more" if len(skipped_skus) > 5 else "")
-                )
-            
+            except Exception as e:
+                # Catch any database errors for individual SKUs
+                detail_entry["status"] = "failed"
+                detail_entry["error_category"] = "DATABASE_ERROR"
+                detail_entry["error_message"] = f"Database error: {str(e)}"
+                result["import_summary"]["failed"] += 1
+                logger.error(f"Database error for SKU {sku_id} at line {line_number}: {str(e)}")
+
+            result["import_details"].append(detail_entry)
+
+        try:
             db.commit()
             db.close()
-            
+
             result["records"] = imported_count
-            logger.info(f"Imported {imported_count} inventory records from {sheet_name}")
-            
+
+            # Log comprehensive summary
+            summary = result["import_summary"]
+            logger.info(f"Import completed for {sheet_name}: {summary['successful']} successful, {summary['failed']} failed, {summary['skipped']} skipped out of {summary['total_rows']} total rows")
+
+            # Add warnings for any failures
+            if summary["failed"] > 0:
+                self.validation_warnings.append(f"{summary['failed']} rows failed to import - see detailed report")
+            if summary["skipped"] > 0:
+                self.validation_warnings.append(f"{summary['skipped']} rows skipped due to partial data")
+
         except Exception as e:
-            self.validation_errors.append(f"Database error in {sheet_name}: {str(e)}")
-            logger.error(f"Database error importing inventory: {str(e)}")
-        
+            self.validation_errors.append(f"Database commit error in {sheet_name}: {str(e)}")
+            logger.error(f"Database commit error: {str(e)}")
+
         return result
     
     def _import_sales_data(self, df: pd.DataFrame, sheet_name: str) -> Dict[str, Any]:
@@ -983,14 +1083,40 @@ class ImportExportManager:
         return output.getvalue().encode('utf-8')
     
     def import_csv_file(self, file_content: bytes, filename: str) -> Dict[str, Any]:
-        """Import CSV file with validation"""
+        """Import CSV file with comprehensive validation and detailed reporting"""
 
         try:
+            # Reset validation tracking
+            self.validation_errors = []
+            self.validation_warnings = []
+
             # Read CSV
             df = pd.read_csv(io.StringIO(file_content.decode('utf-8')))
 
-            # Process similar to Excel import
-            return self._auto_detect_and_import(df, filename)
+            # Create structured results similar to Excel import
+            results = {
+                "success": False,
+                "filename": filename,
+                "import_timestamp": datetime.now().isoformat(),
+                "sheets_processed": 1,
+                "records_imported": 0,
+                "errors": [],
+                "warnings": [],
+                "results": []  # Add results array for detailed import data
+            }
+
+            # Process the CSV (treat as single sheet)
+            sheet_result = self._auto_detect_and_import(df, filename)
+            results["records_imported"] = sheet_result.get("records", 0)
+            results["results"].append(sheet_result)  # Add detailed results
+
+            # Compile validation results
+            results["errors"] = self.validation_errors
+            results["warnings"] = self.validation_warnings
+            results["success"] = len(self.validation_errors) == 0
+
+            logger.info(f"CSV import completed: {filename}, Success: {results['success']}, Records: {results['records_imported']}")
+            return results
 
         except Exception as e:
             logger.error(f"CSV import failed: {str(e)}")

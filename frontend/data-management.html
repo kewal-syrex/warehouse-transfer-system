@@ -826,31 +826,64 @@
 
             resultsDiv.style.display = 'block';
 
+            // Check if we have detailed import results
+            const hasDetailedResults = result.results && result.results.some(r => r.import_summary);
+
             // Update summary statistics
             if (result.success) {
+                let totalRecords = result.records_imported || 0;
+                let totalSuccessful = 0;
+                let totalFailed = 0;
+                let totalSkipped = 0;
+                let totalWarnings = result.warnings?.length || 0;
+                let totalErrors = result.errors?.length || 0;
+
+                // Aggregate detailed results if available
+                if (hasDetailedResults) {
+                    result.results.forEach(r => {
+                        if (r.import_summary) {
+                            totalSuccessful += r.import_summary.successful || 0;
+                            totalFailed += r.import_summary.failed || 0;
+                            totalSkipped += r.import_summary.skipped || 0;
+                        }
+                    });
+                }
+
                 summaryDiv.innerHTML = `
-                    <div class="col-md-3">
+                    <div class="col-md-2">
                         <div class="summary-stat bg-success text-white">
-                            <span class="stat-number">${result.sheets_processed || 1}</span>
-                            <span class="stat-label">Sheets Processed</span>
+                            <span class="stat-number">${totalSuccessful || totalRecords}</span>
+                            <span class="stat-label">Successful</span>
                         </div>
                     </div>
-                    <div class="col-md-3">
-                        <div class="summary-stat bg-primary text-white">
-                            <span class="stat-number">${result.records_imported || 0}</span>
-                            <span class="stat-label">Records Imported</span>
+                    <div class="col-md-2">
+                        <div class="summary-stat bg-danger text-white">
+                            <span class="stat-number">${totalFailed}</span>
+                            <span class="stat-label">Failed</span>
                         </div>
                     </div>
-                    <div class="col-md-3">
+                    <div class="col-md-2">
+                        <div class="summary-stat bg-secondary text-white">
+                            <span class="stat-number">${totalSkipped}</span>
+                            <span class="stat-label">Skipped</span>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
                         <div class="summary-stat bg-warning text-dark">
-                            <span class="stat-number">${result.warnings?.length || 0}</span>
+                            <span class="stat-number">${totalWarnings}</span>
                             <span class="stat-label">Warnings</span>
                         </div>
                     </div>
-                    <div class="col-md-3">
-                        <div class="summary-stat bg-danger text-white">
-                            <span class="stat-number">${result.errors?.length || 0}</span>
-                            <span class="stat-label">Errors</span>
+                    <div class="col-md-2">
+                        <div class="summary-stat bg-info text-white">
+                            <span class="stat-number">${result.sheets_processed || 1}</span>
+                            <span class="stat-label">Sheets</span>
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <div class="summary-stat bg-primary text-white">
+                            <span class="stat-number">${totalSuccessful + totalFailed + totalSkipped}</span>
+                            <span class="stat-label">Total Rows</span>
                         </div>
                     </div>
                 `;
@@ -862,7 +895,7 @@
             if (result.success) {
                 messagesHtml += `<div class="validation-success">
                     <i class="fas fa-check-circle me-2"></i>
-                    Successfully imported ${filename} - ${result.records_imported || 0} records processed
+                    Successfully processed ${filename}
                 </div>`;
             } else {
                 messagesHtml += `<div class="validation-error">
@@ -891,7 +924,180 @@
                 });
             }
 
+            // Add detailed import results if available
+            if (hasDetailedResults) {
+                messagesHtml += '<div class="mt-4">';
+
+                result.results.forEach((sheetResult, index) => {
+                    if (sheetResult.import_details && sheetResult.import_details.length > 0) {
+                        const summary = sheetResult.import_summary;
+                        const failedItems = sheetResult.import_details.filter(item => item.status === 'failed');
+                        const skippedItems = sheetResult.import_details.filter(item => item.status === 'skipped');
+
+                        messagesHtml += `
+                            <div class="detailed-results mb-4">
+                                <h5 class="text-primary">
+                                    <i class="fas fa-table me-2"></i>
+                                    Detailed Results: ${summary.successful} successful, ${summary.failed} failed, ${summary.skipped} skipped
+                                </h5>
+                        `;
+
+                        // Show failed items
+                        if (failedItems.length > 0) {
+                            messagesHtml += `
+                                <div class="mb-3">
+                                    <h6 class="text-danger">
+                                        <i class="fas fa-times-circle me-2"></i>
+                                        Failed Items (${failedItems.length})
+                                    </h6>
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-striped">
+                                            <thead class="table-danger">
+                                                <tr>
+                                                    <th>Line</th>
+                                                    <th>SKU ID</th>
+                                                    <th>Error Category</th>
+                                                    <th>Error Message</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                            `;
+
+                            failedItems.slice(0, 50).forEach(item => {
+                                messagesHtml += `
+                                    <tr>
+                                        <td>${item.line_number}</td>
+                                        <td><code>${item.sku_id}</code></td>
+                                        <td><span class="badge bg-danger">${item.error_category}</span></td>
+                                        <td>${item.error_message}</td>
+                                    </tr>
+                                `;
+                            });
+
+                            if (failedItems.length > 50) {
+                                messagesHtml += `
+                                    <tr>
+                                        <td colspan="4" class="text-center text-muted">
+                                            ... and ${failedItems.length - 50} more failed items
+                                        </td>
+                                    </tr>
+                                `;
+                            }
+
+                            messagesHtml += `
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            `;
+                        }
+
+                        // Show skipped items
+                        if (skippedItems.length > 0) {
+                            messagesHtml += `
+                                <div class="mb-3">
+                                    <h6 class="text-secondary">
+                                        <i class="fas fa-minus-circle me-2"></i>
+                                        Skipped Items (${skippedItems.length})
+                                    </h6>
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-striped">
+                                            <thead class="table-secondary">
+                                                <tr>
+                                                    <th>Line</th>
+                                                    <th>SKU ID</th>
+                                                    <th>Reason</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                            `;
+
+                            skippedItems.slice(0, 20).forEach(item => {
+                                messagesHtml += `
+                                    <tr>
+                                        <td>${item.line_number}</td>
+                                        <td><code>${item.sku_id}</code></td>
+                                        <td>${item.error_message}</td>
+                                    </tr>
+                                `;
+                            });
+
+                            if (skippedItems.length > 20) {
+                                messagesHtml += `
+                                    <tr>
+                                        <td colspan="3" class="text-center text-muted">
+                                            ... and ${skippedItems.length - 20} more skipped items
+                                        </td>
+                                    </tr>
+                                `;
+                            }
+
+                            messagesHtml += `
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            `;
+                        }
+
+                        // Add export button for failed SKUs
+                        if (failedItems.length > 0) {
+                            messagesHtml += `
+                                <div class="mb-3">
+                                    <button class="btn btn-outline-danger btn-sm" onclick="exportFailedSKUs(${index})">
+                                        <i class="fas fa-download me-2"></i>
+                                        Export Failed SKUs
+                                    </button>
+                                </div>
+                            `;
+                        }
+
+                        messagesHtml += '</div>';
+                    }
+                });
+
+                messagesHtml += '</div>';
+            }
+
             messagesDiv.innerHTML = messagesHtml;
+
+            // Store detailed results for export functionality
+            window.lastImportResults = result;
+        }
+
+        // Export failed SKUs to CSV
+        function exportFailedSKUs(sheetIndex) {
+            if (!window.lastImportResults || !window.lastImportResults.results[sheetIndex]) {
+                alert('No detailed results available for export');
+                return;
+            }
+
+            const sheetResult = window.lastImportResults.results[sheetIndex];
+            const failedItems = sheetResult.import_details.filter(item => item.status === 'failed');
+
+            if (failedItems.length === 0) {
+                alert('No failed items to export');
+                return;
+            }
+
+            // Create CSV content
+            const csvHeader = 'Line Number,SKU ID,Error Category,Error Message,Burnaby Qty,Kentucky Qty\n';
+            const csvRows = failedItems.map(item =>
+                `${item.line_number},"${item.sku_id}","${item.error_category}","${item.error_message}",${item.burnaby_qty},${item.kentucky_qty}`
+            ).join('\n');
+
+            const csvContent = csvHeader + csvRows;
+
+            // Create and trigger download
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', `failed_skus_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
         }
 
         // =============================================================================
