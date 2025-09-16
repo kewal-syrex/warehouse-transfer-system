@@ -1550,6 +1550,98 @@ async def export_inventory_status_excel():
             detail=f"Inventory export failed: {str(e)}"
         )
 
+@app.get("/api/export/skus",
+         summary="Export All SKUs",
+         description="Export all SKUs to CSV format with complete master data",
+         tags=["Import/Export"],
+         responses={
+             200: {"description": "CSV file with all SKU data"},
+             500: {"description": "Export failed"}
+         })
+async def export_all_skus():
+    """
+    Export all SKUs to CSV format with complete master data
+
+    Returns:
+        StreamingResponse: CSV file containing all SKU records
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+
+        # Get all SKUs with complete data
+        query = """
+        SELECT
+            sku_id,
+            description,
+            supplier,
+            cost_per_unit,
+            status,
+            transfer_multiple,
+            abc_code,
+            xyz_code,
+            category,
+            created_at,
+            updated_at
+        FROM skus
+        ORDER BY sku_id
+        """
+
+        cursor.execute(query)
+        skus = cursor.fetchall()
+        cursor.close()
+        db.close()
+
+        # Convert to CSV
+        import csv
+        import io
+        from datetime import datetime
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        # Write header
+        headers = [
+            'sku_id', 'description', 'supplier', 'cost_per_unit', 'status',
+            'transfer_multiple', 'abc_code', 'xyz_code', 'category',
+            'created_at', 'updated_at'
+        ]
+        writer.writerow(headers)
+
+        # Write data
+        for sku in skus:
+            writer.writerow([
+                sku['sku_id'],
+                sku['description'],
+                sku['supplier'],
+                sku['cost_per_unit'],
+                sku['status'],
+                sku['transfer_multiple'],
+                sku['abc_code'],
+                sku['xyz_code'],
+                sku['category'],
+                sku['created_at'],
+                sku['updated_at']
+            ])
+
+        # Prepare response
+        output.seek(0)
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+        filename = f"all-skus-{timestamp}.csv"
+
+        return StreamingResponse(
+            io.BytesIO(output.getvalue().encode('utf-8')),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+
+    except Exception as e:
+        logger.error(f"SKU export failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"SKU export failed: {str(e)}"
+        )
+
 # =============================================================================
 # SKU MANAGEMENT ENDPOINTS
 # =============================================================================

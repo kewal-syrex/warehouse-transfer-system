@@ -246,8 +246,11 @@
                         <button class="btn btn-primary me-2" id="applyFilters">
                             <i class="fas fa-search me-1"></i> Apply Filters
                         </button>
-                        <button class="btn btn-outline-secondary" id="clearFilters">
+                        <button class="btn btn-outline-secondary me-2" id="clearFilters">
                             <i class="fas fa-times me-1"></i> Clear
+                        </button>
+                        <button class="btn btn-success me-2" id="exportSkusBtn">
+                            <i class="fas fa-download me-1"></i> Export All SKUs
                         </button>
                         <button class="btn btn-outline-danger ms-2" id="bulkDeleteBtn" data-bs-toggle="modal" data-bs-target="#bulkDeleteModal">
                             <i class="fas fa-trash me-1"></i> Delete Test SKUs
@@ -653,6 +656,7 @@
             // Event listeners
             $('#applyFilters').click(applyFilters);
             $('#clearFilters').click(clearFilters);
+            $('#exportSkusBtn').click(exportAllSkus);
         });
 
         async function loadSkuData() {
@@ -1447,6 +1451,57 @@
                 // Reset button state
                 $('#confirmDeleteAll').prop('disabled', false).html(`
                     <i class="fas fa-skull-crossbones me-1"></i>DELETE ALL SKUS PERMANENTLY
+                `);
+            }
+        }
+
+        // =============================================================================
+        // EXPORT FUNCTIONALITY
+        // =============================================================================
+
+        async function exportAllSkus() {
+            try {
+                // Show loading state
+                const originalBtn = $('#exportSkusBtn');
+                const originalHtml = originalBtn.html();
+                originalBtn.prop('disabled', true).html(`
+                    <i class="fas fa-spinner fa-spin me-1"></i>Exporting...
+                `);
+
+                // Call the export API
+                const response = await fetch('/api/export/skus');
+
+                if (!response.ok) {
+                    throw new Error(`Export failed: ${response.statusText}`);
+                }
+
+                // Get filename from response headers
+                const contentDisposition = response.headers.get('content-disposition');
+                const filename = contentDisposition
+                    ? contentDisposition.split('filename=')[1].replace(/"/g, '')
+                    : `all-skus-${new Date().toISOString().split('T')[0]}.csv`;
+
+                // Download the file
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+
+                // Show success message
+                alert(`Successfully exported all SKUs to ${filename}`);
+
+            } catch (error) {
+                console.error('Export error:', error);
+                alert(`Export failed: ${error.message}`);
+            } finally {
+                // Reset button state
+                $('#exportSkusBtn').prop('disabled', false).html(`
+                    <i class="fas fa-download me-1"></i> Export All SKUs
                 `);
             }
         }

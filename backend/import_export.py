@@ -350,10 +350,10 @@ class ImportExportManager:
     
     def _import_sku_data(self, df: pd.DataFrame, sheet_name: str) -> Dict[str, Any]:
         """
-        Import SKU master data with flexible column detection
+        Import SKU master data with flexible column detection and batch processing
 
         Supports required and optional columns with intelligent detection.
-        Category field is automatically detected if present.
+        Uses batch processing for reliable import of large datasets.
 
         Args:
             df: DataFrame containing SKU data
@@ -369,7 +369,7 @@ class ImportExportManager:
         # Optional columns that can be detected and imported
         optional_columns = ['status', 'transfer_multiple', 'abc_code', 'xyz_code', 'category']
 
-        result = {"type": "sku", "records": 0, "errors": []}
+        result = {"type": "sku", "records": 0, "errors": [], "warnings": []}
 
         # Validate required columns
         missing_cols = self._validate_required_columns(df, required_columns, sheet_name)
@@ -423,49 +423,127 @@ class ImportExportManager:
         if detected_optional:
             self.validation_warnings.append(f"Detected optional columns in {sheet_name}: {', '.join(detected_optional)}")
             logger.info(f"SKU import detected optional columns: {detected_optional}")
-        
-        # Import to database
+
+        # Import to database with batch processing
+        total_rows = len(df_clean)
+        batch_size = 500  # Process in batches of 500
+        imported_count = 0
+        failed_count = 0
+        batch_errors = []
+
         try:
             db = database.get_database_connection()
             cursor = db.cursor()
-            
-            imported_count = 0
-            for _, row in df_clean.iterrows():
-                query = """
-                INSERT INTO skus (sku_id, description, supplier, cost_per_unit, status, transfer_multiple, abc_code, xyz_code, category)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                    description = VALUES(description),
-                    supplier = VALUES(supplier),
-                    cost_per_unit = VALUES(cost_per_unit),
-                    status = VALUES(status),
-                    transfer_multiple = VALUES(transfer_multiple),
-                    abc_code = VALUES(abc_code),
-                    xyz_code = VALUES(xyz_code),
-                    category = VALUES(category)
-                """
-                cursor.execute(query, (
-                    row['sku_id'],
-                    row['description'],
-                    row['supplier'],
-                    row['cost_per_unit'],
-                    row.get('status', 'Active'),
-                    row.get('transfer_multiple', 50),
-                    row.get('abc_code', 'C'),
-                    row.get('xyz_code', 'Z'),
-                    row.get('category', None)
-                ))
-                imported_count += 1
-            
-            db.commit()
+
+            # Process in batches
+            for batch_start in range(0, total_rows, batch_size):
+                batch_end = min(batch_start + batch_size, total_rows)
+                batch_df = df_clean.iloc[batch_start:batch_end]
+
+                try:
+                    # Start transaction for this batch
+                    db.begin()
+
+                    # Prepare batch data
+                    batch_data = []
+                    for _, row in batch_df.iterrows():
+                        batch_data.append((
+                            row['sku_id'],
+                            row['description'],
+                            row['supplier'],
+                            row['cost_per_unit'],
+                            row.get('status', 'Active'),
+                            row.get('transfer_multiple', 50),
+                            row.get('abc_code', 'C'),
+                            row.get('xyz_code', 'Z'),
+                            row.get('category', None)
+                        ))
+
+                    # Execute batch insert
+                    query = """
+                    INSERT INTO skus (sku_id, description, supplier, cost_per_unit, status, transfer_multiple, abc_code, xyz_code, category)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        description = VALUES(description),
+                        supplier = VALUES(supplier),
+                        cost_per_unit = VALUES(cost_per_unit),
+                        status = VALUES(status),
+                        transfer_multiple = VALUES(transfer_multiple),
+                        abc_code = VALUES(abc_code),
+                        xyz_code = VALUES(xyz_code),
+                        category = VALUES(category)
+                    """
+
+                    cursor.executemany(query, batch_data)
+                    db.commit()
+
+                    batch_imported = len(batch_data)
+                    imported_count += batch_imported
+
+                    logger.info(f"Batch {batch_start//batch_size + 1}: Successfully imported {batch_imported} SKUs (rows {batch_start+1}-{batch_end})")
+
+                except Exception as batch_error:
+                    # Rollback failed batch
+                    db.rollback()
+                    failed_count += len(batch_df)
+                    error_msg = f"Batch {batch_start//batch_size + 1} failed (rows {batch_start+1}-{batch_end}): {str(batch_error)}"
+                    batch_errors.append(error_msg)
+                    logger.error(error_msg)
+
+                    # Try individual inserts for this batch to identify specific issues
+                    individual_failures = []
+                    for _, row in batch_df.iterrows():
+                        try:
+                            cursor.execute(query, (
+                                row['sku_id'],
+                                row['description'],
+                                row['supplier'],
+                                row['cost_per_unit'],
+                                row.get('status', 'Active'),
+                                row.get('transfer_multiple', 50),
+                                row.get('abc_code', 'C'),
+                                row.get('xyz_code', 'Z'),
+                                row.get('category', None)
+                            ))
+                            db.commit()
+                            imported_count += 1
+                        except Exception as individual_error:
+                            individual_failures.append(f"SKU {row['sku_id']}: {str(individual_error)}")
+
+                    if individual_failures:
+                        batch_errors.extend(individual_failures[:5])  # Limit to first 5 errors
+                        if len(individual_failures) > 5:
+                            batch_errors.append(f"... and {len(individual_failures) - 5} more errors in this batch")
+
+            cursor.close()
             db.close()
-            
+
+            # Compile results
             result["records"] = imported_count
-            logger.info(f"Imported {imported_count} SKU records from {sheet_name}")
-            
+            result["errors"] = batch_errors
+
+            if imported_count > 0:
+                logger.info(f"Successfully imported {imported_count} SKU records from {sheet_name}")
+                if failed_count > 0:
+                    logger.warning(f"Failed to import {failed_count} SKU records from {sheet_name}")
+            else:
+                logger.error(f"Failed to import any SKU records from {sheet_name}")
+
+            # Add summary to warnings
+            if batch_errors:
+                self.validation_warnings.append(f"Import completed with errors: {imported_count} successful, {failed_count} failed")
+
         except Exception as e:
-            self.validation_errors.append(f"Database error in {sheet_name}: {str(e)}")
-        
+            error_msg = f"Critical database error in {sheet_name}: {str(e)}"
+            logger.error(error_msg)
+            self.validation_errors.append(error_msg)
+            if 'db' in locals():
+                try:
+                    db.rollback()
+                    db.close()
+                except:
+                    pass
+
         return result
     
     def _auto_detect_and_import(self, df: pd.DataFrame, sheet_name: str) -> Dict[str, Any]:
@@ -1078,17 +1156,18 @@ class ImportExportManager:
 
                 # Fill missing or invalid dates with calculated date
                 needs_default = df_clean['expected_arrival'].isna()
-                df_clean.loc[needs_default, 'expected_arrival'] = today + pd.Timedelta(days=default_lead_time)
+                # Use order_date + lead_time instead of today's date for estimated arrivals
+                df_clean.loc[needs_default, 'expected_arrival'] = pd.to_datetime(df_clean.loc[needs_default, 'order_date']).dt.date + pd.Timedelta(days=default_lead_time)
                 df_clean.loc[needs_default, 'is_estimated'] = True
 
                 # Mark provided dates as confirmed
                 df_clean.loc[~needs_default, 'is_estimated'] = False
 
             else:
-                # No expected date column - calculate all
-                df_clean['expected_arrival'] = today + pd.Timedelta(days=default_lead_time)
+                # No expected date column - calculate all using order_date + lead_time
+                df_clean['expected_arrival'] = pd.to_datetime(df_clean['order_date']).dt.date + pd.Timedelta(days=default_lead_time)
                 df_clean['is_estimated'] = True
-                self.validation_warnings.append("No expected date column found - using today + 120 days for all orders")
+                self.validation_warnings.append("No expected date column found - using order_date + 120 days for all orders")
 
             # Convert quantities to integers
             df_clean['quantity'] = df_clean['quantity'].astype(int)
