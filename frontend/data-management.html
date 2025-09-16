@@ -333,20 +333,20 @@
                                     <div id="pending-format" class="accordion-collapse collapse" data-bs-parent="#import-instructions">
                                         <div class="accordion-body">
                                             <strong>Required columns:</strong> sku_id, quantity, destination<br>
-                                            <strong>Optional columns:</strong> expected_date, order_type, status, notes<br>
-                                            <strong>Note:</strong> If expected_date is empty, system uses Today + 120 days (estimated)<br>
+                                            <strong>Optional columns:</strong> order_date, expected_date, order_type, status, notes<br>
+                                            <strong>Note:</strong> If expected_date is empty, system uses order_date + 120 days (or Today + 120 days if order_date also empty)<br>
                                             <strong>Destinations:</strong> burnaby, kentucky<br>
                                             <strong>Examples:</strong><br>
                                             <code>
                                             <strong>Basic Format:</strong><br>
-                                            sku_id | quantity | destination | expected_date<br>
-                                            CHG-001 | 500 | burnaby | 2025-02-15<br>
-                                            CAB-002 | 300 | kentucky |<br>
-                                            WDG-003 | 200 | burnaby | 2025-03-01<br><br>
+                                            sku_id | quantity | destination | order_date | expected_date<br>
+                                            CHG-001 | 500 | burnaby | 2024-10-15 | 2025-02-15<br>
+                                            CAB-002 | 300 | kentucky | 2024-11-01 |<br>
+                                            WDG-003 | 200 | burnaby | 2024-11-05 | 2025-03-01<br><br>
                                             <strong>With Details:</strong><br>
-                                            sku_id | quantity | destination | expected_date | order_type | status | notes<br>
-                                            CHG-001 | 500 | burnaby | 2025-02-15 | supplier | ordered | Shipment confirmed<br>
-                                            CAB-002 | 300 | kentucky | | supplier | ordered | Lead time estimated
+                                            sku_id | quantity | destination | order_date | expected_date | order_type | status | notes<br>
+                                            CHG-001 | 500 | burnaby | 2024-10-15 | 2025-02-15 | supplier | ordered | Shipment confirmed<br>
+                                            CAB-002 | 300 | kentucky | 2024-11-01 | | supplier | ordered | Lead time estimated
                                             </code>
                                         </div>
                                     </div>
@@ -473,6 +473,7 @@
                                                 <th>SKU</th>
                                                 <th>Quantity</th>
                                                 <th>Destination</th>
+                                                <th>Order Date</th>
                                                 <th>Expected Date</th>
                                                 <th>Status</th>
                                                 <th>Days Until</th>
@@ -481,7 +482,7 @@
                                         </thead>
                                         <tbody>
                                             <tr>
-                                                <td colspan="7" class="text-center text-muted">
+                                                <td colspan="8" class="text-center text-muted">
                                                     <em>No pending orders found. Upload pending orders to get started.</em>
                                                 </td>
                                             </tr>
@@ -1281,6 +1282,23 @@
         }
 
         async function refreshPendingOrdersPreview() {
+            /**
+             * Refresh the pending orders preview table with enhanced date display
+             *
+             * Features:
+             * - Displays both order date and expected/calculated arrival date
+             * - Shows visual indicators for estimated vs confirmed dates
+             * - Provides tooltips with calculation details
+             * - Highlights very old orders (>180 days) with warning colors
+             * - Uses proper status badges and color coding
+             *
+             * Date Logic:
+             * - If expected_arrival is provided: uses that date with "Conf." badge
+             * - If no expected_arrival: calculates order_date + 120 days with "Est." badge
+             * - Old orders (>180 days) shown in red with warning tooltip
+             *
+             * @returns {Promise<void>}
+             */
             try {
                 const response = await fetch('/api/pending-orders?limit=5');
 
@@ -1296,26 +1314,45 @@
                 if (orders.length === 0) {
                     tbody.innerHTML = `
                         <tr>
-                            <td colspan="7" class="text-center text-muted">
+                            <td colspan="8" class="text-center text-muted">
                                 <em>No pending orders found.</em>
                             </td>
                         </tr>
                     `;
                 } else {
                     tbody.innerHTML = orders.map(order => {
-                        const expectedDate = new Date(order.expected_arrival).toLocaleDateString();
-                        const daysUntil = Math.ceil((new Date(order.expected_arrival) - new Date()) / (1000 * 60 * 60 * 24));
-                        const statusBadge = order.is_estimated ?
-                            '<span class="badge bg-warning text-dark">Estimated</span>' :
-                            '<span class="badge bg-success">Confirmed</span>';
+                        const orderDate = new Date(order.order_date).toLocaleDateString();
+                        const expectedDate = new Date(order.calculated_arrival_date).toLocaleDateString();
+                        const daysUntil = Math.ceil((new Date(order.calculated_arrival_date) - new Date()) / (1000 * 60 * 60 * 24));
+
+                        // Visual indicator for estimated vs confirmed dates
+                        const isEstimated = !order.expected_arrival;
+                        const daysSinceOrder = Math.ceil((new Date() - new Date(order.order_date)) / (1000 * 60 * 60 * 24));
+
+                        let expectedDateDisplay;
+                        if (isEstimated) {
+                            const tooltipText = `Estimated arrival: Order date (${orderDate}) + 120 days`;
+                            expectedDateDisplay = `<span title="${tooltipText}" data-bs-toggle="tooltip">${expectedDate} <span class="badge bg-warning text-dark ms-1">Est.</span></span>`;
+                        } else {
+                            const tooltipText = `Confirmed expected arrival date`;
+                            expectedDateDisplay = `<span title="${tooltipText}" data-bs-toggle="tooltip">${expectedDate} <span class="badge bg-success text-white ms-1">Conf.</span></span>`;
+                        }
+
+                        // Add warning for very old orders (> 180 days)
+                        const orderDateClass = daysSinceOrder > 180 ? 'text-danger fw-bold' : 'text-muted';
+
+                        const statusBadge = order.status === 'ordered' ? 'primary' :
+                                          order.status === 'shipped' ? 'info' :
+                                          order.status === 'received' ? 'success' : 'secondary';
 
                         return `
                             <tr>
                                 <td><code>${order.sku_id}</code></td>
                                 <td>${order.quantity.toLocaleString()}</td>
                                 <td><span class="badge bg-${order.destination === 'burnaby' ? 'success' : 'warning'}">${order.destination}</span></td>
-                                <td>${expectedDate}</td>
-                                <td>${statusBadge}</td>
+                                <td class="${orderDateClass}" title="${daysSinceOrder > 180 ? 'Order is very old (>180 days)' : `Order placed ${daysSinceOrder} days ago`}" data-bs-toggle="tooltip">${orderDate}</td>
+                                <td>${expectedDateDisplay}</td>
+                                <td><span class="badge bg-${statusBadge}">${order.status}</span></td>
                                 <td class="${daysUntil < 0 ? 'text-danger' : daysUntil <= 30 ? 'text-warning' : 'text-muted'}">${daysUntil} days</td>
                                 <td>
                                     <div class="btn-group" role="group">
@@ -1332,13 +1369,21 @@
                             </tr>
                         `;
                     }).join('');
+
+                    // Initialize tooltips for the new content
+                    const tooltipTriggerList = document.querySelectorAll('#pending-orders-preview [data-bs-toggle="tooltip"]');
+                    tooltipTriggerList.forEach(element => {
+                        if (typeof bootstrap !== 'undefined' && bootstrap.Tooltip) {
+                            new bootstrap.Tooltip(element);
+                        }
+                    });
                 }
 
             } catch (error) {
                 console.error('Error refreshing pending orders preview:', error);
                 document.querySelector('#pending-orders-preview tbody').innerHTML = `
                     <tr>
-                        <td colspan="7" class="text-center text-danger">
+                        <td colspan="8" class="text-center text-danger">
                             <em>Error loading pending orders</em>
                         </td>
                     </tr>
@@ -1354,9 +1399,22 @@
 
         async function editPendingOrder(orderId) {
             /**
-             * Open edit modal for a specific pending order
+             * Open edit modal for a pending order with enhanced date handling
+             *
+             * Features:
+             * - Order date field with validation (cannot be in future)
+             * - Expected arrival date field (optional)
+             * - Real-time calculation display showing final arrival date
+             * - Date validation ensuring expected >= order date
+             * - Visual feedback for calculated vs user-provided dates
+             *
+             * Date Calculation Logic:
+             * - If user provides expected_arrival: uses that date
+             * - If expected_arrival is empty: automatically calculates order_date + 120 days
+             * - Shows preview of final calculated date in readonly field
              *
              * @param {number} orderId - ID of the pending order to edit
+             * @returns {Promise<void>}
              */
             try {
                 // Fetch current order details
@@ -1424,22 +1482,39 @@
                                     <div class="row">
                                         <div class="col-md-6">
                                             <div class="mb-3">
-                                                <label for="edit-expected-date" class="form-label">Expected Arrival</label>
-                                                <input type="date" class="form-control" id="edit-expected-date"
-                                                       value="${order.expected_arrival}">
-                                                <div class="form-text">Leave blank for estimated date (Today + 120 days)</div>
+                                                <label for="edit-order-date" class="form-label">Order Date *</label>
+                                                <input type="date" class="form-control" id="edit-order-date"
+                                                       value="${order.order_date}" required max="${new Date().toISOString().split('T')[0]}">
+                                                <div class="form-text">Date when the order was placed with supplier</div>
                                             </div>
                                         </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="edit-expected-date" class="form-label">Expected Arrival</label>
+                                                <input type="date" class="form-control" id="edit-expected-date"
+                                                       value="${order.expected_arrival || ''}">
+                                                <div class="form-text">Leave blank to use Order Date + 120 days</div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="row">
                                         <div class="col-md-6">
                                             <div class="mb-3">
                                                 <label for="edit-status" class="form-label">Status</label>
                                                 <select class="form-select" id="edit-status">
                                                     <option value="ordered" ${order.status === 'ordered' ? 'selected' : ''}>Ordered</option>
                                                     <option value="shipped" ${order.status === 'shipped' ? 'selected' : ''}>Shipped</option>
-                                                    <option value="pending" ${order.status === 'pending' ? 'selected' : ''}>Pending</option>
                                                     <option value="received" ${order.status === 'received' ? 'selected' : ''}>Received</option>
                                                     <option value="cancelled" ${order.status === 'cancelled' ? 'selected' : ''}>Cancelled</option>
                                                 </select>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="edit-calculated-date" class="form-label">Calculated Arrival</label>
+                                                <input type="text" class="form-control" id="edit-calculated-date" readonly>
+                                                <div class="form-text">Automatically calculated based on dates above</div>
                                             </div>
                                         </div>
                                     </div>
@@ -1482,6 +1557,40 @@
             const modal = new bootstrap.Modal(document.getElementById('editPendingOrderModal'));
             modal.show();
 
+            // Add event listeners for date calculation
+            const orderDateInput = document.getElementById('edit-order-date');
+            const expectedDateInput = document.getElementById('edit-expected-date');
+            const calculatedDateInput = document.getElementById('edit-calculated-date');
+
+            function updateCalculatedDate() {
+                const orderDate = orderDateInput.value;
+                if (orderDate) {
+                    // Calculate order date + 120 days
+                    const orderDateObj = new Date(orderDate);
+                    const calculatedDate = new Date(orderDateObj);
+                    calculatedDate.setDate(calculatedDate.getDate() + 120);
+
+                    const calculatedDateStr = calculatedDate.toISOString().split('T')[0];
+                    const displayDate = calculatedDate.toLocaleDateString();
+
+                    // Show the calculated date
+                    if (expectedDateInput.value) {
+                        calculatedDateInput.value = `Using Expected: ${new Date(expectedDateInput.value).toLocaleDateString()}`;
+                    } else {
+                        calculatedDateInput.value = `${displayDate} (Order + 120 days)`;
+                    }
+                } else {
+                    calculatedDateInput.value = '';
+                }
+            }
+
+            // Update calculated date when order date or expected date changes
+            orderDateInput.addEventListener('change', updateCalculatedDate);
+            expectedDateInput.addEventListener('change', updateCalculatedDate);
+
+            // Initialize calculated date display
+            updateCalculatedDate();
+
             // Clean up after modal is hidden
             document.getElementById('editPendingOrderModal').addEventListener('hidden.bs.modal', function() {
                 this.remove();
@@ -1496,6 +1605,7 @@
                 const orderId = document.getElementById('edit-order-id').value;
                 const quantity = parseInt(document.getElementById('edit-quantity').value);
                 const destination = document.getElementById('edit-destination').value;
+                const orderDate = document.getElementById('edit-order-date').value;
                 const expectedDate = document.getElementById('edit-expected-date').value;
                 const status = document.getElementById('edit-status').value;
                 const isEstimated = document.getElementById('edit-is-estimated').checked;
@@ -1512,10 +1622,29 @@
                     return;
                 }
 
+                if (!orderDate) {
+                    alert('Please enter an order date');
+                    return;
+                }
+
+                // Validate order date is not in the future
+                const today = new Date().toISOString().split('T')[0];
+                if (orderDate > today) {
+                    alert('Order date cannot be in the future');
+                    return;
+                }
+
+                // Validate expected date is after order date if both provided
+                if (expectedDate && orderDate && expectedDate < orderDate) {
+                    alert('Expected arrival date cannot be before order date');
+                    return;
+                }
+
                 // Prepare update data
                 const updateData = {
                     quantity: quantity,
                     destination: destination,
+                    order_date: orderDate,
                     expected_arrival: expectedDate || null,
                     status: status,
                     is_estimated: isEstimated,
