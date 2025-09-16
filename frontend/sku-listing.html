@@ -252,6 +252,9 @@
                         <button class="btn btn-outline-danger ms-2" id="bulkDeleteBtn" data-bs-toggle="modal" data-bs-target="#bulkDeleteModal">
                             <i class="fas fa-trash me-1"></i> Delete Test SKUs
                         </button>
+                        <button class="btn btn-danger ms-2" id="deleteAllBtn" data-bs-toggle="modal" data-bs-target="#deleteAllModal">
+                            <i class="fas fa-exclamation-triangle me-1"></i> Delete ALL SKUs
+                        </button>
                     </div>
                 </div>
             </div>
@@ -381,6 +384,122 @@
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                     <button type="button" class="btn btn-danger" id="confirmBulkDelete">
                         <i class="fas fa-trash me-1"></i>Delete All Test SKUs
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete ALL SKUs Modal -->
+    <div class="modal fade" id="deleteAllModal" tabindex="-1" aria-labelledby="deleteAllModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content border-danger">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title" id="deleteAllModalLabel">
+                        <i class="fas fa-skull-crossbones me-2"></i>DANGER: Delete ALL SKUs
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Strong warning messages -->
+                    <div class="alert alert-danger border-danger">
+                        <div class="d-flex align-items-center mb-3">
+                            <i class="fas fa-exclamation-triangle fa-3x text-danger me-3"></i>
+                            <div>
+                                <h4 class="alert-heading text-danger mb-1">EXTREME CAUTION REQUIRED</h4>
+                                <p class="mb-0"><strong>This will permanently delete ALL SKUs and related data from the entire system!</strong></p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Current stats -->
+                    <div class="card mb-4">
+                        <div class="card-header bg-light">
+                            <h6 class="mb-0"><i class="fas fa-info-circle me-2"></i>Current Database Status</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="row text-center">
+                                <div class="col-3">
+                                    <div class="text-primary fs-4 fw-bold" id="deleteAllTotalSkus">--</div>
+                                    <small class="text-muted">Total SKUs</small>
+                                </div>
+                                <div class="col-3">
+                                    <div class="text-success fs-4 fw-bold" id="deleteAllInStock">--</div>
+                                    <small class="text-muted">In Stock</small>
+                                </div>
+                                <div class="col-3">
+                                    <div class="text-warning fs-4 fw-bold" id="deleteAllLowStock">--</div>
+                                    <small class="text-muted">Low Stock</small>
+                                </div>
+                                <div class="col-3">
+                                    <div class="text-danger fs-4 fw-bold" id="deleteAllOutStock">--</div>
+                                    <small class="text-muted">Out of Stock</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- What will be deleted -->
+                    <div class="mb-4">
+                        <h6 class="text-danger"><i class="fas fa-skull me-2"></i>What will be PERMANENTLY DELETED:</h6>
+                        <ul class="list-unstyled ms-3">
+                            <li class="mb-2"><i class="fas fa-database text-danger me-2"></i><strong>ALL SKU master records</strong> - Every single product in the system</li>
+                            <li class="mb-2"><i class="fas fa-chart-line text-danger me-2"></i><strong>ALL historical sales data</strong> - Complete sales history will be lost</li>
+                            <li class="mb-2"><i class="fas fa-boxes text-danger me-2"></i><strong>ALL inventory records</strong> - Current stock levels in both warehouses</li>
+                            <li class="mb-2"><i class="fas fa-clock text-danger me-2"></i><strong>ALL pending orders</strong> - Future stock replenishment data</li>
+                        </ul>
+                    </div>
+
+                    <!-- Confirmation requirements -->
+                    <div class="border border-danger p-3 bg-light mb-3">
+                        <h6 class="text-danger mb-3"><i class="fas fa-shield-alt me-2"></i>Confirmation Required</h6>
+
+                        <!-- Checkbox 1 -->
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" id="confirmUnderstand">
+                            <label class="form-check-label" for="confirmUnderstand">
+                                I understand this will delete <strong>ALL SKUs</strong> and <strong>ALL related data</strong>
+                            </label>
+                        </div>
+
+                        <!-- Checkbox 2 -->
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" id="confirmNoRestore">
+                            <label class="form-check-label" for="confirmNoRestore">
+                                I understand this action <strong>CANNOT BE UNDONE</strong> and there is no restore option
+                            </label>
+                        </div>
+
+                        <!-- Checkbox 3 -->
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" id="confirmResponsibility">
+                            <label class="form-check-label" for="confirmResponsibility">
+                                I take full responsibility for this action and its consequences
+                            </label>
+                        </div>
+
+                        <!-- Type confirmation -->
+                        <div class="mb-3">
+                            <label for="deleteConfirmText" class="form-label">
+                                <strong>Type "DELETE ALL SKUS" to confirm:</strong>
+                            </label>
+                            <input type="text" class="form-control" id="deleteConfirmText"
+                                   placeholder="Type exactly: DELETE ALL SKUS">
+                            <div class="form-text text-danger">This text must match exactly (case sensitive)</div>
+                        </div>
+                    </div>
+
+                    <div class="text-danger text-center fw-bold">
+                        <i class="fas fa-exclamation-circle me-1"></i>
+                        THERE IS NO UNDO FOR THIS OPERATION!
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="fas fa-times me-1"></i>Cancel (Recommended)
+                    </button>
+                    <button type="button" class="btn btn-danger" id="confirmDeleteAll" disabled>
+                        <i class="fas fa-skull-crossbones me-1"></i>DELETE ALL SKUS PERMANENTLY
                     </button>
                 </div>
             </div>
@@ -1190,10 +1309,153 @@
             }
         }
 
+        // =============================================================================
+        // DELETE ALL SKUS FUNCTIONALITY - EXTREME CAUTION
+        // =============================================================================
+
+        /**
+         * Initialize delete all handlers
+         */
+        function initializeDeleteAllHandlers() {
+            // Handle modal show event to populate current stats
+            $('#deleteAllModal').on('show.bs.modal', populateDeleteAllStats);
+
+            // Handle confirmation changes
+            $('#confirmUnderstand, #confirmNoRestore, #confirmResponsibility, #deleteConfirmText').on('change input', validateDeleteAllConfirmation);
+
+            // Handle delete all button click
+            $('#confirmDeleteAll').on('click', performDeleteAll);
+
+            // Reset modal when closed
+            $('#deleteAllModal').on('hidden.bs.modal', resetDeleteAllModal);
+        }
+
+        /**
+         * Populate current stats in the delete all modal
+         */
+        function populateDeleteAllStats() {
+            // Use the current metrics from the dashboard
+            $('#deleteAllTotalSkus').text($('#totalSkus').text());
+            $('#deleteAllInStock').text($('#inStockCount').text());
+            $('#deleteAllLowStock').text($('#lowStockCount').text());
+            $('#deleteAllOutStock').text($('#outOfStockCount').text());
+        }
+
+        /**
+         * Validate all confirmation requirements
+         */
+        function validateDeleteAllConfirmation() {
+            const checkbox1 = $('#confirmUnderstand').is(':checked');
+            const checkbox2 = $('#confirmNoRestore').is(':checked');
+            const checkbox3 = $('#confirmResponsibility').is(':checked');
+            const textConfirm = $('#deleteConfirmText').val() === 'DELETE ALL SKUS';
+
+            const allConfirmed = checkbox1 && checkbox2 && checkbox3 && textConfirm;
+
+            $('#confirmDeleteAll').prop('disabled', !allConfirmed);
+
+            // Visual feedback for text input
+            if ($('#deleteConfirmText').val().length > 0) {
+                if (textConfirm) {
+                    $('#deleteConfirmText').removeClass('is-invalid').addClass('is-valid');
+                } else {
+                    $('#deleteConfirmText').removeClass('is-valid').addClass('is-invalid');
+                }
+            } else {
+                $('#deleteConfirmText').removeClass('is-valid is-invalid');
+            }
+        }
+
+        /**
+         * Reset the delete all modal to initial state
+         */
+        function resetDeleteAllModal() {
+            $('#confirmUnderstand, #confirmNoRestore, #confirmResponsibility').prop('checked', false);
+            $('#deleteConfirmText').val('').removeClass('is-valid is-invalid');
+            $('#confirmDeleteAll').prop('disabled', true).html('<i class="fas fa-skull-crossbones me-1"></i>DELETE ALL SKUS PERMANENTLY');
+
+            // Reset stats
+            $('#deleteAllTotalSkus, #deleteAllInStock, #deleteAllLowStock, #deleteAllOutStock').text('--');
+        }
+
+        /**
+         * Perform the delete all operation
+         */
+        async function performDeleteAll() {
+            // Final confirmation with browser alert
+            const finalConfirm = confirm(
+                "FINAL WARNING: You are about to DELETE ALL SKUs from the system!\n\n" +
+                "This will permanently remove:\n" +
+                "- All product records\n" +
+                "- All sales history\n" +
+                "- All inventory data\n" +
+                "- All pending orders\n\n" +
+                "This action CANNOT be undone!\n\n" +
+                "Click OK to proceed or Cancel to abort."
+            );
+
+            if (!finalConfirm) {
+                return;
+            }
+
+            try {
+                // Show loading state
+                $('#confirmDeleteAll').prop('disabled', true).html(`
+                    <i class="fas fa-spinner fa-spin me-1"></i>DELETING ALL SKUS...
+                `);
+
+                // Call the delete all API
+                const response = await fetch('/api/skus/delete-all', {
+                    method: 'POST'
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'Delete all operation failed');
+                }
+
+                const result = await response.json();
+
+                // Show detailed success message
+                const message = `SUCCESS: All SKUs have been deleted!\n\n` +
+                    `Summary:\n` +
+                    `- SKUs deleted: ${result.details.skus_deleted}\n` +
+                    `- Sales records deleted: ${result.details.sales_records_deleted}\n` +
+                    `- Inventory records deleted: ${result.details.inventory_records_deleted}\n` +
+                    `- Pending orders deleted: ${result.details.pending_orders_deleted}\n\n` +
+                    `The database has been completely cleared.`;
+
+                alert(message);
+
+                // Close modal
+                const modal = bootstrap.Modal.getInstance(document.getElementById('deleteAllModal'));
+                modal.hide();
+
+                // Refresh the page to show empty state
+                await loadSkuData();
+
+            } catch (error) {
+                console.error('Error performing delete all:', error);
+
+                const errorMessage = `FAILED TO DELETE ALL SKUS!\n\n` +
+                    `Error: ${error.message}\n\n` +
+                    `The operation has been aborted. Your data is safe.\n` +
+                    `Please check the system logs and try again if needed.`;
+
+                alert(errorMessage);
+
+                // Reset button state
+                $('#confirmDeleteAll').prop('disabled', false).html(`
+                    <i class="fas fa-skull-crossbones me-1"></i>DELETE ALL SKUS PERMANENTLY
+                `);
+            }
+        }
+
         // Initialize delete handlers when DOM is ready
         $(document).ready(function() {
             initializeDeleteHandlers();
             initializeEditHandlers();
+            initializeDeleteAllHandlers();
         });
     </script>
 </body>

@@ -204,26 +204,27 @@ async def get_skus():
         db = database.get_database_connection()
         cursor = db.cursor(pymysql.cursors.DictCursor)
         
-        # Comprehensive SKU query with inventory status calculation
+        # Comprehensive SKU query with inventory status calculation - shows all SKUs
         query = """
-        SELECT 
+        SELECT
             s.sku_id,
             s.description,
             s.supplier,
+            s.status,
+            s.cost_per_unit,
             s.abc_code,
             s.xyz_code,
             s.transfer_multiple,
             COALESCE(ic.burnaby_qty, 0) as burnaby_qty,
             COALESCE(ic.kentucky_qty, 0) as kentucky_qty,
-            CASE 
+            CASE
                 WHEN COALESCE(ic.kentucky_qty, 0) = 0 THEN 'OUT_OF_STOCK'
                 WHEN COALESCE(ic.kentucky_qty, 0) < 100 THEN 'LOW_STOCK'
                 ELSE 'IN_STOCK'
             END as stock_status
         FROM skus s
         LEFT JOIN inventory_current ic ON s.sku_id = ic.sku_id
-        WHERE s.status = 'Active'
-        ORDER BY 
+        ORDER BY
             COALESCE(ic.kentucky_qty, 0) ASC,  -- Out of stock first
             s.sku_id
         """
@@ -1696,6 +1697,87 @@ async def bulk_delete_test_skus():
             detail=f"Bulk deletion failed: {str(e)}"
         )
 
+@app.post("/api/skus/delete-all",
+          summary="Delete All SKUs",
+          description="Delete ALL SKUs from the database (DANGEROUS OPERATION)",
+          tags=["SKU Management"],
+          responses={
+              200: {"description": "All SKUs deleted successfully"},
+              400: {"description": "No SKUs found"},
+              500: {"description": "Deletion failed"}
+          })
+async def delete_all_skus():
+    """
+    Delete ALL SKUs from the database - DANGEROUS OPERATION
+
+    This will delete:
+    - All SKU master records
+    - All associated sales history
+    - All inventory records
+
+    WARNING: This action cannot be undone!
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+
+        # First, count all SKUs to report how many will be deleted
+        cursor.execute("SELECT COUNT(*) as total FROM skus")
+        total_count = cursor.fetchone()['total']
+
+        if total_count == 0:
+            raise HTTPException(status_code=400, detail="No SKUs found in database")
+
+        # Start transaction for complete deletion
+        db.begin()
+
+        # Delete all data in correct order (respecting foreign key constraints)
+        # 1. Delete monthly sales data
+        cursor.execute("DELETE FROM monthly_sales")
+        sales_deleted = cursor.rowcount
+
+        # 2. Delete inventory records
+        cursor.execute("DELETE FROM inventory_current")
+        inventory_deleted = cursor.rowcount
+
+        # 3. Delete pending inventory
+        cursor.execute("DELETE FROM pending_inventory")
+        pending_deleted = cursor.rowcount
+
+        # 4. Delete all SKUs (master records)
+        cursor.execute("DELETE FROM skus")
+        skus_deleted = cursor.rowcount
+
+        # Commit all deletions
+        db.commit()
+
+        cursor.close()
+        db.close()
+
+        return {
+            "success": True,
+            "message": f"Successfully deleted all {skus_deleted} SKUs and associated data",
+            "deleted_count": skus_deleted,
+            "details": {
+                "skus_deleted": skus_deleted,
+                "sales_records_deleted": sales_deleted,
+                "inventory_records_deleted": inventory_deleted,
+                "pending_orders_deleted": pending_deleted
+            }
+        }
+
+    except HTTPException:
+        if 'db' in locals():
+            db.rollback()
+        raise
+    except Exception as e:
+        if 'db' in locals():
+            db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Delete all operation failed: {str(e)}"
+        )
+
 # ===================================================================
 # STOCKOUT MANAGEMENT API ENDPOINTS
 # ===================================================================
@@ -2413,13 +2495,14 @@ async def get_pending_orders(
         # Execute data query with pagination
         data_query += filter_conditions + " ORDER BY priority_score DESC, order_date ASC"
 
-        if limit:
+        # MySQL LIMIT OFFSET syntax: LIMIT offset, count
+        if limit and offset > 0:
+            data_query += " LIMIT %s, %s"
+            data_params.append(offset)
+            data_params.append(limit)
+        elif limit:
             data_query += " LIMIT %s"
             data_params.append(limit)
-
-        if offset > 0:
-            data_query += " OFFSET %s"
-            data_params.append(offset)
 
         cursor.execute(data_query, data_params)
         results = cursor.fetchall()
