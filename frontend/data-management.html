@@ -489,6 +489,39 @@
                                         </tbody>
                                     </table>
                                 </div>
+
+                                <!-- Pagination Controls -->
+                                <div id="pending-orders-pagination" class="d-flex justify-content-between align-items-center mt-3" style="display: none;">
+                                    <div>
+                                        Showing <span id="pending-orders-start">1</span>-<span id="pending-orders-end">10</span>
+                                        of <span id="pending-orders-total">0</span> orders
+                                    </div>
+                                    <nav>
+                                        <ul class="pagination pagination-sm mb-0">
+                                            <li class="page-item" id="pending-prev-page">
+                                                <a class="page-link" href="#" onclick="prevPendingOrdersPage(); return false;">Previous</a>
+                                            </li>
+                                            <li class="page-item active" id="pending-page-1">
+                                                <a class="page-link" href="#" onclick="goToPendingOrdersPage(1); return false;">1</a>
+                                            </li>
+                                            <li class="page-item" id="pending-page-2">
+                                                <a class="page-link" href="#" onclick="goToPendingOrdersPage(2); return false;">2</a>
+                                            </li>
+                                            <li class="page-item" id="pending-page-3">
+                                                <a class="page-link" href="#" onclick="goToPendingOrdersPage(3); return false;">3</a>
+                                            </li>
+                                            <li class="page-item" id="pending-next-page">
+                                                <a class="page-link" href="#" onclick="nextPendingOrdersPage(); return false;">Next</a>
+                                            </li>
+                                        </ul>
+                                    </nav>
+                                    <select class="form-select form-select-sm" style="width: auto" onchange="changePendingOrdersPageSize(this.value)">
+                                        <option value="10" selected>10 per page</option>
+                                        <option value="20">20 per page</option>
+                                        <option value="50">50 per page</option>
+                                        <option value="100">100 per page</option>
+                                    </select>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -660,6 +693,12 @@
         // Global variables
         let selectedFiles = [];
         let exportHistory = [];
+
+        // Pagination variables for pending orders
+        let currentPendingOrdersPage = 1;
+        let pendingOrdersPerPage = 10;
+        let totalPendingOrders = 0;
+        let totalPendingOrdersPages = 1;
 
         // Initialize when DOM is ready
         $(document).ready(function() {
@@ -1261,9 +1300,9 @@
             }
         }
 
-        async function refreshPendingOrdersPreview() {
+        async function refreshPendingOrdersPreview(page = currentPendingOrdersPage, pageSize = pendingOrdersPerPage) {
             /**
-             * Refresh the pending orders preview table with enhanced date display
+             * Refresh the pending orders preview table with enhanced date display and pagination
              *
              * Features:
              * - Displays both order date and expected/calculated arrival date
@@ -1271,16 +1310,20 @@
              * - Provides tooltips with calculation details
              * - Highlights very old orders (>180 days) with warning colors
              * - Uses proper status badges and color coding
+             * - Supports pagination with page and pageSize parameters
              *
              * Date Logic:
              * - If expected_arrival is provided: uses that date with "Conf." badge
              * - If no expected_arrival: calculates order_date + 120 days with "Est." badge
              * - Old orders (>180 days) shown in red with warning tooltip
              *
+             * @param {number} page - Page number to load (1-based)
+             * @param {number} pageSize - Number of records per page
              * @returns {Promise<void>}
              */
             try {
-                const response = await fetch('/api/pending-orders?limit=5');
+                const offset = (page - 1) * pageSize;
+                const response = await fetch(`/api/pending-orders?limit=${pageSize}&offset=${offset}`);
 
                 if (!response.ok) {
                     throw new Error('Failed to fetch pending orders');
@@ -1288,6 +1331,12 @@
 
                 const result = await response.json();
                 const orders = result.data || [];
+
+                // Update pagination variables from API response
+                currentPendingOrdersPage = page;
+                pendingOrdersPerPage = pageSize;
+                totalPendingOrders = result.total || result.count || orders.length;
+                totalPendingOrdersPages = result.pages || Math.ceil(totalPendingOrders / pageSize);
 
                 const tbody = document.querySelector('#pending-orders-preview tbody');
 
@@ -1358,6 +1407,9 @@
                         }
                     });
                 }
+
+                // Update pagination controls
+                updatePendingOrdersPagination();
 
             } catch (error) {
                 console.error('Error refreshing pending orders preview:', error);
@@ -1783,6 +1835,134 @@
             } finally {
                 showLoading(false);
             }
+        }
+
+        // =============================================================================
+        // PENDING ORDERS PAGINATION FUNCTIONALITY
+        // =============================================================================
+
+        function updatePendingOrdersPagination() {
+            /**
+             * Update pagination controls based on current state
+             */
+            const paginationDiv = document.getElementById('pending-orders-pagination');
+            const startSpan = document.getElementById('pending-orders-start');
+            const endSpan = document.getElementById('pending-orders-end');
+            const totalSpan = document.getElementById('pending-orders-total');
+
+            if (totalPendingOrders === 0) {
+                paginationDiv.style.display = 'none';
+                return;
+            }
+
+            // Show pagination if we have orders
+            paginationDiv.style.display = 'flex';
+
+            // Update range display
+            const start = (currentPendingOrdersPage - 1) * pendingOrdersPerPage + 1;
+            const end = Math.min(start + pendingOrdersPerPage - 1, totalPendingOrders);
+
+            startSpan.textContent = start;
+            endSpan.textContent = end;
+            totalSpan.textContent = totalPendingOrders;
+
+            // Update page buttons
+            updatePaginationButtons();
+        }
+
+        function updatePaginationButtons() {
+            /**
+             * Update pagination button states
+             */
+            const prevBtn = document.getElementById('pending-prev-page');
+            const nextBtn = document.getElementById('pending-next-page');
+
+            // Enable/disable previous button
+            if (currentPendingOrdersPage <= 1) {
+                prevBtn.classList.add('disabled');
+            } else {
+                prevBtn.classList.remove('disabled');
+            }
+
+            // Enable/disable next button
+            if (currentPendingOrdersPage >= totalPendingOrdersPages) {
+                nextBtn.classList.add('disabled');
+            } else {
+                nextBtn.classList.remove('disabled');
+            }
+
+            // Update page number buttons (show current page and nearby pages)
+            updatePageNumbers();
+        }
+
+        function updatePageNumbers() {
+            /**
+             * Update the page number buttons to show current and nearby pages
+             */
+            const pageButtons = document.querySelectorAll('[id^="pending-page-"]');
+
+            // Hide all page buttons first
+            pageButtons.forEach(btn => btn.style.display = 'none');
+
+            // Show up to 3 page buttons centered around current page
+            for (let i = 1; i <= 3; i++) {
+                const pageBtn = document.getElementById(`pending-page-${i}`);
+                if (pageBtn) {
+                    const pageNum = Math.max(1, currentPendingOrdersPage - 1) + (i - 1);
+                    if (pageNum <= totalPendingOrdersPages) {
+                        pageBtn.style.display = 'list-item';
+                        const link = pageBtn.querySelector('a');
+                        link.textContent = pageNum;
+                        link.onclick = () => { goToPendingOrdersPage(pageNum); return false; };
+
+                        // Update active state
+                        if (pageNum === currentPendingOrdersPage) {
+                            pageBtn.classList.add('active');
+                        } else {
+                            pageBtn.classList.remove('active');
+                        }
+                    } else {
+                        pageBtn.style.display = 'none';
+                    }
+                }
+            }
+        }
+
+        function goToPendingOrdersPage(page) {
+            /**
+             * Navigate to a specific page
+             */
+            if (page >= 1 && page <= totalPendingOrdersPages && page !== currentPendingOrdersPage) {
+                refreshPendingOrdersPreview(page, pendingOrdersPerPage);
+            }
+        }
+
+        function prevPendingOrdersPage() {
+            /**
+             * Go to previous page
+             */
+            if (currentPendingOrdersPage > 1) {
+                goToPendingOrdersPage(currentPendingOrdersPage - 1);
+            }
+        }
+
+        function nextPendingOrdersPage() {
+            /**
+             * Go to next page
+             */
+            if (currentPendingOrdersPage < totalPendingOrdersPages) {
+                goToPendingOrdersPage(currentPendingOrdersPage + 1);
+            }
+        }
+
+        function changePendingOrdersPageSize(newSize) {
+            /**
+             * Change the number of items per page
+             */
+            pendingOrdersPerPage = parseInt(newSize);
+            currentPendingOrdersPage = 1; // Reset to first page
+            totalPendingOrdersPages = Math.ceil(totalPendingOrders / pendingOrdersPerPage);
+            refreshPendingOrdersPreview(1, pendingOrdersPerPage);
         }
 
         // Initialize pending orders functionality when page loads
