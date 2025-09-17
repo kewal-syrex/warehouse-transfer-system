@@ -367,57 +367,155 @@ class ImportExportManager:
         return result
     
     def _import_sales_data(self, df: pd.DataFrame, sheet_name: str) -> Dict[str, Any]:
-        """Import sales history data with stockout days"""
-        
+        """
+        Import sales history data with comprehensive error logging and SKU validation
+
+        Tracks each row's success/failure with specific error reasons and line numbers.
+        Pre-validates SKUs against master table to prevent foreign key violations.
+        Supports partial imports with detailed reporting.
+
+        Args:
+            df: DataFrame containing sales data
+            sheet_name: Name of the Excel sheet for error reporting
+
+        Returns:
+            Dict containing detailed import results with line-by-line tracking
+        """
+
         expected_columns = ['sku_id', 'year_month', 'burnaby_sales', 'kentucky_sales', 'kentucky_stockout_days']
-        result = {"type": "sales", "records": 0, "errors": []}
-        
+        result = {
+            "type": "sales",
+            "records": 0,
+            "errors": [],
+            "import_summary": {
+                "total_rows": 0,
+                "successful": 0,
+                "failed": 0,
+                "skipped": 0
+            },
+            "import_details": []
+        }
+
+
         # Validate columns (allow some flexibility)
         available_cols = df.columns.tolist()
         missing_critical = []
-        
+
         for col in ['sku_id', 'year_month']:
             if col not in available_cols:
                 missing_critical.append(col)
-        
+
         if missing_critical:
             error_msg = f"Missing critical columns in {sheet_name}: {', '.join(missing_critical)}"
             self.validation_errors.append(error_msg)
             return result
-        
+
         # Handle optional columns
         df_clean = df.copy()
         for col in ['burnaby_sales', 'kentucky_sales', 'kentucky_stockout_days', 'burnaby_stockout_days']:
             if col not in df_clean.columns:
                 df_clean[col] = 0
-        
+
         # Clean and validate data
         df_clean = df_clean.dropna(subset=['sku_id', 'year_month'])
-        
+
         # Convert numeric columns
         numeric_cols = ['burnaby_sales', 'kentucky_sales', 'kentucky_stockout_days', 'burnaby_stockout_days']
         for col in numeric_cols:
             df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce').fillna(0).astype(int)
-        
+
         # Validate stockout days (0-31)
         invalid_stockout = df_clean[
-            (df_clean['kentucky_stockout_days'] < 0) | 
-            (df_clean['kentucky_stockout_days'] > 31)
+            (df_clean['kentucky_stockout_days'] < 0) |
+            (df_clean['kentucky_stockout_days'] > 31) |
+            (df_clean['burnaby_stockout_days'] < 0) |
+            (df_clean['burnaby_stockout_days'] > 31)
         ]
-        
+
         if not invalid_stockout.empty:
             self.validation_warnings.append(
-                f"Invalid stockout days found in {sheet_name} - should be 0-31 days"
+                f"Invalid stockout days found in {sheet_name} - should be 0-31 days (corrected to valid range)"
             )
-        
-        # Import to database
+            # Correct invalid values
+            df_clean['kentucky_stockout_days'] = df_clean['kentucky_stockout_days'].clip(0, 31)
+            df_clean['burnaby_stockout_days'] = df_clean['burnaby_stockout_days'].clip(0, 31)
+
+        # Track original row numbers (adding 2 to account for header row and 0-based indexing)
+        df_clean['original_row'] = df_clean.index + 2
+        result["import_summary"]["total_rows"] = len(df_clean)
+
+        # Pre-load all existing SKUs from master table
         try:
             db = database.get_database_connection()
             cursor = db.cursor()
-            
-            imported_count = 0
-            for _, row in df_clean.iterrows():
-                # Upsert sales data
+
+            # Get all SKUs that exist in master table
+            cursor.execute("SELECT sku_id FROM skus")
+            existing_skus = {row[0] for row in cursor.fetchall()}
+
+            logger.info(f"ENHANCED SALES IMPORT: Found {len(existing_skus)} SKUs in master table for sales import validation")
+
+        except Exception as e:
+            self.validation_errors.append(f"Failed to load existing SKUs: {str(e)}")
+            logger.error(f"Database error loading SKUs: {str(e)}")
+            db.close()
+            return result
+
+        # Track duplicates within the CSV file
+        sku_year_combinations = df_clean[['sku_id', 'year_month']].apply(lambda x: f"{x['sku_id']}_{x['year_month']}", axis=1)
+        duplicate_combinations = set(sku_year_combinations[sku_year_combinations.duplicated()])
+
+        # Process each row with detailed tracking
+        imported_count = 0
+
+        for idx, row in df_clean.iterrows():
+            line_number = row['original_row']
+            sku_id = row['sku_id']
+            year_month = row['year_month']
+            combination_key = f"{sku_id}_{year_month}"
+
+            detail_entry = {
+                "line_number": line_number,
+                "sku_id": sku_id,
+                "year_month": year_month,
+                "burnaby_sales": row['burnaby_sales'],
+                "kentucky_sales": row['kentucky_sales'],
+                "burnaby_stockout_days": row['burnaby_stockout_days'],
+                "kentucky_stockout_days": row['kentucky_stockout_days'],
+                "status": "pending",
+                "error_category": None,
+                "error_message": None
+            }
+
+            try:
+                # Check for duplicate SKU+year_month combination in file
+                if combination_key in duplicate_combinations:
+                    detail_entry["status"] = "failed"
+                    detail_entry["error_category"] = "DUPLICATE_IN_FILE"
+                    detail_entry["error_message"] = f"SKU {sku_id} for {year_month} appears multiple times in file"
+                    result["import_summary"]["failed"] += 1
+                    result["import_details"].append(detail_entry)
+                    continue
+
+                # Validate SKU exists in master table
+                if sku_id not in existing_skus:
+                    detail_entry["status"] = "failed"
+                    detail_entry["error_category"] = "SKU_NOT_IN_MASTER"
+                    detail_entry["error_message"] = f"SKU {sku_id} does not exist in master SKU table - add SKU first"
+                    result["import_summary"]["failed"] += 1
+                    result["import_details"].append(detail_entry)
+                    continue
+
+                # Validate data quality
+                if row['burnaby_sales'] < 0 or row['kentucky_sales'] < 0:
+                    detail_entry["status"] = "failed"
+                    detail_entry["error_category"] = "INVALID_DATA"
+                    detail_entry["error_message"] = f"Negative sales values not allowed (Burnaby: {row['burnaby_sales']}, Kentucky: {row['kentucky_sales']})"
+                    result["import_summary"]["failed"] += 1
+                    result["import_details"].append(detail_entry)
+                    continue
+
+                # Insert/update sales data
                 query = """
                 INSERT INTO monthly_sales
                 (`sku_id`, `year_month`, `burnaby_sales`, `kentucky_sales`,
@@ -430,22 +528,55 @@ class ImportExportManager:
                     `kentucky_stockout_days` = VALUES(`kentucky_stockout_days`)
                 """
                 cursor.execute(query, (
-                    row['sku_id'], row['year_month'], row['burnaby_sales'], 
-                    row['kentucky_sales'], row['burnaby_stockout_days'], 
+                    sku_id, year_month, row['burnaby_sales'],
+                    row['kentucky_sales'], row['burnaby_stockout_days'],
                     row['kentucky_stockout_days']
                 ))
+
+                detail_entry["status"] = "success"
+                detail_entry["error_message"] = "Sales data imported successfully"
                 imported_count += 1
-            
+                result["import_summary"]["successful"] += 1
+
+            except Exception as e:
+                # Catch any database errors for individual records
+                detail_entry["status"] = "failed"
+                detail_entry["error_category"] = "DATABASE_ERROR"
+                detail_entry["error_message"] = f"Database error: {str(e)}"
+                result["import_summary"]["failed"] += 1
+                logger.error(f"Database error for SKU {sku_id} at line {line_number}: {str(e)}")
+
+            result["import_details"].append(detail_entry)
+
+        try:
             db.commit()
             db.close()
-            
+
             result["records"] = imported_count
-            logger.info(f"Imported {imported_count} sales records from {sheet_name}")
-            
+
+            # Log comprehensive summary
+            summary = result["import_summary"]
+            logger.info(f"Sales import completed for {sheet_name}: {summary['successful']} successful, {summary['failed']} failed, {summary['skipped']} skipped out of {summary['total_rows']} total rows")
+
+            # Add warnings for any failures
+            if summary["failed"] > 0:
+                failed_skus = [detail["sku_id"] for detail in result["import_details"] if detail["status"] == "failed" and detail["error_category"] == "SKU_NOT_IN_MASTER"]
+                if failed_skus:
+                    unique_failed_skus = list(set(failed_skus))
+                    if len(unique_failed_skus) <= 5:
+                        self.validation_warnings.append(f"Missing SKUs need to be added first: {', '.join(unique_failed_skus)}")
+                    else:
+                        self.validation_warnings.append(f"Missing SKUs need to be added first: {', '.join(unique_failed_skus[:5])} and {len(unique_failed_skus)-5} more")
+
+                self.validation_warnings.append(f"{summary['failed']} rows failed to import - see detailed report")
+
+            if summary["skipped"] > 0:
+                self.validation_warnings.append(f"{summary['skipped']} rows skipped due to data issues")
+
         except Exception as e:
-            self.validation_errors.append(f"Database error in {sheet_name}: {str(e)}")
-            logger.error(f"Database error importing sales: {str(e)}")
-        
+            self.validation_errors.append(f"Database commit error in {sheet_name}: {str(e)}")
+            logger.error(f"Database commit error: {str(e)}")
+
         return result
     
     def _import_sku_data(self, df: pd.DataFrame, sheet_name: str) -> Dict[str, Any]:
@@ -650,6 +781,7 @@ class ImportExportManager:
         """Auto-detect sheet content type and import appropriately"""
 
         columns = [col.lower() for col in df.columns]
+        logger.info(f"AUTO-DETECT: Processing {sheet_name} with columns: {columns}")
 
         # Check for inventory data - requires sku_id and at least one quantity column
         has_sku_id = 'sku_id' in columns
@@ -657,12 +789,16 @@ class ImportExportManager:
         has_kentucky_qty = any('kentucky' in col and 'qty' in col for col in columns)
 
         if has_sku_id and (has_burnaby_qty or has_kentucky_qty):
+            logger.info(f"AUTO-DETECT: Detected inventory data for {sheet_name}")
             return self._import_inventory_data(df, sheet_name)
         elif 'year_month' in columns and any('sales' in col for col in columns):
+            logger.info(f"AUTO-DETECT: Detected sales data for {sheet_name}")
             return self._import_sales_data(df, sheet_name)
         elif 'description' in columns and 'cost_per_unit' in columns:
+            logger.info(f"AUTO-DETECT: Detected SKU data for {sheet_name}")
             return self._import_sku_data(df, sheet_name)
         else:
+            logger.info(f"AUTO-DETECT: Unknown format for {sheet_name}")
             self.validation_warnings.append(f"Unknown sheet format: {sheet_name} - skipped")
             return {"type": "unknown", "records": 0}
     
