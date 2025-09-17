@@ -591,6 +591,174 @@ async def get_sku_details(sku_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
 
+@app.get("/api/test-weighted-demand/{sku_id}",
+         summary="Test Weighted Demand Calculations",
+         description="Compare traditional single-month vs new weighted moving average demand calculations",
+         tags=["Analytics"],
+         responses={
+             200: {
+                 "description": "Comparison of demand calculation methods",
+                 "content": {
+                     "application/json": {
+                         "example": {
+                             "sku_id": "SKU123",
+                             "traditional_calculation": {"corrected_demand": 150, "method": "single_month"},
+                             "weighted_calculation": {
+                                 "enhanced_demand": 135,
+                                 "method": "weighted_3mo_avg",
+                                 "demand_3mo_weighted": 135.5,
+                                 "demand_6mo_weighted": 142.3,
+                                 "volatility_class": "medium",
+                                 "coefficient_variation": 0.45,
+                                 "recommendation_basis": "3-month weighted average for BY classification"
+                             },
+                             "comparison": {"difference_percentage": -10.0, "method_preference": "weighted_average"}
+                         }
+                     }
+                 }
+             },
+             404: {"description": "SKU not found or no sales data available"}
+         })
+async def test_weighted_demand_calculation(sku_id: str):
+    """
+    Test endpoint to compare traditional single-month demand calculation
+    with new weighted moving average approach
+
+    This endpoint helps validate that the new weighted demand calculations
+    are working correctly by showing side-by-side comparison with the
+    traditional approach.
+
+    Args:
+        sku_id: The SKU identifier to analyze
+
+    Returns:
+        dict: Comparison of both calculation methods with detailed metrics
+
+    Raises:
+        HTTPException: 404 if SKU not found, 500 if calculation error
+
+    Business Use:
+    - Validate new weighted average implementation
+    - Compare calculation approaches during transition period
+    - Troubleshoot demand calculation discrepancies
+    - Performance testing of new algorithms
+    """
+    try:
+        # Initialize calculators
+        calc = calculations.TransferCalculator()
+
+        # Get SKU information and sales data
+        db = database.get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+
+        # Get SKU details including ABC-XYZ classification
+        cursor.execute("""
+            SELECT s.sku_id, s.description, s.abc_code, s.xyz_code,
+                   ic.kentucky_qty, ic.burnaby_qty
+            FROM skus s
+            LEFT JOIN inventory_current ic ON s.sku_id = ic.sku_id
+            WHERE s.sku_id = %s AND s.status = 'Active'
+        """, (sku_id,))
+
+        sku_info = cursor.fetchone()
+        if not sku_info:
+            db.close()
+            raise HTTPException(status_code=404, detail=f"SKU {sku_id} not found or inactive")
+
+        # Get latest sales data for traditional calculation
+        cursor.execute("""
+            SELECT kentucky_sales, kentucky_stockout_days, corrected_demand_kentucky
+            FROM monthly_sales
+            WHERE sku_id = %s
+            ORDER BY `year_month` DESC
+            LIMIT 1
+        """, (sku_id,))
+
+        latest_sales = cursor.fetchone()
+        db.close()
+
+        if not latest_sales:
+            raise HTTPException(status_code=404, detail=f"No sales data found for SKU {sku_id}")
+
+        # Traditional single-month calculation (existing logic)
+        kentucky_sales = latest_sales['kentucky_sales'] or 0
+        stockout_days = latest_sales['kentucky_stockout_days'] or 0
+
+        # Simple stockout correction (mimicking existing logic)
+        if stockout_days > 0 and kentucky_sales > 0:
+            availability_rate = max((30 - stockout_days) / 30, 0.3)
+            traditional_corrected = kentucky_sales / availability_rate
+            traditional_corrected = min(traditional_corrected, kentucky_sales * 1.5)
+        else:
+            traditional_corrected = kentucky_sales
+
+        traditional_calculation = {
+            "corrected_demand": round(traditional_corrected, 2),
+            "method": "single_month",
+            "raw_sales": kentucky_sales,
+            "stockout_days": stockout_days,
+            "availability_rate": round((30 - stockout_days) / 30, 3) if stockout_days > 0 else 1.0
+        }
+
+        # New weighted calculation
+        abc_class = sku_info['abc_code'] or 'B'
+        xyz_class = sku_info['xyz_code'] or 'Y'
+
+        weighted_result = calc.weighted_demand_calculator.get_enhanced_demand_calculation(
+            sku_id, abc_class, xyz_class, kentucky_sales, stockout_days
+        )
+
+        # Calculate percentage difference
+        traditional_demand = traditional_corrected
+        weighted_demand = weighted_result['enhanced_demand']
+
+        if traditional_demand > 0:
+            difference_pct = round(((weighted_demand - traditional_demand) / traditional_demand) * 100, 2)
+        else:
+            difference_pct = 0
+
+        # Determine method preference based on data quality
+        sample_size = weighted_result.get('sample_size_months', 0)
+        data_quality = weighted_result.get('data_quality_score', 0.0)
+
+        if sample_size >= 3 and data_quality >= 0.7:
+            method_preference = "weighted_average"
+            preference_reason = "Sufficient historical data with good quality"
+        elif sample_size >= 2:
+            method_preference = "weighted_average"
+            preference_reason = "Limited but usable historical data"
+        else:
+            method_preference = "single_month"
+            preference_reason = "Insufficient historical data for weighted calculation"
+
+        return {
+            "sku_id": sku_id,
+            "sku_info": {
+                "description": sku_info['description'],
+                "abc_code": abc_class,
+                "xyz_code": xyz_class,
+                "kentucky_qty": sku_info['kentucky_qty'] or 0,
+                "burnaby_qty": sku_info['burnaby_qty'] or 0
+            },
+            "traditional_calculation": traditional_calculation,
+            "weighted_calculation": weighted_result,
+            "comparison": {
+                "difference_percentage": difference_pct,
+                "method_preference": method_preference,
+                "preference_reason": preference_reason,
+                "improvement_notes": [
+                    "Weighted average reduces single-month volatility impact",
+                    "ABC-XYZ classification optimizes calculation strategy",
+                    "Volatility metrics help identify forecast reliability"
+                ]
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Calculation test failed: {str(e)}")
+
 @app.get("/api/export/sales-history/{sku_id}",
          summary="Export Individual SKU Sales History",
          description="Export comprehensive sales history for a specific SKU as CSV",
@@ -3195,6 +3363,158 @@ async def update_pending_order(order_id: int, updates: models.PendingInventoryUp
         raise HTTPException(
             status_code=500,
             detail=f"Failed to update pending order: {str(e)}"
+        )
+
+# ===================================================================
+# SAFETY STOCK AND COVERAGE TESTING API ENDPOINTS
+# ===================================================================
+
+@app.get("/api/test-safety-stock/{sku_id}",
+         summary="Test Safety Stock and Coverage Calculations",
+         description="Test complete volatility, safety stock, and coverage calculation system",
+         tags=["Analytics"],
+         responses={
+             200: {
+                 "description": "Complete safety stock and coverage analysis",
+                 "content": {
+                     "application/json": {
+                         "example": {
+                             "sku_id": "UB-YTX14-BS",
+                             "enhanced_demand": 1719.26,
+                             "coverage_analysis": {
+                                 "recommended_coverage_months": 6.3,
+                                 "base_coverage_months": 6.0,
+                                 "safety_stock_months": 0.2,
+                                 "volatility_adjustment_months": 0.1
+                             },
+                             "safety_stock_details": {
+                                 "safety_stock": 5.2,
+                                 "z_score": 1.28,
+                                 "service_level": 0.90
+                             }
+                         }
+                     }
+                 }
+             },
+             404: {"description": "SKU not found"}
+         })
+async def test_safety_stock_calculation(sku_id: str):
+    """
+    Test complete safety stock and coverage calculation system
+
+    This endpoint demonstrates the integration of:
+    - Weighted demand calculations
+    - Demand volatility analysis
+    - Statistical safety stock formulas
+    - Volatility-based coverage adjustments
+
+    Args:
+        sku_id: SKU identifier to analyze
+
+    Returns:
+        Complete analysis with safety stock recommendations and coverage targets
+    """
+    try:
+        # Initialize calculator
+        calc = calculations.TransferCalculator()
+
+        # Verify SKU exists and is active
+        sku_query = """
+        SELECT sku_id, description, abc_code, xyz_code, supplier, status
+        FROM skus
+        WHERE sku_id = %s AND status = 'Active'
+        """
+
+        sku_info = database.execute_query(sku_query, (sku_id,), fetch_one=True)
+
+        if not sku_info:
+            raise HTTPException(
+                status_code=404,
+                detail=f"SKU {sku_id} not found or inactive"
+            )
+
+        abc_class = sku_info['abc_code'] or 'C'
+        xyz_class = sku_info['xyz_code'] or 'Z'
+        supplier = sku_info['supplier']
+
+        # Get enhanced demand calculation
+        enhanced_result = calc.weighted_demand_calculator.get_enhanced_demand_calculation(
+            sku_id, abc_class, xyz_class, 0, 0
+        )
+
+        enhanced_demand = enhanced_result['enhanced_demand']
+
+        # Calculate coverage with safety stock
+        coverage_result = calc.weighted_demand_calculator.calculate_coverage_with_safety_stock(
+            sku_id, abc_class, enhanced_demand, supplier
+        )
+
+        # Test direct safety stock calculation
+        volatility_metrics = calc.weighted_demand_calculator.calculate_demand_volatility(sku_id)
+        weekly_demand = enhanced_demand / 4.33
+        demand_std = volatility_metrics['standard_deviation'] / 4.33
+
+        safety_stock_result = calc.weighted_demand_calculator.safety_stock_calculator.calculate_safety_stock(
+            demand_std=demand_std,
+            abc_class=abc_class,
+            supplier=supplier,
+            mean_demand=weekly_demand
+        )
+
+        # Calculate reorder point
+        reorder_point_result = calc.weighted_demand_calculator.safety_stock_calculator.calculate_reorder_point(
+            mean_demand=weekly_demand,
+            demand_std=demand_std,
+            abc_class=abc_class,
+            supplier=supplier
+        )
+
+        # Get service level recommendations
+        service_recommendations = calc.weighted_demand_calculator.safety_stock_calculator.get_service_level_recommendations(
+            abc_class, volatility_metrics['volatility_class']
+        )
+
+        return {
+            "sku_id": sku_id,
+            "sku_info": {
+                "description": sku_info['description'],
+                "abc_code": abc_class,
+                "xyz_code": xyz_class,
+                "supplier": supplier,
+                "status": sku_info['status']
+            },
+            "enhanced_demand": enhanced_demand,
+            "enhanced_demand_details": enhanced_result,
+            "coverage_analysis": coverage_result,
+            "safety_stock_calculation": safety_stock_result,
+            "reorder_point_calculation": reorder_point_result,
+            "service_level_recommendations": service_recommendations,
+            "volatility_metrics": volatility_metrics,
+            "calculation_summary": {
+                "recommended_coverage_months": coverage_result.get('recommended_coverage_months', 6.0),
+                "safety_stock_units": safety_stock_result['safety_stock'],
+                "reorder_point_units": reorder_point_result['reorder_point'],
+                "service_level_target": service_recommendations['recommended_service_level'],
+                "volatility_class": volatility_metrics['volatility_class'],
+                "weekly_demand": round(weekly_demand, 2),
+                "formula_used": safety_stock_result.get('formula', 'N/A')
+            },
+            "business_interpretation": {
+                "coverage_recommendation": f"Stock {coverage_result.get('recommended_coverage_months', 6.0)} months of inventory",
+                "safety_buffer": f"Keep {safety_stock_result['safety_stock']} units as safety stock",
+                "reorder_trigger": f"Reorder when inventory drops to {reorder_point_result['reorder_point']} units",
+                "risk_level": volatility_metrics['volatility_class'].title(),
+                "confidence_level": f"{service_recommendations['recommended_service_level']*100:.1f}% service level"
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Safety stock calculation test failed for {sku_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Safety stock calculation failed: {str(e)}"
         )
 
 # ===================================================================

@@ -74,7 +74,7 @@ def execute_query(query: str, params: Optional[tuple] = None, fetch_one: bool = 
         return result
         
     except Exception as e:
-        logger.error(f"Query execution failed: {e}")
+        logger.error("Query execution failed: " + str(e))
         raise
 
 def get_current_stock_status():
