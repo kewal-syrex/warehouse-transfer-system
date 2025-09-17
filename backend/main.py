@@ -1283,6 +1283,8 @@ async def import_pending_orders_from_csv(
         imported_count = 0
         error_count = 0
         errors = []
+        successful_imports = []
+        failed_imports = []
         batch_id = str(uuid.uuid4())
 
         # Validate SKUs
@@ -1292,6 +1294,17 @@ async def import_pending_orders_from_csv(
         valid_skus = {row[0] for row in cursor.fetchall()}
 
         invalid_skus = set(all_skus) - valid_skus
+
+        # Track invalid SKUs as failed imports
+        for order_data in orders:
+            if order_data["sku_id"] in invalid_skus:
+                failed_imports.append({
+                    "sku_id": order_data["sku_id"],
+                    "quantity": order_data["quantity"],
+                    "destination": order_data["destination"],
+                    "error": "SKU not found in database"
+                })
+
         if invalid_skus:
             errors.append(f"Invalid SKUs found: {', '.join(sorted(invalid_skus))}")
 
@@ -1317,11 +1330,31 @@ async def import_pending_orders_from_csv(
                         order_data.get("notes")
                     ))
                     imported_count += 1
+
+                    # Track successful import
+                    successful_imports.append({
+                        "sku_id": order_data["sku_id"],
+                        "quantity": order_data["quantity"],
+                        "destination": order_data["destination"],
+                        "expected_arrival": order_data["expected_arrival"],
+                        "is_estimated": order_data["is_estimated"],
+                        "notes": order_data.get("notes")
+                    })
+
                     if order_data["is_estimated"]:
                         estimated_dates_added += 1
                 except Exception as e:
-                    errors.append(f"Failed to import {order_data['sku_id']}: {str(e)}")
+                    error_message = str(e)
+                    errors.append(f"Failed to import {order_data['sku_id']}: {error_message}")
                     error_count += 1
+
+                    # Track failed import
+                    failed_imports.append({
+                        "sku_id": order_data["sku_id"],
+                        "quantity": order_data["quantity"],
+                        "destination": order_data["destination"],
+                        "error": error_message
+                    })
 
         db.commit()
         cursor.close()
@@ -1329,10 +1362,18 @@ async def import_pending_orders_from_csv(
 
         result = {
             "success": True,
+            "summary": {
+                "total_rows": len(orders),
+                "imported": imported_count,
+                "failed": error_count + len(invalid_skus),
+                "estimated_dates": estimated_dates_added
+            },
             "imported_count": imported_count,
             "total_orders": len(orders),
             "estimated_dates_added": estimated_dates_added,
-            "errors": errors if errors else []
+            "errors": errors if errors else [],
+            "successful_imports": successful_imports,
+            "failed_imports": failed_imports
         }
 
         # Add replace mode information if used

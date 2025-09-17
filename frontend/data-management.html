@@ -1438,27 +1438,91 @@
             let html = '';
 
             if (result.success) {
+                // Summary section
+                const summary = result.summary || {
+                    total_rows: result.total_orders,
+                    imported: result.imported_count,
+                    failed: (result.failed_imports?.length || 0),
+                    estimated_dates: result.estimated_dates_added
+                };
+
                 html += `<div class="validation-success">
                     <i class="fas fa-check-circle me-2"></i>
-                    <strong>Import Successful!</strong><br>
-                    Imported ${result.imported_count} pending orders from ${result.total_orders} rows.
+                    <strong>Import Completed!</strong><br>
+                    <div class="row mt-2">
+                        <div class="col-3 text-center">
+                            <div class="text-success fw-bold fs-5">${summary.imported}</div>
+                            <small>Imported</small>
+                        </div>
+                        <div class="col-3 text-center">
+                            <div class="text-danger fw-bold fs-5">${summary.failed}</div>
+                            <small>Failed</small>
+                        </div>
+                        <div class="col-3 text-center">
+                            <div class="text-warning fw-bold fs-5">${summary.estimated_dates}</div>
+                            <small>Estimated</small>
+                        </div>
+                        <div class="col-3 text-center">
+                            <div class="text-info fw-bold fs-5">${summary.total_rows}</div>
+                            <small>Total Rows</small>
+                        </div>
+                    </div>
                 </div>`;
 
+                // Successful imports section
+                if (result.successful_imports && result.successful_imports.length > 0) {
+                    html += `<div class="mt-3">
+                        <button class="btn btn-outline-success btn-sm" data-bs-toggle="collapse" data-bs-target="#successful-imports">
+                            <i class="fas fa-check me-1"></i>View ${result.successful_imports.length} Successful Imports
+                        </button>
+                        <div class="collapse mt-2" id="successful-imports">
+                            <div class="card">
+                                <div class="card-body p-2" style="max-height: 200px; overflow-y: auto;">
+                                    <small>
+                                        ${result.successful_imports.slice(0, 50).map(item =>
+                                            `• ${item.sku_id} (${item.quantity}) → ${item.destination}${item.is_estimated ? ' <span class="badge badge-warning">Est.</span>' : ''}`
+                                        ).join('<br>')}
+                                        ${result.successful_imports.length > 50 ? '<br>• ...and ' + (result.successful_imports.length - 50) + ' more' : ''}
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+                }
+
+                // Failed imports section
+                if (result.failed_imports && result.failed_imports.length > 0) {
+                    html += `<div class="mt-3">
+                        <button class="btn btn-outline-danger btn-sm" data-bs-toggle="collapse" data-bs-target="#failed-imports">
+                            <i class="fas fa-exclamation-triangle me-1"></i>View ${result.failed_imports.length} Failed Imports
+                        </button>
+                        <div class="collapse mt-2" id="failed-imports">
+                            <div class="card border-danger">
+                                <div class="card-body p-2" style="max-height: 200px; overflow-y: auto;">
+                                    <small>
+                                        ${result.failed_imports.slice(0, 25).map(item =>
+                                            `• <strong>${item.sku_id}</strong> (${item.quantity}) → ${item.destination}<br>&nbsp;&nbsp;<em class="text-danger">${item.error}</em>`
+                                        ).join('<br>')}
+                                        ${result.failed_imports.length > 25 ? '<br>• ...and ' + (result.failed_imports.length - 25) + ' more failures' : ''}
+                                    </small>
+                                </div>
+                                <div class="card-footer p-2">
+                                    <button class="btn btn-outline-secondary btn-sm" onclick="exportFailedImports()">
+                                        <i class="fas fa-download me-1"></i>Export Error Report
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+                }
+
                 if (result.estimated_dates_added > 0) {
-                    html += `<div class="validation-warning">
+                    html += `<div class="validation-warning mt-3">
                         <i class="fas fa-calendar me-2"></i>
                         ${result.estimated_dates_added} orders used estimated dates (Today + 120 days).
                     </div>`;
                 }
 
-                if (result.errors && result.errors.length > 0) {
-                    html += `<div class="validation-error">
-                        <i class="fas fa-exclamation-triangle me-2"></i>
-                        <strong>Some issues found:</strong><br>
-                        ${result.errors.slice(0, 5).map(error => `• ${error}`).join('<br>')}
-                        ${result.errors.length > 5 ? '<br>• ...and more' : ''}
-                    </div>`;
-                }
             } else {
                 html += `<div class="validation-error">
                     <i class="fas fa-times-circle me-2"></i>
@@ -1468,7 +1532,10 @@
 
             container.innerHTML = html;
 
-            // Auto-hide after 10 seconds if successful
+            // Store the result for potential export
+            window.lastImportResult = result;
+
+            // Auto-hide after 15 seconds if successful
             if (result.success) {
                 setTimeout(() => {
                     container.style.display = 'none';
@@ -2177,6 +2244,35 @@
             refreshPendingOrdersSummary();
             refreshPendingOrdersPreview();
         });
+        // Export failed imports to CSV for analysis
+        function exportFailedImports() {
+            if (!window.lastImportResult || !window.lastImportResult.failed_imports) {
+                alert('No failed imports to export');
+                return;
+            }
+
+            const failedImports = window.lastImportResult.failed_imports;
+
+            // Create CSV content
+            let csvContent = 'sku_id,quantity,destination,error\n';
+            failedImports.forEach(item => {
+                csvContent += `"${item.sku_id}","${item.quantity}","${item.destination}","${item.error.replace(/"/g, '""')}"\n`;
+            });
+
+            // Create and download file
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            if (link.download !== undefined) {
+                const url = URL.createObjectURL(blob);
+                link.setAttribute('href', url);
+                link.setAttribute('download', `failed_imports_${new Date().toISOString().split('T')[0]}.csv`);
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+        }
+
     </script>
 </body>
 </html>
