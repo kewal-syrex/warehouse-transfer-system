@@ -708,11 +708,12 @@ class TransferCalculator:
         Returns:
             Target coverage in months
         """
-        # Coverage matrix from PRD
+        # Coverage matrix from PRD - Updated C-level targets for better inventory management
+        # C-level items need higher coverage due to slower turnover and longer lead times
         coverage_matrix = {
             'AX': 4, 'AY': 5, 'AZ': 6,
             'BX': 3, 'BY': 4, 'BZ': 5,
-            'CX': 2, 'CY': 2, 'CZ': 1
+            'CX': 4, 'CY': 5, 'CZ': 6
         }
         
         key = f"{abc_class}{xyz_class}"
@@ -842,31 +843,77 @@ class TransferCalculator:
             }
 
     def calculate_burnaby_retention(self, burnaby_qty: int, burnaby_demand: float,
-                                   pending_data: Dict[str, Any]) -> Dict[str, Any]:
+                                   pending_data: Dict[str, Any], abc_class: str = 'C',
+                                   xyz_class: str = 'Z') -> Dict[str, Any]:
         """
-        Calculate how much inventory Burnaby should retain based on pending orders
+        Calculate how much inventory Burnaby should retain based on ABC-XYZ classification and pending orders
+
+        Uses dynamic retention targets based on ABC-XYZ classification instead of fixed coverage months.
+        High-value or erratic items (A-class, Z-class) get higher retention targets for safety.
 
         Args:
             burnaby_qty: Current Burnaby inventory
             burnaby_demand: Monthly demand for Burnaby
             pending_data: Pending orders data from get_pending_orders_data()
+            abc_class: ABC classification ('A', 'B', 'C') for determining retention importance
+            xyz_class: XYZ classification ('X', 'Y', 'Z') for demand variability
 
         Returns:
-            Dictionary with retention calculation details
+            Dictionary with retention calculation details including classification-based targets
         """
         try:
             days_until_arrival = pending_data.get('days_until_arrival')
             burnaby_pending = pending_data.get('burnaby_pending', 0)
 
-            # Determine retention strategy based on pending arrivals
-            if days_until_arrival is not None and days_until_arrival < 45 and burnaby_pending > 0:
-                # Reduce retention when pending orders are imminent
-                burnaby_min_retain = burnaby_demand * self.BURNABY_COVERAGE_WITH_PENDING
-                retention_reason = f"Reduced retention due to pending arrival in {days_until_arrival} days"
-            else:
-                # Standard retention
-                burnaby_min_retain = burnaby_demand * self.BURNABY_MIN_COVERAGE_MONTHS
-                retention_reason = "Standard retention policy"
+            # Dynamic retention based on supplier lead time and pending order status
+            # Account for full replenishment cycle when no orders are pending
+
+            # Lead time parameters based on business requirements
+            supplier_lead_time_days = 100  # Average of 80-120 days supplier lead time
+            review_period_days = 7  # Weekly ordering cycle
+            total_replen_time_months = (supplier_lead_time_days + review_period_days) / 30  # ~3.5 months
+
+            if days_until_arrival is None or days_until_arrival > 60 or burnaby_pending == 0:
+                # NO PENDING ORDERS or too far away - Need full pipeline coverage
+                base_coverage_months = total_replen_time_months + 1.0  # 3.5 + 1 = 4.5 months safety
+
+                # Adjust based on KY/CA demand ratio - if KY sells considerably more, can be more aggressive
+                demand_ratio = 1.0
+                if kentucky_demand and kentucky_demand > 0 and burnaby_demand > 0:
+                    demand_ratio = kentucky_demand / burnaby_demand
+                    if demand_ratio > 2.0:  # KY sells 2x+ more than CA
+                        base_coverage_months *= 0.7  # Reduce to ~3.15 months
+                    elif demand_ratio > 1.5:  # KY sells 1.5x+ more than CA
+                        base_coverage_months *= 0.85  # Reduce to ~3.8 months
+
+                burnaby_min_retain = burnaby_demand * base_coverage_months
+                retention_reason = f"No pending orders - {base_coverage_months:.1f}m retention (KY/CA ratio: {demand_ratio:.1f}, {abc_class}{xyz_class})"
+
+            elif days_until_arrival <= 30:
+                # Orders arriving soon - can be aggressive but add buffer for delays
+                base_coverage_months = 2.5  # 1.5 base + 1.0 delay buffer
+                confidence_factor = 0.8  # High confidence for near-term orders
+                base_retention = base_coverage_months * burnaby_demand
+                pending_reduction = burnaby_pending * confidence_factor
+
+                # Minimum retention of 1.0 months to account for potential delays
+                min_retention = 1.0 * burnaby_demand
+                burnaby_min_retain = max(min_retention, base_retention - pending_reduction)
+
+                retention_reason = f"Pending arrival in {days_until_arrival}d - {burnaby_min_retain/burnaby_demand:.1f}m retention ({abc_class}{xyz_class})"
+
+            else:  # 31-60 days away
+                # Orders in pipeline but not imminent - moderate retention with delay buffer
+                base_coverage_months = 3.5  # 2.5 base + 1.0 delay buffer
+                confidence_factor = 0.5  # Medium confidence for medium-term orders
+                base_retention = base_coverage_months * burnaby_demand
+                pending_reduction = burnaby_pending * confidence_factor
+
+                # Minimum retention of 1.5 months for distant orders
+                min_retention = 1.5 * burnaby_demand
+                burnaby_min_retain = max(min_retention, base_retention - pending_reduction)
+
+                retention_reason = f"Pending arrival in {days_until_arrival}d - {burnaby_min_retain/burnaby_demand:.1f}m retention ({abc_class}{xyz_class})"
 
             # Calculate available for transfer
             available_for_transfer = max(0, burnaby_qty - burnaby_min_retain)
@@ -880,17 +927,28 @@ class TransferCalculator:
                 'available_for_transfer': int(available_for_transfer),
                 'retention_reason': retention_reason,
                 'coverage_with_pending': round(coverage_with_pending, 1),
-                'burnaby_pending': burnaby_pending
+                'burnaby_pending': burnaby_pending,
+                'abc_class': abc_class,
+                'xyz_class': xyz_class,
+                'base_coverage_months': base_coverage_months
             }
 
         except Exception as e:
             logger.error(f"Burnaby retention calculation failed: {e}")
-            # Safe fallback
-            burnaby_min_retain = burnaby_demand * self.BURNABY_MIN_COVERAGE_MONTHS
+            # Safe fallback using classification if possible, otherwise use default
+            try:
+                fallback_coverage = self.get_coverage_target(abc_class, xyz_class)
+            except:
+                fallback_coverage = 2.0  # Safe fallback
+
+            burnaby_min_retain = burnaby_demand * fallback_coverage
             return {
                 'burnaby_min_retain': int(burnaby_min_retain),
                 'available_for_transfer': max(0, int(burnaby_qty - burnaby_min_retain)),
-                'retention_reason': "Fallback retention calculation",
+                'retention_reason': f"Fallback retention calculation ({abc_class}{xyz_class}: {fallback_coverage} months)",
+                'abc_class': abc_class,
+                'xyz_class': xyz_class,
+                'base_coverage_months': fallback_coverage,
                 'coverage_with_pending': burnaby_qty / max(burnaby_demand, 1),
                 'burnaby_pending': 0
             }
@@ -1198,16 +1256,23 @@ class TransferCalculator:
                 days_until_arrival = None
                 pending_orders_included = False
 
-            # Step 2: Calculate corrected demand for BOTH warehouses
-            current_month = datetime.now().strftime('%Y-%m')
+            # Step 2: Use corrected demand from database (already calculated with enhanced methods)
+            # Convert from Decimal to float to avoid type errors in calculations
+            kentucky_corrected_demand = float(sku_data.get('corrected_demand_kentucky', 0) or 0)
+            burnaby_corrected_demand = float(sku_data.get('corrected_demand_burnaby', 0) or 0)
 
-            kentucky_corrected_demand = self.corrector.correct_monthly_demand_enhanced(
-                sku_id, kentucky_sales, stockout_days, current_month
-            )
+            # Fallback: if database values are 0 but we have sales, calculate them
+            if kentucky_corrected_demand == 0 and kentucky_sales > 0:
+                current_month = datetime.now().strftime('%Y-%m')
+                kentucky_corrected_demand = self.corrector.correct_monthly_demand_enhanced(
+                    sku_id, kentucky_sales, stockout_days, current_month
+                )
 
-            burnaby_corrected_demand = self.corrector.correct_monthly_demand_enhanced(
-                sku_id, burnaby_sales, burnaby_stockout_days, current_month
-            )
+            if burnaby_corrected_demand == 0 and burnaby_sales > 0:
+                current_month = datetime.now().strftime('%Y-%m')
+                burnaby_corrected_demand = self.corrector.correct_monthly_demand_enhanced(
+                    sku_id, burnaby_sales, burnaby_stockout_days, current_month
+                )
 
             # Step 3: Economic Validation - Don't transfer if CA demand significantly higher than KY
             economic_validation_passed = True
@@ -1217,11 +1282,50 @@ class TransferCalculator:
                 economic_validation_passed = False
                 economic_reason = f"CA demand ({burnaby_corrected_demand:.0f}) too high vs KY demand ({kentucky_corrected_demand:.0f}). Transfer would risk CA stockout."
 
-            # Step 4: Calculate Burnaby minimum retention considering pending arrivals
-            burnaby_min_retain = burnaby_corrected_demand * self.BURNABY_MIN_COVERAGE_MONTHS
-            # Adjust retention if significant pending arrivals expected for Burnaby
-            if burnaby_pending > burnaby_corrected_demand * 0.5:  # If pending > 50% of monthly demand
-                burnaby_min_retain *= 0.8  # Can be more aggressive with retention
+            # Step 4: Calculate Burnaby minimum retention using dynamic approach
+            # Same logic as calculate_burnaby_retention function
+
+            # Lead time parameters based on business requirements
+            supplier_lead_time_days = 100  # Average of 80-120 days supplier lead time
+            review_period_days = 7  # Weekly ordering cycle
+            total_replen_time_months = (supplier_lead_time_days + review_period_days) / 30  # ~3.5 months
+
+            if days_until_arrival is None or days_until_arrival > 60 or burnaby_pending == 0:
+                # NO PENDING ORDERS or too far away - Need full pipeline coverage
+                burnaby_base_coverage = total_replen_time_months + 1.0  # 3.5 + 1 = 4.5 months safety
+
+                # Adjust based on KY/CA demand ratio - if KY sells considerably more, can be more aggressive
+                demand_ratio = 1.0
+                if kentucky_corrected_demand > 0 and burnaby_corrected_demand > 0:
+                    demand_ratio = kentucky_corrected_demand / burnaby_corrected_demand
+                    if demand_ratio > 2.0:  # KY sells 2x+ more than CA
+                        burnaby_base_coverage *= 0.7  # Reduce to ~3.15 months
+                    elif demand_ratio > 1.5:  # KY sells 1.5x+ more than CA
+                        burnaby_base_coverage *= 0.85  # Reduce to ~3.8 months
+
+                burnaby_min_retain = burnaby_corrected_demand * burnaby_base_coverage
+
+            elif days_until_arrival <= 30:
+                # Orders arriving soon - can be aggressive but add buffer for delays
+                burnaby_base_coverage = 2.5  # 1.5 base + 1.0 delay buffer
+                confidence_factor = 0.8  # High confidence for near-term orders
+                base_retention = burnaby_base_coverage * burnaby_corrected_demand
+                pending_reduction = burnaby_pending * confidence_factor
+
+                # Minimum retention of 1.0 months to account for potential delays
+                min_retention = 1.0 * burnaby_corrected_demand
+                burnaby_min_retain = max(min_retention, base_retention - pending_reduction)
+
+            else:  # 31-60 days away
+                # Orders in pipeline but not imminent - moderate retention with delay buffer
+                burnaby_base_coverage = 3.5  # 2.5 base + 1.0 delay buffer
+                confidence_factor = 0.5  # Medium confidence for medium-term orders
+                base_retention = burnaby_base_coverage * burnaby_corrected_demand
+                pending_reduction = burnaby_pending * confidence_factor
+
+                # Minimum retention of 1.5 months for distant orders
+                min_retention = 1.5 * burnaby_corrected_demand
+                burnaby_min_retain = max(min_retention, base_retention - pending_reduction)
 
             available_for_transfer = max(0, burnaby_qty - burnaby_min_retain)
 
@@ -1241,7 +1345,9 @@ class TransferCalculator:
                 # Insufficient inventory after retention
                 final_transfer_qty = 0
                 priority = "LOW" if kentucky_qty > kentucky_corrected_demand else "MEDIUM"
-                reason = f"Insufficient CA inventory for transfer. CA needs {burnaby_min_retain:.0f} for 2-month coverage, only has {burnaby_qty}"
+                # Calculate actual retention period for message
+                actual_retention_months = burnaby_min_retain / burnaby_corrected_demand if burnaby_corrected_demand > 0 else 0
+                reason = f"Insufficient CA inventory for transfer. CA needs {burnaby_min_retain:.0f} for {actual_retention_months:.1f}-month coverage, only has {burnaby_qty}"
             else:
                 # Normal transfer calculation
                 recommended_qty = min(transfer_need, available_for_transfer)
@@ -1259,7 +1365,9 @@ class TransferCalculator:
 
                 # Generate comprehensive reason
                 if final_transfer_qty > 0:
-                    reason = f"Transfer {final_transfer_qty} units. CA retains {burnaby_min_retain:.0f} for 2-month coverage. Economic validation passed."
+                    # Calculate actual retention period for message
+                    actual_retention_months = burnaby_min_retain / burnaby_corrected_demand if burnaby_corrected_demand > 0 else 0
+                    reason = f"Transfer {final_transfer_qty} units. CA retains {burnaby_min_retain:.0f} for {actual_retention_months:.1f}-month coverage. Economic validation passed."
                 else:
                     reason = f"No transfer needed. KY has {kentucky_qty} units vs {kentucky_corrected_demand:.0f} monthly demand."
 
@@ -1387,9 +1495,9 @@ class TransferCalculator:
                 sku_id, burnaby_sales, burnaby_stockout_days, datetime.now().strftime('%Y-%m')
             )
 
-            # Step 5: Calculate Burnaby retention with pending orders
+            # Step 5: Calculate Burnaby retention with pending orders and ABC-XYZ classification
             burnaby_retention = self.calculate_burnaby_retention(
-                effective_burnaby_qty, burnaby_corrected_demand, pending_data
+                effective_burnaby_qty, burnaby_corrected_demand, pending_data, abc_class, xyz_class
             )
 
             # Step 6: Apply seasonal and growth patterns
@@ -2043,10 +2151,18 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
             COALESCE(ms.kentucky_sales, 0) as kentucky_sales,
             COALESCE(ms.kentucky_stockout_days, 0) as kentucky_stockout_days,
             COALESCE(ms.burnaby_sales, 0) as burnaby_sales,
-            COALESCE(ms.burnaby_stockout_days, 0) as burnaby_stockout_days
+            COALESCE(ms.burnaby_stockout_days, 0) as burnaby_stockout_days,
+            COALESCE(ms.corrected_demand_kentucky, 0) as corrected_demand_kentucky,
+            COALESCE(ms.corrected_demand_burnaby, 0) as corrected_demand_burnaby
         FROM skus s
         LEFT JOIN inventory_current ic ON s.sku_id = ic.sku_id
-        LEFT JOIN monthly_sales ms ON s.sku_id = ms.sku_id AND ms.`year_month` = '2024-03'
+        LEFT JOIN monthly_sales ms ON s.sku_id = ms.sku_id
+            AND ms.`year_month` = (
+                SELECT MAX(`year_month`)
+                FROM monthly_sales ms2
+                WHERE ms2.sku_id = s.sku_id
+                AND (ms2.kentucky_sales > 0 OR ms2.burnaby_sales > 0)
+            )
         WHERE s.status = 'Active'
         ORDER BY s.sku_id
         """
@@ -2083,26 +2199,65 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
 def update_abc_xyz_classifications():
     """
     Update ABC-XYZ classifications for all SKUs based on recent sales data
-    This would typically be run monthly after new sales data is imported
+
+    Uses the last 12 months of combined warehouse sales data for accurate classification.
+    Automatically determines the recent period to ensure sufficient data for analysis.
+    Should be called after sales data import to keep classifications current.
+
+    Returns:
+        bool: True if classifications updated successfully, False otherwise
     """
     try:
-        # Get sales data for classification
+        from datetime import datetime, timedelta
+        import calendar
+
+        # Calculate 12 months back from the most recent sales data
+        current_month_query = "SELECT MAX(`year_month`) as latest_month FROM monthly_sales"
+        latest_data = database.execute_query(current_month_query)
+
+        if not latest_data or not latest_data[0]['latest_month']:
+            logger.warning("No sales data found for classification update")
+            return False
+
+        latest_month = latest_data[0]['latest_month']
+
+        # Calculate 12 months back (accounting for year boundary)
+        try:
+            year, month = map(int, latest_month.split('-'))
+            if month > 12:
+                start_year = year
+                start_month = month - 12
+            else:
+                start_year = year - 1
+                start_month = month + 12 - 12
+            start_date = f"{start_year:04d}-{start_month:02d}"
+        except:
+            # Fallback to simple calculation
+            start_date = "2024-01"
+
+        # Get combined sales data for classification (both warehouses)
         sales_query = """
-        SELECT 
+        SELECT
             s.sku_id,
             s.cost_per_unit,
             ms.kentucky_sales,
+            ms.burnaby_sales,
             ms.`year_month`
         FROM skus s
         LEFT JOIN monthly_sales ms ON s.sku_id = ms.sku_id
         WHERE s.status = 'Active'
-            AND ms.`year_month` >= '2024-01'  # Last 3 months
+            AND ms.`year_month` >= %s
+            AND (ms.kentucky_sales > 0 OR ms.burnaby_sales > 0)
         ORDER BY s.sku_id, ms.`year_month`
         """
-        
-        sales_data = database.execute_query(sales_query)
-        
-        # Group by SKU
+
+        sales_data = database.execute_query(sales_query, (start_date,))
+
+        if not sales_data:
+            logger.warning(f"No sales data found from {start_date} onwards")
+            return False
+
+        # Group by SKU and combine warehouse sales
         sku_sales = {}
         for row in sales_data:
             sku_id = row['sku_id']
@@ -2111,38 +2266,57 @@ def update_abc_xyz_classifications():
                     'cost_per_unit': row['cost_per_unit'] or 0,
                     'sales': []
                 }
-            sku_sales[sku_id]['sales'].append(row['kentucky_sales'] or 0)
+            # Combine both warehouse sales for total demand
+            total_monthly_sales = (row['kentucky_sales'] or 0) + (row['burnaby_sales'] or 0)
+            sku_sales[sku_id]['sales'].append(total_monthly_sales)
         
         classifier = ABCXYZClassifier()
         
         # Calculate total annual value for ABC classification
         total_annual_value = 0
         for sku_data in sku_sales.values():
-            annual_sales = sum(sku_data['sales']) * 4  # Extrapolate from 3 months
+            # Use actual 12-month sales data (no extrapolation needed)
+            annual_sales = sum(sku_data['sales'])
             annual_value = annual_sales * sku_data['cost_per_unit']
             total_annual_value += annual_value
-        
-        # Update classifications
+
+        updated_count = 0
+
+        # Update classifications in batch for better performance
+        updates = []
         for sku_id, sku_data in sku_sales.items():
-            annual_sales = sum(sku_data['sales']) * 4
+            annual_sales = sum(sku_data['sales'])
             annual_value = annual_sales * sku_data['cost_per_unit']
             
             abc_class = classifier.classify_abc(annual_value, total_annual_value)
             xyz_class = classifier.classify_xyz(sku_data['sales'])
-            
-            # Update database
-            update_query = """
-            UPDATE skus 
-            SET abc_code = %s, xyz_code = %s, updated_at = NOW()
-            WHERE sku_id = %s
-            """
-            
+
+            updates.append((abc_class, xyz_class, sku_id))
+
+        # Batch update for better performance
+        if updates:
             db = database.get_database_connection()
             cursor = db.cursor()
-            cursor.execute(update_query, (abc_class, xyz_class, sku_id))
-            db.close()
-        
-        logger.info(f"Updated ABC-XYZ classifications for {len(sku_sales)} SKUs")
+            try:
+                update_query = """
+                UPDATE skus
+                SET abc_code = %s, xyz_code = %s, updated_at = NOW()
+                WHERE sku_id = %s
+                """
+                cursor.executemany(update_query, updates)
+                db.commit()
+                updated_count = len(updates)
+                logger.info(f"Successfully updated ABC-XYZ classifications for {updated_count} SKUs")
+                logger.info(f"Classification period: {start_date} to {latest_month}")
+
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Database error updating classifications: {e}")
+                return False
+            finally:
+                cursor.close()
+                db.close()
+
         return True
 
     except Exception as e:

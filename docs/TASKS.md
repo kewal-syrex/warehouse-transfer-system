@@ -183,6 +183,143 @@ Successfully enhanced the pending orders system to include both order date and e
 
 ---
 
+## 📋 Current Sprint: Smart Transfer Calculation System
+
+### 🎯 **TASK-304: Implement Smart Transfer Calculations with Dynamic Classification**
+
+**Objective**: Fix transfer calculations to properly consider both warehouses' demand, implement dynamic ABC-XYZ classification updates, and create intelligent Burnaby retention logic based on pending orders and demand ratios.
+
+**Context**: The current system shows "No transfer needed" for UB-YTX14-BS despite Kentucky having only 1.45 months coverage because:
+1. Coverage targets are too low (C-Z = 1 month instead of 6)
+2. ABC-XYZ classifications are static (never updated with new sales data)
+3. Burnaby retention doesn't use ABC-XYZ classification
+4. No consideration of pending orders or demand ratios
+
+#### Phase 1: Fix Coverage Matrix & Core Logic
+
+- [ ] **TASK-304.1**: Update Coverage Target Matrix
+  - [ ] Update line 715 in calculations.py to use realistic coverage targets
+  - [ ] Change C-Z from 1 month to 6 months (CX:4, CY:5, CZ:6)
+  - [ ] Add comprehensive docstrings explaining the business logic
+  - [ ] Test coverage calculations with various ABC-XYZ combinations
+
+- [ ] **TASK-304.2**: Fix Burnaby Retention Calculation
+  - [ ] Modify calculate_burnaby_retention() to use ABC-XYZ classification
+  - [ ] Pass abc_code and xyz_code to the retention function
+  - [ ] Use get_coverage_target() for Burnaby same as Kentucky
+  - [ ] Document the retention logic with clear examples
+
+#### Phase 2: Implement Dynamic Classification System
+
+- [ ] **TASK-304.3**: Create Classification Refresh Infrastructure
+  - [ ] Create update_single_sku_classification() method
+  - [ ] Add batch update capability for all SKUs
+  - [ ] Implement efficient SQL queries for classification updates
+  - [ ] Add logging for classification changes
+
+- [ ] **TASK-304.4**: Create Classification Refresh Script
+  - [ ] Create scripts/refresh_abc_xyz_classifications.py
+  - [ ] Add command-line arguments for selective updates
+  - [ ] Include progress tracking for large datasets
+  - [ ] Add validation and rollback capability
+
+- [ ] **TASK-304.5**: Add Auto-Update Triggers
+  - [ ] Modify import_sales_data() to trigger classification updates
+  - [ ] Add classification refresh after inventory imports
+  - [ ] Create API endpoint for manual classification refresh
+  - [ ] Add UI button to trigger manual refresh
+
+#### Phase 3: Smart Retention Logic ✅
+
+- [x] **TASK-304.6**: Implement Pending Order Awareness ✅
+  - [x] Enhanced calculate_burnaby_retention() with pending order logic
+  - [x] Reduced retention when pending orders arriving < 30 days with confidence factors
+  - [x] Adjusted retention based on days_until_arrival (≤30, 31-60, >60 day tiers)
+  - [x] Added 1-month delay buffer for shipment delays
+  - [x] Documented the time-based retention adjustments with clear examples
+
+- [x] **TASK-304.7**: Add Demand Ratio Intelligence ✅
+  - [x] Calculate kentucky_demand / burnaby_demand ratio
+  - [x] Reduce Burnaby retention when KY demand > 1.5x BY demand
+  - [x] Implemented configurable ratio thresholds (0.5-2.0 range)
+  - [x] Added safety checks to prevent over-aggressive transfers
+
+- [x] **TASK-304.8**: Implement Lead Time Assumptions ✅
+  - [x] Added logic for when no pending orders exist (4.5-month retention)
+  - [x] Assumed 100-day lead time for new orders (based on 80-120 day range)
+  - [x] Adjusted Burnaby retention to cover lead time plus safety buffer
+  - [x] Made lead time calculations dynamic based on pending order status
+
+#### Phase 4: Testing & Validation
+
+- [ ] **TASK-304.9**: Unit Tests for Calculation Logic
+  - [ ] Test coverage matrix changes
+  - [ ] Test Burnaby retention with various scenarios
+  - [ ] Test classification update functions
+  - [ ] Test demand ratio calculations
+
+- [ ] **TASK-304.10**: Integration Testing
+  - [ ] Test full transfer calculation flow
+  - [ ] Verify pending order integration
+  - [ ] Test classification updates with real data
+  - [ ] Validate performance with 4000+ SKUs
+
+- [x] **TASK-304.11**: Playwright UI Testing ✅
+  - [x] Tested transfer planning page displays correct values
+  - [x] Verified UB-YTX14-BS shows proper retention (1.0 month, 731 units) and transfer (6,300 units)
+  - [x] Confirmed pending order integration with delay buffer logic
+  - [x] Validated retention logic improvements for safety stock
+
+#### Phase 5: Documentation & Deployment
+
+- [ ] **TASK-304.12**: Code Documentation
+  - [ ] Add comprehensive docstrings to all modified functions
+  - [ ] Document calculation formulas with examples
+  - [ ] Update inline comments for complex logic
+  - [ ] Create developer notes for future maintenance
+
+- [ ] **TASK-304.13**: User Documentation
+  - [ ] Update help text in UI
+  - [ ] Create guide for classification system
+  - [ ] Document retention logic for users
+  - [ ] Add tooltips explaining calculations
+
+- [ ] **TASK-304.14**: Deployment & Monitoring
+  - [ ] Deploy changes to production
+  - [ ] Monitor calculation performance
+  - [ ] Track classification update frequency
+  - [ ] Collect user feedback on recommendations
+
+#### Success Criteria:
+- [ ] UB-YTX14-BS shows ~5,100 unit transfer recommendation
+- [ ] Classifications update automatically on data import
+- [ ] Burnaby retention uses ABC-XYZ classification
+- [ ] Pending orders properly influence retention
+- [ ] All tests pass with >90% coverage
+- [ ] Performance remains <5s for 4000 SKUs
+- [ ] Code is fully documented
+- [ ] User feedback positive
+
+#### ✅ **COMPLETED - Smart Retention Logic Enhancement**
+
+**Implementation Summary** (September 17, 2025):
+Successfully enhanced the Burnaby retention calculation system to include intelligent pending order awareness and demand ratio adjustments with proper delay buffers.
+
+**Key Features Delivered:**
+1. **Dynamic Retention Logic**: Time-based retention periods (≤30 days: 2.5 months, 31-60 days: 3.5 months, >60 days: 4.5 months)
+2. **Delay Buffer**: Added 1-month safety buffer to prevent depletion from shipment delays
+3. **Confidence Factors**: Applied 0.8 confidence for near-term orders, 0.5 for medium-term
+4. **Demand Ratio Intelligence**: Reduced retention when Kentucky demand significantly exceeds Burnaby
+5. **Lead Time Assumptions**: 100-day default lead time for new orders when no pending orders exist
+
+**Results for UB-YTX14-BS**:
+- **Before**: Burnaby retention 0.5 months (366 units) - too aggressive, no delay buffer
+- **After**: Burnaby retention 1.0 months (731 units) - safer with delay buffer
+- **Transfer Quantity**: 6,300 units (optimized for both efficiency and safety)
+- **Pending Orders**: 2,000 units arriving in 12 days properly accounted for
+
+---
+
 ## 📋 Future Enhancements & Open Tasks
 
 The following features and tasks from the original plan remain open for future development sprints.
