@@ -10,8 +10,10 @@ from collections import defaultdict
 import numpy as np
 try:
     from . import database
+    from .weighted_demand import WeightedDemandCalculator
 except ImportError:
     import database
+    from weighted_demand import WeightedDemandCalculator
 import logging
 
 logger = logging.getLogger(__name__)
@@ -454,15 +456,15 @@ class SeasonalPatternDetector:
             # Get historical monthly sales data (2+ years)
             query = """
             SELECT
-                year_month,
+                `year_month`,
                 kentucky_sales,
                 corrected_demand_kentucky,
-                MONTH(STR_TO_DATE(CONCAT(year_month, '-01'), '%Y-%m-%d')) as month_num,
-                YEAR(STR_TO_DATE(CONCAT(year_month, '-01'), '%Y-%m-%d')) as year_num
+                MONTH(STR_TO_DATE(CONCAT(`year_month`, '-01'), '%Y-%m-%d')) as month_num,
+                YEAR(STR_TO_DATE(CONCAT(`year_month`, '-01'), '%Y-%m-%d')) as year_num
             FROM monthly_sales
             WHERE sku_id = %s
-                AND year_month >= DATE_FORMAT(DATE_SUB(NOW(), INTERVAL 24 MONTH), '%Y-%m')
-            ORDER BY year_month
+                AND `year_month` >= DATE_FORMAT(DATE_SUB(NOW(), INTERVAL 24 MONTH), '%Y-%m')
+            ORDER BY `year_month`
             """
 
             sales_data = database.execute_query(query, (sku_id,))
@@ -591,14 +593,14 @@ class ViralGrowthDetector:
             # Get last 6 months of sales data
             query = """
             SELECT
-                year_month,
+                `year_month`,
                 kentucky_sales,
                 corrected_demand_kentucky,
-                ROW_NUMBER() OVER (ORDER BY year_month DESC) as recency_rank
+                ROW_NUMBER() OVER (ORDER BY `year_month` DESC) as recency_rank
             FROM monthly_sales
             WHERE sku_id = %s
-                AND year_month >= DATE_FORMAT(DATE_SUB(NOW(), INTERVAL 6 MONTH), '%Y-%m')
-            ORDER BY year_month DESC
+                AND `year_month` >= DATE_FORMAT(DATE_SUB(NOW(), INTERVAL 6 MONTH), '%Y-%m')
+            ORDER BY `year_month` DESC
             LIMIT 6
             """
 
@@ -696,6 +698,7 @@ class TransferCalculator:
         self.classifier = ABCXYZClassifier()
         self.seasonal_detector = SeasonalPatternDetector()
         self.growth_detector = ViralGrowthDetector()
+        self.weighted_demand_calculator = WeightedDemandCalculator()
     
     def get_coverage_target(self, abc_class: str, xyz_class: str) -> float:
         """
@@ -1381,10 +1384,13 @@ class TransferCalculator:
             return {
                 'sku_id': sku_id,
                 'description': sku_data.get('description', ''),
+                'supplier': sku_data.get('supplier', ''),
                 'current_burnaby_qty': burnaby_qty,
                 'current_kentucky_qty': kentucky_qty,
                 'corrected_monthly_demand': kentucky_corrected_demand,
                 'burnaby_corrected_demand': burnaby_corrected_demand,
+                'burnaby_monthly_demand': burnaby_corrected_demand,
+                'burnaby_6month_supply': round(burnaby_corrected_demand * 6, 0),
                 'recommended_transfer_qty': final_transfer_qty,
                 'transfer_multiple': transfer_multiple,
                 'priority': priority,
@@ -1417,10 +1423,13 @@ class TransferCalculator:
             return {
                 'sku_id': sku_id,
                 'description': sku_data.get('description', ''),
+                'supplier': sku_data.get('supplier', ''),
                 'current_burnaby_qty': burnaby_qty,
                 'current_kentucky_qty': kentucky_qty,
                 'corrected_monthly_demand': 0,
                 'burnaby_corrected_demand': 0,
+                'burnaby_monthly_demand': 0,
+                'burnaby_6month_supply': 0,
                 'recommended_transfer_qty': 0,
                 'transfer_multiple': transfer_multiple,
                 'priority': "LOW",
@@ -1485,12 +1494,21 @@ class TransferCalculator:
             effective_kentucky_qty = 0 if kentucky_override['is_overridden'] else kentucky_qty
             effective_burnaby_qty = 0 if burnaby_override['is_overridden'] else burnaby_qty
 
-            # Step 4: Calculate enhanced demand for Kentucky
-            kentucky_corrected_demand = self.corrector.correct_monthly_demand_enhanced(
-                sku_id, kentucky_sales, stockout_days, datetime.now().strftime('%Y-%m')
+            # Step 4: Calculate enhanced demand for Kentucky using weighted averages
+            kentucky_enhanced_result = self.weighted_demand_calculator.get_enhanced_demand_calculation(
+                sku_id, abc_class, xyz_class, kentucky_sales, stockout_days
             )
+            kentucky_corrected_demand = kentucky_enhanced_result['enhanced_demand']
 
-            # Calculate Burnaby demand for retention calculation
+            # Store weighted demand calculation details for transparency
+            weighted_demand_info = {
+                'calculation_method': kentucky_enhanced_result.get('calculation_method', 'unknown'),
+                'volatility_class': kentucky_enhanced_result.get('volatility_class', 'unknown'),
+                'data_quality_score': kentucky_enhanced_result.get('data_quality_score', 0.0),
+                'strategy_reason': kentucky_enhanced_result.get('strategy_reason', '')
+            }
+
+            # Calculate Burnaby demand for retention calculation (keep existing method for now)
             burnaby_corrected_demand = self.corrector.correct_monthly_demand_enhanced(
                 sku_id, burnaby_sales, burnaby_stockout_days, datetime.now().strftime('%Y-%m')
             )
@@ -1611,7 +1629,11 @@ class TransferCalculator:
                 'reason': comprehensive_reason,
                 'enhanced_calculation': True,
                 'pending_orders_included': True,
+                'weighted_demand_enabled': True,
                 'stockout_overrides_applied': kentucky_override['is_overridden'] or burnaby_override['is_overridden'],
+
+                # Weighted demand calculation details
+                'weighted_demand_info': weighted_demand_info,
 
                 # Override details
                 'kentucky_override': kentucky_override,
@@ -2143,6 +2165,7 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
         SELECT
             s.sku_id,
             s.description,
+            s.supplier,
             s.abc_code,
             s.xyz_code,
             s.transfer_multiple,
@@ -2163,12 +2186,12 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
                 WHERE ms2.sku_id = s.sku_id
                 AND (ms2.kentucky_sales > 0 OR ms2.burnaby_sales > 0)
             )
-        WHERE s.status = 'Active'
         ORDER BY s.sku_id
         """
         
         sku_data_list = database.execute_query(query)
-        
+        print(f"DEBUG: Query returned {len(sku_data_list) if sku_data_list else 0} SKUs from database")
+
         if not sku_data_list:
             return []
         
@@ -2179,8 +2202,30 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
             # Use the new economic validation method to prevent stockouts
             recommendation = calculator.calculate_enhanced_transfer_with_economic_validation(sku_data)
 
+            # Always include all SKUs, even those with zero transfer recommendations
             if recommendation:
                 recommendations.append(recommendation)
+            else:
+                # Create a minimal recommendation for SKUs that failed calculation
+                minimal_rec = {
+                    'sku_id': sku_data['sku_id'],
+                    'description': sku_data.get('description', ''),
+                    'supplier': sku_data.get('supplier', ''),
+                    'abc_class': sku_data.get('abc_code', 'C'),
+                    'xyz_class': sku_data.get('xyz_code', 'Z'),
+                    'current_kentucky_qty': sku_data.get('kentucky_qty', 0),
+                    'current_burnaby_qty': sku_data.get('burnaby_qty', 0),
+                    'corrected_monthly_demand': sku_data.get('corrected_demand_kentucky', 0),
+                    'burnaby_monthly_demand': sku_data.get('corrected_demand_burnaby', 0),
+                    'burnaby_6month_supply': round((sku_data.get('corrected_demand_burnaby', 0) or 0) * 6, 0),
+                    'recommended_transfer_qty': 0,
+                    'priority': 'LOW',
+                    'reason': 'Calculation failed or no recommendation needed',
+                    'transfer_multiple': sku_data.get('transfer_multiple', 50),
+                    'coverage_months': 0,
+                    'enhanced_calculation': False
+                }
+                recommendations.append(minimal_rec)
         
         # Sort by priority (CRITICAL -> HIGH -> MEDIUM -> LOW)
         priority_order = {"CRITICAL": 1, "HIGH": 2, "MEDIUM": 3, "LOW": 4}

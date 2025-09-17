@@ -577,8 +577,20 @@ class ImportExportManager:
             self.validation_errors.append(f"Database commit error in {sheet_name}: {str(e)}")
             logger.error(f"Database commit error: {str(e)}")
 
+        # Auto-update ABC-XYZ classifications after successful sales import
+        if result["import_summary"]["successful"] > 0:
+            try:
+                logger.info("Updating ABC-XYZ classifications after sales data import...")
+                from . import calculations
+                if calculations.update_abc_xyz_classifications():
+                    logger.info("ABC-XYZ classifications updated successfully")
+                else:
+                    logger.warning("ABC-XYZ classification update failed - see logs for details")
+            except Exception as e:
+                logger.error(f"Error updating ABC-XYZ classifications: {e}")
+
         return result
-    
+
     def _import_sku_data(self, df: pd.DataFrame, sheet_name: str) -> Dict[str, Any]:
         """
         Import SKU master data with flexible column detection and batch processing

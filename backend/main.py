@@ -2567,78 +2567,113 @@ async def undo_stockout_update(batch_id: str):
           })
 async def import_stockout_history(file: UploadFile = File(...)):
     """
-    Import historical stockout data from CSV file
-    
-    Expected CSV format (no headers):
+    Import historical stockout data from CSV file with warehouse specification support
+
+    Supported CSV formats:
+
+    Legacy format (3 columns) - defaults to Kentucky warehouse:
     - Column 1: SKU ID
     - Column 2: Date out of stock (YYYY-MM-DD)
     - Column 3: Date back in stock (YYYY-MM-DD or blank for ongoing)
-    
+
+    Enhanced format (4 columns) - warehouse can be specified:
+    - Column 1: SKU ID
+    - Column 2: Date out of stock (YYYY-MM-DD)
+    - Column 3: Date back in stock (YYYY-MM-DD or blank for ongoing)
+    - Column 4: Warehouse ('kentucky', 'burnaby', or 'both')
+
+    Business Rules:
+    - Warehouse values are case-insensitive
+    - 'both' creates separate records for both warehouses
+    - Legacy files without warehouse column default to 'kentucky'
+    - Invalid warehouse values generate clear error messages
+
     Args:
-        file: CSV file upload
-        
+        file: CSV file upload containing stockout history data
+
     Returns:
-        Dictionary with import results and statistics
+        Dictionary with import results and detailed statistics including:
+        - success: boolean indicating if any records were imported
+        - imported_count: total number of stockout records created
+        - error_count: number of rows with validation errors
+        - total_rows: total rows processed
+        - batch_id: unique identifier for this import operation
+        - filename: name of the uploaded file
+        - errors: list of first 10 error messages for troubleshooting
     """
     try:
         # Validate file type
         if not file.filename.lower().endswith('.csv'):
             raise HTTPException(status_code=400, detail="File must be a CSV")
-        
+
         # Read CSV content
         content = await file.read()
         decoded_content = content.decode('utf-8')
-        
+
         import csv
         import io
         import uuid
         from datetime import datetime
-        
+
         # Parse CSV
         csv_reader = csv.reader(io.StringIO(decoded_content))
-        
+
         db = database.get_database_connection()
         cursor = db.cursor(pymysql.cursors.DictCursor)
-        
+
         # Start transaction
         db.begin()
-        
+
         imported_count = 0
         error_count = 0
         batch_id = str(uuid.uuid4())
         errors = []
-        
+
+        # Valid warehouse values (case-insensitive)
+        valid_warehouses = {'kentucky', 'burnaby', 'both'}
+
         for row_num, row in enumerate(csv_reader, 1):
             try:
                 if len(row) < 2:
-                    errors.append(f"Row {row_num}: Insufficient columns")
+                    errors.append(f"Row {row_num}: Insufficient columns (minimum 2 required: SKU, Date_Out)")
                     error_count += 1
                     continue
-                
+
                 sku_id = row[0].strip()
                 date_out_str = row[1].strip()
                 date_in_str = row[2].strip() if len(row) > 2 else ''
-                
+
+                # Handle warehouse column (4th column) with backward compatibility
+                warehouse_input = 'kentucky'  # Default for legacy files
+                if len(row) > 3 and row[3].strip():
+                    warehouse_raw = row[3].strip().lower()
+                    if warehouse_raw in valid_warehouses:
+                        warehouse_input = warehouse_raw
+                    else:
+                        errors.append(f"Row {row_num}: Invalid warehouse '{row[3]}'. Valid options: kentucky, burnaby, both")
+                        error_count += 1
+                        continue
+
                 if not sku_id or not date_out_str:
-                    errors.append(f"Row {row_num}: Missing SKU or date")
+                    errors.append(f"Row {row_num}: Missing required fields (SKU and Date_Out are mandatory)")
                     error_count += 1
                     continue
-                
+
                 # Validate SKU exists
                 cursor.execute("SELECT sku_id FROM skus WHERE sku_id = %s", (sku_id,))
                 if not cursor.fetchone():
-                    errors.append(f"Row {row_num}: SKU {sku_id} not found")
+                    errors.append(f"Row {row_num}: SKU '{sku_id}' not found in database")
                     error_count += 1
                     continue
-                
+
                 # Parse dates
                 try:
                     date_out = datetime.strptime(date_out_str, '%Y-%m-%d').date()
                 except ValueError:
-                    errors.append(f"Row {row_num}: Invalid date format for date_out")
+                    errors.append(f"Row {row_num}: Invalid date format for Date_Out '{date_out_str}' (expected YYYY-MM-DD)")
                     error_count += 1
                     continue
-                
+
                 date_in = None
                 is_resolved = False
                 if date_in_str:
@@ -2646,43 +2681,51 @@ async def import_stockout_history(file: UploadFile = File(...)):
                         date_in = datetime.strptime(date_in_str, '%Y-%m-%d').date()
                         is_resolved = True
                     except ValueError:
-                        errors.append(f"Row {row_num}: Invalid date format for date_in")
+                        errors.append(f"Row {row_num}: Invalid date format for Date_Back_In '{date_in_str}' (expected YYYY-MM-DD)")
                         error_count += 1
                         continue
-                
-                # Insert stockout record (assuming Kentucky warehouse for now)
-                # TODO: Add warehouse detection logic based on data or add warehouse column
-                cursor.execute("""
-                    INSERT INTO stockout_dates 
-                    (sku_id, warehouse, stockout_date, is_resolved, resolved_date)
-                    VALUES (%s, 'kentucky', %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE
-                        is_resolved = VALUES(is_resolved),
-                        resolved_date = VALUES(resolved_date)
-                """, (sku_id, date_out, is_resolved, date_in))
-                
-                # Log the import
-                cursor.execute("""
-                    INSERT INTO stockout_updates_log 
-                    (update_batch_id, sku_id, warehouse, action, new_status, 
-                     stockout_date, resolution_date, update_source, user_notes, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-                """, (
-                    batch_id,
-                    sku_id,
-                    'kentucky',
-                    'mark_in' if is_resolved else 'mark_out',
-                    'in_stock' if is_resolved else 'out_of_stock',
-                    date_out,
-                    date_in,
-                    'csv_import',
-                    f'Historical import from {file.filename}'
-                ))
-                
-                imported_count += 1
-                
+
+                # Determine which warehouses to create records for
+                warehouses_to_process = []
+                if warehouse_input == 'both':
+                    warehouses_to_process = ['kentucky', 'burnaby']
+                else:
+                    warehouses_to_process = [warehouse_input]
+
+                # Create stockout records for specified warehouse(s)
+                for warehouse in warehouses_to_process:
+                    # Insert stockout record
+                    cursor.execute("""
+                        INSERT INTO stockout_dates
+                        (sku_id, warehouse, stockout_date, is_resolved, resolved_date)
+                        VALUES (%s, %s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE
+                            is_resolved = VALUES(is_resolved),
+                            resolved_date = VALUES(resolved_date)
+                    """, (sku_id, warehouse, date_out, is_resolved, date_in))
+
+                    # Log the import
+                    cursor.execute("""
+                        INSERT INTO stockout_updates_log
+                        (update_batch_id, sku_id, warehouse, action, new_status,
+                         stockout_date, resolution_date, update_source, user_notes, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    """, (
+                        batch_id,
+                        sku_id,
+                        warehouse,
+                        'mark_in' if is_resolved else 'mark_out',
+                        'in_stock' if is_resolved else 'out_of_stock',
+                        date_out,
+                        date_in,
+                        'csv_import',
+                        f'Historical import from {file.filename} (warehouse: {warehouse_input})'
+                    ))
+
+                    imported_count += 1
+
             except Exception as e:
-                errors.append(f"Row {row_num}: {str(e)}")
+                errors.append(f"Row {row_num}: Unexpected error - {str(e)}")
                 error_count += 1
                 continue
         

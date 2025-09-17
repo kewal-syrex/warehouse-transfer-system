@@ -430,8 +430,15 @@ Performance: Optimized for handling 50+ SKU updates in seconds
                             <input type="file" id="csvFileInput" accept=".csv" style="display: none;" onchange="handleCSVImport(this.files[0])">
                         </div>
                         <small class="text-muted">
-                            <strong>Format:</strong> SKU, Date_Out, Date_Back_In<br>
-                            Leave Date_Back_In blank for ongoing stockouts
+                            <strong>Enhanced Format (4 columns):</strong> SKU, Date_Out, Date_Back_In, Warehouse<br>
+                            <strong>Legacy Format (3 columns):</strong> SKU, Date_Out, Date_Back_In<br>
+                            <strong>Warehouse Options:</strong> kentucky, burnaby, both (case-insensitive)<br>
+                            <strong>Examples:</strong><br>
+                            • CHG-001, 2024-01-15, 2024-01-20, kentucky<br>
+                            • CBL-002, 2024-02-01, , burnaby<br>
+                            • WDG-003, 2024-03-10, 2024-03-15, both<br>
+                            • CHG-004, 2024-04-01, 2024-04-05 (defaults to kentucky)<br>
+                            Leave Date_Back_In blank for ongoing stockouts. Legacy files without warehouse column default to Kentucky.
                         </small>
                     </div>
                 </div>

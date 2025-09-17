@@ -24,6 +24,11 @@ SELECT
     pi.order_type,
     pi.status,
     pi.notes,
+    -- Calculate actual arrival date (expected or estimated)
+    CASE
+        WHEN pi.expected_arrival IS NOT NULL THEN pi.expected_arrival
+        ELSE DATE_ADD(pi.order_date, INTERVAL pi.lead_time_days DAY)
+    END as calculated_arrival_date,
     -- Calculate days until arrival
     CASE
         WHEN pi.expected_arrival IS NOT NULL THEN

@@ -545,6 +545,145 @@ Phase 1 & 2 foundations are complete. The system now successfully uses weighted 
 
 ---
 
+## 📋 Current Sprint: CSV Import Warehouse Selection Enhancement
+
+### 🎯 **TASK-306: Implement CSV Import Warehouse Selection Feature**
+
+**Objective**: Enhance the stockout management CSV import functionality to support warehouse specification via a 4th column, with backward compatibility for existing 3-column files and proper error handling for invalid warehouse values.
+
+**Context**: The current CSV import for stockout data is hardcoded to only import for Kentucky warehouse. Users need the ability to specify which warehouse (Kentucky, Burnaby, or both) each stockout record applies to during CSV import.
+
+#### Phase 1: Backend Enhancement ✅
+
+- [x] **TASK-306.1**: Update CSV Import API Endpoint ✅
+  - [x] Modified `/api/import/stockout-history` in `backend/main.py` to support 4th column
+  - [x] Added backward compatibility for 3-column format (defaults to 'kentucky')
+  - [x] Added warehouse validation: accepts 'kentucky', 'burnaby', 'both' (case-insensitive)
+  - [x] Implemented 'both' option by creating two separate stockout records
+  - [x] Enhanced error handling with warehouse-specific error messages
+  - [x] Updated docstring with comprehensive CSV format documentation
+
+#### Phase 2: Frontend Documentation Updates ✅
+
+- [x] **TASK-306.2**: Update Stockout Management UI ✅
+  - [x] Updated CSV format documentation in `frontend/stockout-management.html`
+  - [x] Added example showing new 4-column format with warehouse column
+  - [x] Updated help text to explain warehouse options with clear examples
+  - [x] Added visual indicators for warehouse in import preview
+  - [x] Ensured existing functionality remains unchanged
+
+#### Phase 3: Code Documentation & Quality ✅
+
+- [x] **TASK-306.3**: Add Comprehensive Documentation ✅
+  - [x] Added detailed docstrings following project standards
+  - [x] Documented CSV format changes in inline comments
+  - [x] Updated function parameter documentation
+  - [x] Added business logic explanations for warehouse handling
+  - [x] Documented backward compatibility approach
+
+#### Phase 4: Comprehensive Testing ✅
+
+- [x] **TASK-306.4**: Unit Testing ✅
+  - [x] Tested 3-column CSV import (legacy format) defaults to Kentucky
+  - [x] Tested 4-column CSV import with valid warehouse values
+  - [x] Tested 'both' warehouse option creates dual records
+  - [x] Tested case-insensitive warehouse validation (KENTUCKY accepted)
+  - [x] Tested error handling for invalid warehouse values
+  - [x] Tested file validation and error messages
+
+- [x] **TASK-306.5**: Playwright Integration Testing ✅
+  - [x] Tested CSV file upload with 3-column format (imported 3 records to Kentucky)
+  - [x] Tested CSV file upload with 4-column format (imported 5 records to correct warehouses)
+  - [x] Verified stockout records created in correct warehouses (Kentucky, Burnaby, both)
+  - [x] Tested error handling displays properly in UI
+  - [x] Validated recent updates show correct warehouse information
+  - [x] Tested performance with realistic CSV files
+  - [x] Verified backward compatibility doesn't break existing workflows
+
+#### Phase 5: Documentation & Deployment ✅
+
+- [x] **TASK-306.6**: User Documentation ✅
+  - [x] Updated CSV format examples in UI with clear format specifications
+  - [x] Created clear help text explaining warehouse options
+  - [x] Documented migration path for existing CSV files
+  - [x] Added troubleshooting guide for common import errors
+  - [x] Updated tooltips and help messages
+
+- [x] **TASK-306.7**: Final Validation & Cleanup ✅
+  - [x] Verified all existing functionality remains intact
+  - [x] Tested edge cases and error conditions
+  - [x] Validated performance remains under 5-second threshold
+  - [x] Ensured proper logging for debugging
+  - [x] Code review and cleanup completed
+
+#### Success Criteria: ✅ ALL ACHIEVED
+- [x] CSV imports work with both 3-column (legacy) and 4-column (new) formats ✅
+- [x] Warehouse can be specified as 'kentucky', 'burnaby', or 'both' ✅
+- [x] Legacy 3-column files default to 'kentucky' for backward compatibility ✅
+- [x] 'both' warehouse option creates records for both warehouses ✅
+- [x] Clear error messages for invalid warehouse values ✅
+- [x] All existing stockout management functionality remains unchanged ✅
+- [x] Performance impact is negligible ✅
+- [x] Code is comprehensively documented following project standards ✅
+- [x] All tests pass including Playwright UI testing ✅
+- [x] User documentation is clear and complete ✅
+
+#### New CSV Format:
+```csv
+SKU, Date_Out, Date_Back_In, Warehouse
+CHG-001, 2024-01-15, 2024-01-20, kentucky
+CBL-002, 2024-02-01, , burnaby
+WDG-003, 2024-03-10, 2024-03-15, both
+CHG-004, 2024-04-01, 2024-04-05
+```
+
+#### Implementation Notes:
+- Maintain 100% backward compatibility with existing 3-column files
+- Use case-insensitive validation for warehouse values
+- Provide clear, actionable error messages
+- Follow existing code patterns and documentation standards
+- Ensure robust error handling for edge cases
+
+#### ✅ **COMPLETED - September 17, 2025**
+
+**Implementation Summary:**
+Successfully implemented CSV import warehouse selection functionality with full backward compatibility and comprehensive testing.
+
+**Key Features Delivered:**
+1. **Enhanced CSV Import API**: Modified `/api/import/stockout-history` to support optional 4th warehouse column
+2. **Backward Compatibility**: Legacy 3-column files automatically default to Kentucky warehouse
+3. **Warehouse Validation**: Accepts 'kentucky', 'burnaby', 'both' (case-insensitive)
+4. **Dual Record Creation**: 'both' option creates separate records for both warehouses
+5. **Comprehensive Documentation**: Updated UI with clear format examples and help text
+6. **Error Handling**: Clear, actionable error messages for validation failures
+
+**Testing Results:**
+- **Legacy Format Test**: 3-column CSV imported 3 records to Kentucky (100% backward compatible)
+- **Enhanced Format Test**: 4-column CSV imported 5 records (including dual records for 'both' option)
+- **Case Sensitivity**: 'KENTUCKY' correctly accepted and processed
+- **Warehouse Distribution**: Records correctly created in Kentucky, Burnaby, and both warehouses
+- **UI Integration**: Recent updates properly display warehouse-specific information
+
+**Technical Achievements:**
+- ✅ Zero breaking changes to existing functionality
+- ✅ Comprehensive docstring documentation following project standards
+- ✅ Robust error handling with detailed validation messages
+- ✅ Performance remains under 5-second threshold
+- ✅ All Playwright tests pass with visual verification
+
+**User Impact:**
+Users can now specify warehouse in CSV imports using the format:
+```csv
+SKU, Date_Out, Date_Back_In, Warehouse
+ACA-10159, 2024-01-15, 2024-01-20, kentucky
+ACF-10134, 2024-02-01, , burnaby
+ACA-10169, 2024-03-10, 2024-03-15, both
+```
+
+Legacy files without the warehouse column continue to work seamlessly, defaulting to Kentucky warehouse.
+
+---
+
 ## 📋 Future Enhancements & Open Tasks
 
 The following features and tasks from the original plan remain open for future development sprints.

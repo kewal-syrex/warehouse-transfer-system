@@ -309,7 +309,7 @@
         <!-- Filters Section -->
         <div class="filters-section">
             <h6 class="mb-3"><i class="fas fa-filter me-2"></i>Filters & Actions</h6>
-            <div class="row align-items-end">
+            <div class="row align-items-end mb-3">
                 <div class="col-md-2">
                     <label class="form-label">Priority</label>
                     <select id="priority-filter" class="form-select form-select-sm">
@@ -330,10 +330,27 @@
                     </select>
                 </div>
                 <div class="col-md-2">
+                    <label class="form-label">Supplier</label>
+                    <select id="supplier-filter" class="form-select form-select-sm">
+                        <option value="">All Suppliers</option>
+                        <!-- Options will be populated dynamically -->
+                    </select>
+                </div>
+                <div class="col-md-2">
                     <label class="form-label">Min Transfer Qty</label>
                     <input type="number" id="min-qty-filter" class="form-control form-control-sm" placeholder="0" min="0">
                 </div>
-                <div class="col-md-6">
+                <div class="col-md-4">
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="show-recommendations-only">
+                        <label class="form-check-label" for="show-recommendations-only">
+                            Show only SKUs with recommendations
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-12">
                     <div class="action-btn-group">
                         <button class="btn btn-primary btn-sm" onclick="applyFilters()">
                             <i class="fas fa-search"></i> Apply Filters
@@ -374,6 +391,7 @@
                                 <th>Burnaby Pending</th>
                                 <th>Kentucky Pending</th>
                                 <th>Monthly Demand</th>
+                                <th>CA Monthly Demand</th>
                                 <th>Coverage</th>
                                 <th>Transfer Qty</th>
                                 <th>CA Coverage After</th>
@@ -454,9 +472,9 @@
                 "pageLength": 25,
                 "order": [[3, "asc"]], // Sort by priority
                 "columnDefs": [
-                    { "orderable": false, "targets": [0, 13] }, // Checkbox and actions (updated for new columns)
-                    { "searchable": false, "targets": [0, 13] },
-                    { "className": "text-center", "targets": [0, 3, 4, 5, 6, 7, 8, 9, 10, 11] }
+                    { "orderable": false, "targets": [0, 16] }, // Checkbox and actions
+                    { "searchable": false, "targets": [0, 16] },
+                    { "className": "text-center", "targets": [0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] }
                 ],
                 "dom": '<"row"<"col-sm-6"l><"col-sm-6"f>>rtip',
                 "language": {
@@ -491,6 +509,7 @@
                 recommendationsData = data.recommendations || [];
                 
                 updateSummaryStats();
+                populateSupplierFilter();
                 populateTable();
                 updateTimestamp(data.generated_at);
                 
@@ -521,6 +540,34 @@
             document.getElementById('critical-count').textContent = critical;
             document.getElementById('total-transfer-qty').textContent = totalQty.toLocaleString();
             document.getElementById('avg-coverage').textContent = avgCoverage ? avgCoverage.toFixed(1) : '0.0';
+        }
+
+        /**
+         * Populate supplier filter dropdown with unique suppliers from data
+         *
+         * Extracts unique supplier values from recommendations data and populates
+         * the supplier filter dropdown for user selection
+         *
+         * @function populateSupplierFilter
+         * @returns {void}
+         */
+        function populateSupplierFilter() {
+            const supplierFilter = document.getElementById('supplier-filter');
+            const suppliers = [...new Set(recommendationsData
+                .map(rec => rec.supplier)
+                .filter(supplier => supplier && supplier.trim() !== '')
+            )].sort();
+
+            // Clear existing options except "All Suppliers"
+            supplierFilter.innerHTML = '<option value="">All Suppliers</option>';
+
+            // Add unique suppliers
+            suppliers.forEach(supplier => {
+                const option = document.createElement('option');
+                option.value = supplier;
+                option.textContent = supplier;
+                supplierFilter.appendChild(option);
+            });
         }
 
         /**
@@ -585,6 +632,10 @@
                     <td>
                         ${rec.corrected_monthly_demand.toFixed(0)}
                         ${stockoutBadge}
+                    </td>
+                    <td>
+                        <strong>${(rec.burnaby_monthly_demand || 0).toFixed(0)}</strong>
+                        <small class="text-muted">(${(rec.burnaby_6month_supply || 0)} for 6mo)</small>
                     </td>
                     <td><span class="${coverageColor}">${rec.coverage_months.toFixed(1)}m</span></td>
                     <td>
@@ -1205,22 +1256,32 @@
         function applyFilters() {
             const priority = document.getElementById('priority-filter').value;
             const abc = document.getElementById('abc-filter').value;
+            const supplier = document.getElementById('supplier-filter').value;
             const minQty = parseInt(document.getElementById('min-qty-filter').value) || 0;
-            
+            const showRecommendationsOnly = document.getElementById('show-recommendations-only').checked;
+
             let filteredData = recommendationsData;
-            
+
             if (priority) {
                 filteredData = filteredData.filter(r => r.priority === priority);
             }
-            
+
             if (abc) {
                 filteredData = filteredData.filter(r => r.abc_class === abc);
             }
-            
+
+            if (supplier) {
+                filteredData = filteredData.filter(r => r.supplier === supplier);
+            }
+
             if (minQty > 0) {
                 filteredData = filteredData.filter(r => r.recommended_transfer_qty >= minQty);
             }
-            
+
+            if (showRecommendationsOnly) {
+                filteredData = filteredData.filter(r => r.recommended_transfer_qty > 0);
+            }
+
             // Update table with filtered data
             dataTable.clear();
             filteredData.forEach(rec => {
@@ -1242,7 +1303,9 @@
         function clearFilters() {
             document.getElementById('priority-filter').value = '';
             document.getElementById('abc-filter').value = '';
+            document.getElementById('supplier-filter').value = '';
             document.getElementById('min-qty-filter').value = '';
+            document.getElementById('show-recommendations-only').checked = false;
             populateTable();
         }
 
