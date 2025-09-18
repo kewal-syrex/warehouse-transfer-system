@@ -1,13 +1,30 @@
 """
 Database connection and utility functions
+
+This module provides database connectivity with both legacy PyMySQL support
+and new SQLAlchemy connection pooling for improved performance.
+
+Connection Pooling:
+- Uses SQLAlchemy connection pooling to prevent connection exhaustion
+- Falls back to direct PyMySQL connections if pooling fails
+- Configurable pool size and overflow handling
 """
 import pymysql
 import pymysql.cursors
 import os
-from typing import Optional
+from typing import Optional, Union, List, Dict, Any
 import logging
 
-# Database configuration
+# Import the new connection pool
+try:
+    from .database_pool import get_connection_pool, execute_pooled_query, DatabaseConnectionPool
+    POOLING_AVAILABLE = True
+except ImportError:
+    # Fallback if SQLAlchemy is not available
+    POOLING_AVAILABLE = False
+    print("Warning: SQLAlchemy not available, using direct connections")
+
+# Database configuration for legacy connections
 DB_CONFIG = {
     'host': os.getenv('DB_HOST', 'localhost'),
     'user': os.getenv('DB_USER', 'root'),
@@ -19,9 +36,16 @@ DB_CONFIG = {
 
 logger = logging.getLogger(__name__)
 
+# Configuration for connection pooling
+USE_CONNECTION_POOLING = os.getenv('USE_CONNECTION_POOLING', 'true').lower() == 'true'
+
+
 def get_database_connection():
     """
-    Create and return a database connection
+    Create and return a database connection (legacy method)
+
+    This is kept for backward compatibility. New code should use execute_query()
+    which automatically uses connection pooling when available.
     """
     try:
         connection = pymysql.connect(**DB_CONFIG)
@@ -30,52 +54,126 @@ def get_database_connection():
         logger.error(f"Database connection failed: {e}")
         raise
 
+
 def test_connection() -> bool:
     """
     Test if database connection is working
+
+    Tests both connection pooling (if available) and direct connections.
     """
     try:
-        db = get_database_connection()
-        cursor = db.cursor()
-        cursor.execute("SELECT 1")
-        cursor.fetchone()
-        db.close()
-        return True
+        if POOLING_AVAILABLE and USE_CONNECTION_POOLING:
+            # Test using connection pool
+            result = execute_pooled_query("SELECT 1 as test", fetch_one=True)
+            return result is not None and result.get('test') == 1
+        else:
+            # Test using direct connection
+            db = get_database_connection()
+            cursor = db.cursor()
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+            db.close()
+            return True
+
     except Exception as e:
         logger.error(f"Database test failed: {e}")
         return False
 
-def execute_query(query: str, params: Optional[tuple] = None, fetch_one: bool = False, fetch_all: bool = True):
+
+def execute_query(query: str,
+                 params: Optional[tuple] = None,
+                 fetch_one: bool = False,
+                 fetch_all: bool = True) -> Optional[Union[List[Dict], Dict, int]]:
     """
-    Execute a database query with optional parameters
-    
+    Execute a database query with automatic connection pooling
+
+    This function automatically uses connection pooling when available,
+    falling back to direct connections if pooling is disabled or fails.
+
     Args:
         query: SQL query string
         params: Query parameters tuple
         fetch_one: Return single result
         fetch_all: Return all results (default)
-    
+
     Returns:
         Query results or None
+
+    Raises:
+        Exception: If query execution fails
+    """
+    # Try using connection pooling first
+    if POOLING_AVAILABLE and USE_CONNECTION_POOLING:
+        try:
+            return execute_pooled_query(query, params, fetch_one, fetch_all)
+        except Exception as e:
+            logger.warning(f"Connection pool failed, falling back to direct connection: {e}")
+
+    # Fallback to direct connection (legacy method)
+    return _execute_query_direct(query, params, fetch_one, fetch_all)
+
+
+def _execute_query_direct(query: str,
+                         params: Optional[tuple] = None,
+                         fetch_one: bool = False,
+                         fetch_all: bool = True) -> Optional[Union[List[Dict], Dict, int]]:
+    """
+    Execute a database query using direct PyMySQL connection (legacy method)
+
+    This is the original implementation kept for fallback purposes.
     """
     try:
         db = get_database_connection()
         cursor = db.cursor(pymysql.cursors.DictCursor)
         cursor.execute(query, params)
-        
+
         if fetch_one:
             result = cursor.fetchone()
         elif fetch_all:
             result = cursor.fetchall()
         else:
             result = None
-            
+
         db.close()
         return result
-        
+
     except Exception as e:
         logger.error("Query execution failed: " + str(e))
         raise
+
+
+def get_connection_pool_status() -> Dict[str, Any]:
+    """
+    Get connection pool status and statistics
+
+    Returns:
+        Dictionary containing pool status, or error info if pooling unavailable
+    """
+    if not POOLING_AVAILABLE:
+        return {
+            'pooling_available': False,
+            'error': 'SQLAlchemy not installed'
+        }
+
+    if not USE_CONNECTION_POOLING:
+        return {
+            'pooling_available': True,
+            'pooling_enabled': False,
+            'reason': 'Disabled via configuration'
+        }
+
+    try:
+        pool = get_connection_pool()
+        status = pool.get_pool_status()
+        status['pooling_available'] = True
+        status['pooling_enabled'] = True
+        return status
+    except Exception as e:
+        return {
+            'pooling_available': True,
+            'pooling_enabled': True,
+            'error': str(e)
+        }
 
 def get_current_stock_status():
     """

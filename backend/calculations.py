@@ -11,9 +11,11 @@ import numpy as np
 try:
     from . import database
     from .weighted_demand import WeightedDemandCalculator
+    from .cache_manager import create_cache_manager
 except ImportError:
     import database
     from weighted_demand import WeightedDemandCalculator
+    from cache_manager import create_cache_manager
 import logging
 
 logger = logging.getLogger(__name__)
@@ -699,6 +701,7 @@ class TransferCalculator:
         self.seasonal_detector = SeasonalPatternDetector()
         self.growth_detector = ViralGrowthDetector()
         self.weighted_demand_calculator = WeightedDemandCalculator()
+        self.cache_manager = create_cache_manager()
     
     def get_coverage_target(self, abc_class: str, xyz_class: str) -> float:
         """
@@ -2293,22 +2296,34 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
         calculator = TransferCalculator()
         recommendations = []
 
-        # Process each SKU and calculate weighted demand for improved accuracy
-        # This integration replaces single-month demand calculations with sophisticated
-        # weighted moving averages to reduce monthly anomaly impact and improve forecasting
+        # Process each SKU and calculate weighted demand with caching for improved performance
+        # This integration uses the CacheManager to prevent connection exhaustion while
+        # providing sophisticated weighted moving averages for better forecasting accuracy
         for sku_data in sku_data_list:
-            # Calculate weighted demand for Kentucky warehouse using our enhanced system
-            # Uses 6-month weighted average for stable SKUs, 3-month for volatile SKUs
-            # Falls back to single-month calculation for new SKUs with insufficient history
+            # Calculate weighted demand for Kentucky warehouse with cache-first approach
+            # Cache prevents the 5000+ database queries that were causing connection exhaustion
             try:
-                kentucky_weighted_result = calculator.weighted_demand_calculator.get_enhanced_demand_calculation(
-                    sku_data['sku_id'],
-                    sku_data.get('abc_code', 'C'),
-                    sku_data.get('xyz_code', 'Z'),
-                    sku_data.get('kentucky_sales', 0),
-                    sku_data.get('kentucky_stockout_days', 0),
-                    warehouse='kentucky'
+                # Try to get cached result first
+                kentucky_weighted_result = calculator.cache_manager.get_cached_weighted_demand(
+                    sku_data['sku_id'], 'kentucky'
                 )
+
+                # If no valid cache, calculate and store in cache
+                if not kentucky_weighted_result:
+                    kentucky_weighted_result = calculator.weighted_demand_calculator.get_enhanced_demand_calculation(
+                        sku_data['sku_id'],
+                        sku_data.get('abc_code', 'C'),
+                        sku_data.get('xyz_code', 'Z'),
+                        sku_data.get('kentucky_sales', 0),
+                        sku_data.get('kentucky_stockout_days', 0),
+                        warehouse='kentucky'
+                    )
+
+                    # Store in cache for future requests
+                    if kentucky_weighted_result:
+                        calculator.cache_manager.store_cached_demand(
+                            sku_data['sku_id'], 'kentucky', kentucky_weighted_result
+                        )
 
                 # Replace database corrected_demand with weighted calculation
                 if kentucky_weighted_result and kentucky_weighted_result.get('enhanced_demand', 0) > 0:
@@ -2316,9 +2331,9 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
                     # Add 6-month supply calculation for UI display
                     sku_data['kentucky_6month_supply'] = round(kentucky_weighted_result['enhanced_demand'] * 6, 0)
 
-                    # Log the improvement for debugging
-                    logger.debug(f"SKU {sku_data['sku_id']} KY: Using weighted demand {kentucky_weighted_result['enhanced_demand']:.1f} "
-                                f"vs database {sku_data.get('corrected_demand_kentucky', 0)}")
+                    # Log cache usage for performance monitoring
+                    cache_source = "cached" if kentucky_weighted_result.get('cache_source') else "calculated"
+                    logger.debug(f"SKU {sku_data['sku_id']} KY: Using {cache_source} weighted demand {kentucky_weighted_result['enhanced_demand']:.1f}")
                 else:
                     # Keep database value as fallback and calculate 6-month supply
                     current_demand = sku_data.get('corrected_demand_kentucky', 0) or 0
@@ -2330,16 +2345,29 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
                 current_demand = sku_data.get('corrected_demand_kentucky', 0) or 0
                 sku_data['kentucky_6month_supply'] = round(float(current_demand) * 6, 0)
 
-            # Calculate weighted demand for Burnaby warehouse using our enhanced system
+            # Calculate weighted demand for Burnaby warehouse with cache-first approach
             try:
-                burnaby_weighted_result = calculator.weighted_demand_calculator.get_enhanced_demand_calculation(
-                    sku_data['sku_id'],
-                    sku_data.get('abc_code', 'C'),
-                    sku_data.get('xyz_code', 'Z'),
-                    sku_data.get('burnaby_sales', 0),
-                    sku_data.get('burnaby_stockout_days', 0),
-                    warehouse='burnaby'
+                # Try to get cached result first
+                burnaby_weighted_result = calculator.cache_manager.get_cached_weighted_demand(
+                    sku_data['sku_id'], 'burnaby'
                 )
+
+                # If no valid cache, calculate and store in cache
+                if not burnaby_weighted_result:
+                    burnaby_weighted_result = calculator.weighted_demand_calculator.get_enhanced_demand_calculation(
+                        sku_data['sku_id'],
+                        sku_data.get('abc_code', 'C'),
+                        sku_data.get('xyz_code', 'Z'),
+                        sku_data.get('burnaby_sales', 0),
+                        sku_data.get('burnaby_stockout_days', 0),
+                        warehouse='burnaby'
+                    )
+
+                    # Store in cache for future requests
+                    if burnaby_weighted_result:
+                        calculator.cache_manager.store_cached_demand(
+                            sku_data['sku_id'], 'burnaby', burnaby_weighted_result
+                        )
 
                 # Replace database corrected_demand with weighted calculation
                 if burnaby_weighted_result and burnaby_weighted_result.get('enhanced_demand', 0) > 0:
@@ -2347,9 +2375,9 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
                     # Add 6-month supply calculation for UI display
                     sku_data['burnaby_6month_supply'] = round(burnaby_weighted_result['enhanced_demand'] * 6, 0)
 
-                    # Log the improvement for debugging
-                    logger.debug(f"SKU {sku_data['sku_id']} BY: Using weighted demand {burnaby_weighted_result['enhanced_demand']:.1f} "
-                               f"vs database {sku_data.get('corrected_demand_burnaby', 0)}")
+                    # Log cache usage for performance monitoring
+                    cache_source = "cached" if burnaby_weighted_result.get('cache_source') else "calculated"
+                    logger.debug(f"SKU {sku_data['sku_id']} BY: Using {cache_source} weighted demand {burnaby_weighted_result['enhanced_demand']:.1f}")
                 else:
                     # Keep database value as fallback and calculate 6-month supply
                     current_demand = sku_data.get('corrected_demand_burnaby', 0) or 0

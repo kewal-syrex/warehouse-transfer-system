@@ -31,6 +31,12 @@ try:
     from . import calculations
     from . import import_export
     from . import settings
+    from .cache_manager import create_cache_manager
+    try:
+        from .database_pool import get_connection_pool
+        database.get_connection_pool = get_connection_pool
+    except ImportError:
+        pass
 except ImportError:
     # For direct execution - add current directory to path
     import sys
@@ -42,6 +48,12 @@ except ImportError:
     import calculations
     import import_export
     import settings
+    from cache_manager import create_cache_manager
+    try:
+        from database_pool import get_connection_pool
+        database.get_connection_pool = get_connection_pool
+    except ImportError:
+        pass
 
 # Create FastAPI application
 app = FastAPI(
@@ -3823,6 +3835,195 @@ async def reset_configuration(category: Optional[str] = None):
         raise HTTPException(
             status_code=500,
             detail=f"Failed to reset configuration: {str(e)}"
+        )
+
+# Cache Management API Endpoints
+@app.post("/api/cache/refresh-weighted-demand",
+          summary="Refresh Weighted Demand Cache",
+          description="Refresh the weighted demand cache for all SKUs or a filtered subset",
+          tags=["Cache Management"])
+async def refresh_weighted_demand_cache(
+    sku_filter: Optional[str] = None,
+    force_refresh: bool = False
+):
+    """
+    Refresh weighted demand cache to improve performance and prevent connection exhaustion
+
+    This endpoint solves the database connection exhaustion issue by pre-calculating
+    weighted demand values and storing them in the cache table.
+
+    Args:
+        sku_filter: Optional comma-separated list of SKU IDs to refresh (None = all SKUs)
+        force_refresh: Force refresh even if cache is valid (default: False)
+
+    Returns:
+        Summary of cache refresh operation including timing and success metrics
+    """
+    try:
+        logger.info("Cache refresh requested via API")
+
+        # Parse SKU filter if provided
+        sku_list = None
+        if sku_filter:
+            sku_list = [sku.strip() for sku in sku_filter.split(',') if sku.strip()]
+            logger.info(f"Refreshing cache for {len(sku_list)} specific SKUs")
+
+        # Create cache manager and perform refresh
+        cache_manager = create_cache_manager()
+
+        # Invalidate cache if force refresh is requested
+        if force_refresh:
+            cache_manager.invalidate_cache("API forced refresh")
+
+        # Perform cache refresh
+        summary = cache_manager.refresh_weighted_cache(
+            sku_filter=sku_list,
+            progress_callback=None  # Could add WebSocket progress updates later
+        )
+
+        # Add performance metrics
+        summary['api_response'] = {
+            'cache_refresh_completed': True,
+            'timestamp': datetime.now().isoformat(),
+            'sku_filter_applied': sku_list is not None,
+            'force_refresh': force_refresh
+        }
+
+        # Return success response
+        return {
+            "success": True,
+            "message": f"Cache refresh completed successfully",
+            "summary": summary
+        }
+
+    except Exception as e:
+        logger.error(f"Cache refresh failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Cache refresh failed: {str(e)}"
+        )
+
+
+@app.get("/api/cache/status",
+         summary="Get Cache Status",
+         description="Get current cache performance and status statistics",
+         tags=["Cache Management"])
+async def get_cache_status():
+    """
+    Get cache performance statistics and connection pool status
+
+    Returns:
+        Dictionary containing cache statistics, pool status, and performance metrics
+    """
+    try:
+        cache_manager = create_cache_manager()
+
+        # Get cache statistics
+        cache_stats = cache_manager.get_cache_statistics()
+
+        # Get connection pool status
+        pool_status = database.get_connection_pool_status()
+
+        return {
+            "success": True,
+            "cache_statistics": cache_stats,
+            "connection_pool_status": pool_status,
+            "timestamp": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get cache status: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get cache status: {str(e)}"
+        )
+
+
+@app.post("/api/cache/invalidate",
+          summary="Invalidate Cache",
+          description="Invalidate the entire weighted demand cache",
+          tags=["Cache Management"])
+async def invalidate_cache(reason: str = "Manual API invalidation"):
+    """
+    Invalidate the entire weighted demand cache
+
+    This forces recalculation of all cached values on next access.
+    Use when sales data has been imported or demand patterns have changed.
+
+    Args:
+        reason: Reason for cache invalidation (for logging)
+
+    Returns:
+        Success status and invalidation details
+    """
+    try:
+        cache_manager = create_cache_manager()
+
+        success = cache_manager.invalidate_cache(reason)
+
+        if not success:
+            raise HTTPException(
+                status_code=500,
+                detail="Cache invalidation failed"
+            )
+
+        return {
+            "success": True,
+            "message": "Cache invalidated successfully",
+            "reason": reason,
+            "timestamp": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Cache invalidation failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Cache invalidation failed: {str(e)}"
+        )
+
+
+@app.get("/api/cache/performance-test",
+         summary="Test Cache Performance",
+         description="Run a performance test on the connection pool",
+         tags=["Cache Management"])
+async def test_cache_performance(num_queries: int = 100):
+    """
+    Test connection pool performance with multiple queries
+
+    Args:
+        num_queries: Number of test queries to execute (default: 100)
+
+    Returns:
+        Performance test results including timing and success metrics
+    """
+    try:
+        if num_queries > 1000:
+            raise HTTPException(
+                status_code=400,
+                detail="Number of queries limited to 1000 for performance testing"
+            )
+
+        # Get connection pool and run performance test
+        pool = database.get_connection_pool()
+        if not pool:
+            raise HTTPException(
+                status_code=503,
+                detail="Connection pool not available"
+            )
+
+        results = pool.test_pool_performance(num_queries)
+
+        return {
+            "success": True,
+            "performance_results": results,
+            "timestamp": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Performance test failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Performance test failed: {str(e)}"
         )
 
 # Serve the main dashboard
