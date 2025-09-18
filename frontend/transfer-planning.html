@@ -12,6 +12,7 @@
     <!-- DataTables CSS -->
     <link href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css" rel="stylesheet">
     <link href="https://cdn.datatables.net/buttons/2.4.1/css/buttons.bootstrap5.min.css" rel="stylesheet">
+    <link href="https://cdn.datatables.net/colreorder/1.7.0/css/colReorder.dataTables.min.css" rel="stylesheet">
     
     <style>
         /* Priority color coding */
@@ -50,6 +51,26 @@
             font-weight: 600;
             font-size: 0.85rem;
         }
+
+        /* Sticky table headers - Excel freeze row functionality */
+        #recommendations-table thead {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background-color: #f8f9fa;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        #recommendations-table thead th {
+            border-bottom: 2px solid #dee2e6;
+        }
+
+        /* Table wrapper with proper height and scrolling */
+        .table-responsive {
+            max-height: calc(100vh - 420px);
+            overflow-y: auto;
+            position: relative;
+        }
         
         .editable-qty {
             width: 80px;
@@ -63,6 +84,69 @@
             border-color: #80bdff;
             box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
             outline: 0;
+        }
+
+        /* Confirmed quantity styling */
+        .confirmed-qty {
+            background-color: #d4edda;
+            color: #155724;
+            font-weight: bold;
+            border: 1px solid #c3e6cb;
+            border-radius: 4px;
+            padding: 4px 8px;
+            text-align: center;
+            position: relative;
+        }
+
+        .confirmed-qty.has-variance {
+            background-color: #fff3cd;
+            color: #856404;
+            border-color: #ffeaa7;
+        }
+
+        .confirmed-qty.major-variance {
+            background-color: #f8d7da;
+            color: #721c24;
+            border-color: #f5c6cb;
+        }
+
+        .lock-icon {
+            color: #28a745;
+            margin-left: 4px;
+            font-size: 0.8em;
+        }
+
+        .lock-btn {
+            background: none;
+            border: none;
+            color: #6c757d;
+            font-size: 0.9em;
+            cursor: pointer;
+            margin-left: 4px;
+        }
+
+        .lock-btn:hover {
+            color: #28a745;
+        }
+
+        .lock-btn.locked {
+            color: #28a745;
+        }
+
+        .variance-badge {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            font-size: 0.7em;
+            background-color: #ffc107;
+            color: #000;
+            padding: 1px 4px;
+            border-radius: 2px;
+        }
+
+        .variance-badge.major {
+            background-color: #dc3545;
+            color: white;
         }
         
         /* Loading states */
@@ -364,6 +448,15 @@
                         <button class="btn btn-outline-info btn-sm" onclick="bulkEditSelected()">
                             <i class="fas fa-edit"></i> Bulk Edit
                         </button>
+                        <button class="btn btn-success btn-sm" onclick="exportConfirmedOnly()">
+                            <i class="fas fa-lock"></i> Export Confirmed Only
+                        </button>
+                        <button class="btn btn-outline-warning btn-sm" onclick="clearAllConfirmations()">
+                            <i class="fas fa-unlock"></i> Clear All Confirmations
+                        </button>
+                        <button class="btn btn-outline-primary btn-sm" onclick="reviewVariances()">
+                            <i class="fas fa-exclamation-triangle"></i> Review Variances
+                        </button>
                     </div>
                 </div>
             </div>
@@ -394,6 +487,7 @@
                                 <th>CA Monthly Demand</th>
                                 <th>Coverage</th>
                                 <th>Transfer Qty</th>
+                                <th>Confirmed Qty</th>
                                 <th>CA Coverage After</th>
                                 <th>KY Coverage After</th>
                                 <th>ABC/XYZ</th>
@@ -443,6 +537,7 @@
     <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
     <script src="https://cdn.datatables.net/buttons/2.4.1/js/dataTables.buttons.min.js"></script>
     <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.bootstrap5.min.js"></script>
+    <script src="https://cdn.datatables.net/colreorder/1.7.0/js/dataTables.colReorder.min.js"></script>
     <!-- Chart.js for sales visualization -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
@@ -451,6 +546,7 @@
         // Global variables
         let recommendationsData = [];
         let dataTable;
+        let confirmationsData = {}; // Cache for confirmation data
 
         // Initialize when DOM is ready
         $(document).ready(function() {
@@ -471,10 +567,12 @@
             dataTable = $('#recommendations-table').DataTable({
                 "pageLength": 25,
                 "order": [[3, "asc"]], // Sort by priority
+                "colReorder": true, // Enable column reordering
+                "stateSave": true,  // Save column order and other table state
                 "columnDefs": [
-                    { "orderable": false, "targets": [0, 16] }, // Checkbox and actions
-                    { "searchable": false, "targets": [0, 16] },
-                    { "className": "text-center", "targets": [0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] }
+                    { "orderable": false, "targets": [0, 17] }, // Checkbox and actions
+                    { "searchable": false, "targets": [0, 17] },
+                    { "className": "text-center", "targets": [0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] }
                 ],
                 "dom": '<"row"<"col-sm-6"l><"col-sm-6"f>>rtip',
                 "language": {
@@ -640,13 +738,16 @@
                     </td>
                     <td><span class="${coverageColor}">${rec.coverage_months.toFixed(1)}m</span></td>
                     <td>
-                        <input type="number" 
-                               class="editable-qty" 
-                               value="${rec.recommended_transfer_qty}" 
-                               min="0" 
+                        <input type="number"
+                               class="editable-qty"
+                               value="${rec.recommended_transfer_qty}"
+                               min="0"
                                step="${rec.transfer_multiple}"
                                data-sku="${rec.sku_id}"
                                onchange="updateTransferQty('${rec.sku_id}', this.value)">
+                    </td>
+                    <td>
+                        ${createConfirmedQtyColumn(rec)}
                     </td>
                     <td>
                         <span class="text-success">${(rec.burnaby_coverage_after_transfer || 0).toFixed(1)}m</span>
@@ -668,6 +769,282 @@
                     </td>
                 </tr>
             `;
+        }
+
+        /**
+         * Create the confirmed quantity column HTML
+         *
+         * @function createConfirmedQtyColumn
+         * @param {Object} rec - Transfer recommendation data
+         * @returns {string} HTML for confirmed quantity column
+         */
+        function createConfirmedQtyColumn(rec) {
+            const isConfirmed = rec.is_confirmed;
+            const confirmedQty = rec.confirmed_qty || 0;
+            const hasVariance = rec.has_significant_variance;
+            const hasMajorVariance = rec.has_major_variance;
+            const variancePercent = rec.variance_percent || 0;
+
+            if (isConfirmed) {
+                let classes = 'confirmed-qty';
+                if (hasMajorVariance) {
+                    classes += ' major-variance';
+                } else if (hasVariance) {
+                    classes += ' has-variance';
+                }
+
+                let varianceBadge = '';
+                if (hasMajorVariance) {
+                    varianceBadge = `<span class="variance-badge major" title="Major variance: ${variancePercent}%">${variancePercent}%</span>`;
+                } else if (hasVariance) {
+                    varianceBadge = `<span class="variance-badge" title="Variance: ${variancePercent}%">${variancePercent}%</span>`;
+                }
+
+                return `
+                    <div class="${classes}" title="Confirmed by ${rec.confirmed_by || 'system'} on ${rec.confirmed_at || ''}">
+                        ${confirmedQty}
+                        <i class="fas fa-lock lock-icon"></i>
+                        ${varianceBadge}
+                        <button class="lock-btn locked" onclick="unlockTransferQty('${rec.sku_id}')" title="Unlock quantity">
+                            <i class="fas fa-unlock"></i>
+                        </button>
+                    </div>
+                `;
+            } else {
+                return `
+                    <div class="text-muted">
+                        --
+                        <button class="lock-btn" onclick="confirmTransferQty('${rec.sku_id}', ${rec.recommended_transfer_qty})" title="Lock current quantity">
+                            <i class="fas fa-lock"></i>
+                        </button>
+                    </div>
+                `;
+            }
+        }
+
+        /**
+         * Confirm/lock a transfer quantity for a specific SKU
+         *
+         * @function confirmTransferQty
+         * @param {string} skuId - SKU identifier
+         * @param {number} qty - Quantity to confirm
+         * @param {string} notes - Optional notes
+         * @returns {Promise<void>}
+         */
+        async function confirmTransferQty(skuId, qty, notes = '') {
+            try {
+                const rec = recommendationsData.find(r => r.sku_id === skuId);
+                if (!rec) {
+                    alert('SKU not found in recommendations');
+                    return;
+                }
+
+                const confirmationData = {
+                    confirmed_qty: parseInt(qty),
+                    original_suggested_qty: rec.recommended_transfer_qty,
+                    confirmed_by: 'user', // Could be made dynamic
+                    notes: notes
+                };
+
+                const response = await fetch(`/api/transfer-confirmations/${skuId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(confirmationData)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Failed to confirm quantity: ${response.statusText}`);
+                }
+
+                const result = await response.json();
+
+                // Update local data
+                rec.confirmed_qty = confirmationData.confirmed_qty;
+                rec.original_suggested_qty = confirmationData.original_suggested_qty;
+                rec.confirmed_by = confirmationData.confirmed_by;
+                rec.confirmed_at = new Date().toISOString();
+                rec.is_confirmed = true;
+                rec.variance_percent = result.confirmation.variance_percent || 0;
+                rec.has_significant_variance = Math.abs(rec.variance_percent) > 20;
+                rec.has_major_variance = Math.abs(rec.variance_percent) > 50;
+
+                // Refresh the table
+                populateTable();
+
+                console.log(`Confirmed transfer quantity for ${skuId}: ${qty}`);
+
+            } catch (error) {
+                console.error('Failed to confirm transfer quantity:', error);
+                alert(`Failed to confirm quantity: ${error.message}`);
+            }
+        }
+
+        /**
+         * Unlock a confirmed transfer quantity
+         *
+         * @function unlockTransferQty
+         * @param {string} skuId - SKU identifier to unlock
+         * @returns {Promise<void>}
+         */
+        async function unlockTransferQty(skuId) {
+            if (!confirm(`Are you sure you want to unlock the confirmed quantity for ${skuId}?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/transfer-confirmations/${skuId}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Failed to unlock quantity: ${response.statusText}`);
+                }
+
+                // Update local data
+                const rec = recommendationsData.find(r => r.sku_id === skuId);
+                if (rec) {
+                    rec.confirmed_qty = null;
+                    rec.original_suggested_qty = null;
+                    rec.confirmed_by = null;
+                    rec.confirmed_at = null;
+                    rec.is_confirmed = false;
+                    rec.variance_percent = 0;
+                    rec.has_significant_variance = false;
+                    rec.has_major_variance = false;
+                }
+
+                // Refresh the table
+                populateTable();
+
+                console.log(`Unlocked transfer quantity for ${skuId}`);
+
+            } catch (error) {
+                console.error('Failed to unlock transfer quantity:', error);
+                alert(`Failed to unlock quantity: ${error.message}`);
+            }
+        }
+
+        /**
+         * Clear all transfer confirmations
+         *
+         * @function clearAllConfirmations
+         * @returns {Promise<void>}
+         */
+        async function clearAllConfirmations() {
+            const confirmedCount = recommendationsData.filter(r => r.is_confirmed).length;
+
+            if (confirmedCount === 0) {
+                alert('No confirmed quantities to clear.');
+                return;
+            }
+
+            if (!confirm(`Are you sure you want to clear all ${confirmedCount} confirmed quantities? This action cannot be undone.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/transfer-confirmations', {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Failed to clear confirmations: ${response.statusText}`);
+                }
+
+                // Update local data
+                recommendationsData.forEach(rec => {
+                    rec.confirmed_qty = null;
+                    rec.original_suggested_qty = null;
+                    rec.confirmed_by = null;
+                    rec.confirmed_at = null;
+                    rec.is_confirmed = false;
+                    rec.variance_percent = 0;
+                    rec.has_significant_variance = false;
+                    rec.has_major_variance = false;
+                });
+
+                // Refresh the table
+                populateTable();
+
+                alert(`Cleared ${confirmedCount} confirmed quantities.`);
+
+            } catch (error) {
+                console.error('Failed to clear confirmations:', error);
+                alert(`Failed to clear confirmations: ${error.message}`);
+            }
+        }
+
+        /**
+         * Export only confirmed transfer quantities
+         *
+         * @function exportConfirmedOnly
+         * @returns {Promise<void>}
+         */
+        async function exportConfirmedOnly() {
+            const confirmedItems = recommendationsData.filter(r => r.is_confirmed && r.confirmed_qty > 0);
+
+            if (confirmedItems.length === 0) {
+                alert('No confirmed quantities to export.');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/export/confirmed-transfers');
+
+                if (!response.ok) {
+                    throw new Error(`Export failed: ${response.statusText}`);
+                }
+
+                // Get filename from response headers
+                const contentDisposition = response.headers.get('content-disposition');
+                const filename = contentDisposition
+                    ? contentDisposition.split('filename=')[1].replace(/"/g, '')
+                    : `confirmed-transfers-${new Date().toISOString().split('T')[0]}.csv`;
+
+                // Download the file
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+
+                alert(`Exported ${confirmedItems.length} confirmed transfers: ${filename}`);
+
+            } catch (error) {
+                console.error('Failed to export confirmed transfers:', error);
+                alert(`Export failed: ${error.message}`);
+            }
+        }
+
+        /**
+         * Review items with significant variances
+         *
+         * @function reviewVariances
+         * @returns {void}
+         */
+        function reviewVariances() {
+            const varianceItems = recommendationsData.filter(r => r.is_confirmed && r.has_significant_variance);
+
+            if (varianceItems.length === 0) {
+                alert('No confirmed quantities with significant variances found.');
+                return;
+            }
+
+            // Apply filter to show only variance items
+            dataTable.clear();
+            varianceItems.forEach(rec => {
+                const row = createTableRow(rec);
+                dataTable.row.add($(row));
+            });
+            dataTable.draw();
+
+            alert(`Showing ${varianceItems.length} items with significant variances (>20% difference from suggested quantity).`);
         }
 
         /**
