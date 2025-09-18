@@ -32,7 +32,7 @@ class Warehouse(enum.Enum):
 
 class SKU(Base):
     __tablename__ = 'skus'
-    
+
     sku_id = Column(String(50), primary_key=True)
     description = Column(String(255), nullable=False)
     supplier = Column(String(100))
@@ -44,13 +44,14 @@ class SKU(Base):
     category = Column(String(50))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
     # Relationships
     inventory = relationship("InventoryCurrent", back_populates="sku", uselist=False)
     sales_history = relationship("MonthlySales", back_populates="sku")
     stockout_dates = relationship("StockoutDate", back_populates="sku")
     pending_inventory = relationship("PendingInventory", back_populates="sku")
     transfer_history = relationship("TransferHistory", back_populates="sku")
+    transfer_confirmation = relationship("TransferConfirmation", back_populates="sku", uselist=False)
 
 class InventoryCurrent(Base):
     __tablename__ = 'inventory_current'
@@ -207,7 +208,7 @@ class PendingInventory(Base):
 
 class TransferHistory(Base):
     __tablename__ = 'transfer_history'
-    
+
     id = Column(Integer, primary_key=True, autoincrement=True)
     sku_id = Column(String(50), ForeignKey('skus.sku_id', ondelete='CASCADE'), nullable=False)
     recommended_qty = Column(Integer, nullable=False)
@@ -223,9 +224,46 @@ class TransferHistory(Base):
     xyz_class = Column(String(1))
     created_by = Column(String(50), default='system')
     created_at = Column(DateTime, default=datetime.utcnow)
-    
+
     # Relationships
     sku = relationship("SKU", back_populates="transfer_history")
+
+class TransferConfirmation(Base):
+    """
+    Model for tracking confirmed/locked transfer quantities
+
+    Allows users to lock in specific transfer quantities after manual review,
+    providing an audit trail and preventing accidental changes.
+    """
+    __tablename__ = 'transfer_confirmations'
+
+    sku_id = Column(String(50), ForeignKey('skus.sku_id', ondelete='CASCADE'), primary_key=True)
+    confirmed_qty = Column(Integer, nullable=False)
+    original_suggested_qty = Column(Integer)
+    confirmed_by = Column(String(100))
+    confirmed_at = Column(DateTime, default=datetime.utcnow)
+    notes = Column(Text)
+
+    # Relationships
+    sku = relationship("SKU", back_populates="transfer_confirmation")
+
+    @property
+    def variance_percent(self):
+        """Calculate percentage variance between confirmed and suggested quantities"""
+        if not self.original_suggested_qty or self.original_suggested_qty == 0:
+            return 0.0
+        variance = ((self.confirmed_qty - self.original_suggested_qty) / self.original_suggested_qty) * 100
+        return round(variance, 2)
+
+    @property
+    def has_significant_variance(self):
+        """Check if variance is significant (>20%)"""
+        return abs(self.variance_percent) > 20
+
+    @property
+    def has_major_variance(self):
+        """Check if variance is major (>50%)"""
+        return abs(self.variance_percent) > 50
 
 # Pydantic models for API serialization
 from pydantic import BaseModel, Field, validator
@@ -453,3 +491,67 @@ class BulkPendingInventoryCreate(BaseModel):
     """
     orders: List[PendingInventoryCreate] = Field(..., description="List of pending orders to create")
     validate_skus: bool = Field(default=True, description="Whether to validate SKU existence")
+
+# ===================================================================
+# Transfer Confirmation Pydantic Models
+# ===================================================================
+
+class TransferConfirmationBase(BaseModel):
+    """
+    Base model for transfer confirmation data
+    """
+    confirmed_qty: int = Field(..., ge=0, description="Confirmed transfer quantity")
+    original_suggested_qty: Optional[int] = Field(None, ge=0, description="Original suggested quantity")
+    confirmed_by: Optional[str] = Field(None, max_length=100, description="User who confirmed the quantity")
+    notes: Optional[str] = Field(None, max_length=1000, description="Notes about the confirmation")
+
+    @validator('confirmed_qty')
+    def validate_confirmed_qty(cls, v):
+        if v < 0:
+            raise ValueError('Confirmed quantity cannot be negative')
+        return v
+
+class TransferConfirmationCreate(TransferConfirmationBase):
+    """
+    Model for creating transfer confirmations
+    """
+    pass
+
+class TransferConfirmationUpdate(BaseModel):
+    """
+    Model for updating transfer confirmations
+    All fields are optional - only provided fields will be updated
+    """
+    confirmed_qty: Optional[int] = Field(None, ge=0, description="Confirmed transfer quantity")
+    notes: Optional[str] = Field(None, max_length=1000, description="Notes about the confirmation")
+
+class TransferConfirmationResponse(TransferConfirmationBase):
+    """
+    Model for transfer confirmation responses
+    """
+    sku_id: str = Field(..., description="SKU identifier")
+    confirmed_at: datetime = Field(..., description="Confirmation timestamp")
+    variance_percent: float = Field(..., description="Percentage variance from suggested qty")
+    has_significant_variance: bool = Field(..., description="Whether variance is significant (>20%)")
+    has_major_variance: bool = Field(..., description="Whether variance is major (>50%)")
+
+    class Config:
+        from_attributes = True
+
+class BulkConfirmationRequest(BaseModel):
+    """
+    Model for bulk transfer confirmations
+    """
+    confirmations: List[dict] = Field(..., description="List of SKU confirmations")
+    confirmed_by: Optional[str] = Field(None, max_length=100, description="User performing bulk confirmation")
+
+    @validator('confirmations')
+    def validate_confirmations(cls, v):
+        if not v:
+            raise ValueError('At least one confirmation is required')
+        for conf in v:
+            if 'sku_id' not in conf or 'confirmed_qty' not in conf:
+                raise ValueError('Each confirmation must have sku_id and confirmed_qty')
+            if not isinstance(conf['confirmed_qty'], int) or conf['confirmed_qty'] < 0:
+                raise ValueError('confirmed_qty must be a non-negative integer')
+        return v

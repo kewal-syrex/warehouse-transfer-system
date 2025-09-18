@@ -725,21 +725,32 @@ class TransferCalculator:
         key = f"{abc_class}{xyz_class}"
         return coverage_matrix.get(key, 6)  # Default 6 months if unknown
     
-    def round_to_multiple(self, quantity: int, multiple: int) -> int:
+    def round_to_multiple(self, quantity: int, multiple: int, max_available: int = None) -> int:
         """
         Round transfer quantity to appropriate multiple
-        
+
         Args:
             quantity: Calculated transfer quantity
             multiple: Transfer multiple (25, 50, 100)
-        
+            max_available: Maximum available inventory (optional)
+
         Returns:
-            Rounded quantity respecting minimum transfer of 10 units
+            Rounded quantity respecting minimum transfer of 10 units and available inventory
         """
         if quantity < 10:
             return 0  # Below minimum transfer threshold
-        
-        return math.ceil(quantity / multiple) * multiple
+
+        rounded = math.ceil(quantity / multiple) * multiple
+
+        # Never exceed available inventory
+        if max_available is not None and rounded > max_available:
+            # Round down to largest multiple that fits within available inventory
+            rounded = math.floor(max_available / multiple) * multiple
+            # If rounded down below minimum, return 0
+            if rounded < 10:
+                rounded = 0
+
+        return rounded
 
     def get_pending_orders_data(self, sku_id: str) -> Dict[str, Any]:
         """
@@ -1009,8 +1020,8 @@ class TransferCalculator:
             burnaby_available = max(0, burnaby_qty - burnaby_min_retain)
             available_to_transfer = min(transfer_need, burnaby_available)
             
-            # Round to multiple
-            recommended_qty = self.round_to_multiple(available_to_transfer, transfer_multiple)
+            # Round to multiple, ensuring we don't exceed available inventory
+            recommended_qty = self.round_to_multiple(available_to_transfer, transfer_multiple, burnaby_qty)
             
             # Calculate priority
             if kentucky_qty == 0:
@@ -1124,7 +1135,7 @@ class TransferCalculator:
             kentucky_qty = basic_rec['current_kentucky_qty']
             transfer_need = enhanced_target - kentucky_qty
             available_to_transfer = min(transfer_need, basic_rec['current_burnaby_qty'])
-            enhanced_transfer_qty = self.round_to_multiple(available_to_transfer, basic_rec['transfer_multiple'])
+            enhanced_transfer_qty = self.round_to_multiple(available_to_transfer, basic_rec['transfer_multiple'], basic_rec['current_burnaby_qty'])
 
             # Check for seasonal pre-positioning needs
             seasonal_positioning = self.get_seasonal_pre_positioning(sku_id, seasonal_pattern, current_month)
@@ -1140,7 +1151,7 @@ class TransferCalculator:
                 pre_position_target = final_demand * coverage_months
                 transfer_need = pre_position_target - kentucky_qty
                 available_to_transfer = min(transfer_need, basic_rec['current_burnaby_qty'])
-                enhanced_transfer_qty = self.round_to_multiple(available_to_transfer, basic_rec['transfer_multiple'])
+                enhanced_transfer_qty = self.round_to_multiple(available_to_transfer, basic_rec['transfer_multiple'], basic_rec['current_burnaby_qty'])
 
             # Calculate priority score using new scoring system
             score_data = {
@@ -1415,7 +1426,7 @@ class TransferCalculator:
             else:
                 # Normal transfer calculation
                 recommended_qty = min(transfer_need, available_for_transfer)
-                final_transfer_qty = self.round_to_multiple(recommended_qty, transfer_multiple)
+                final_transfer_qty = self.round_to_multiple(recommended_qty, transfer_multiple, burnaby_qty)
 
                 # Calculate priority based on Kentucky situation
                 if kentucky_qty == 0:
@@ -1429,9 +1440,10 @@ class TransferCalculator:
 
                 # Generate comprehensive reason
                 if final_transfer_qty > 0:
-                    # Calculate actual retention period for message
-                    actual_retention_months = burnaby_min_retain / burnaby_corrected_demand if burnaby_corrected_demand > 0 else 0
-                    reason = f"Transfer {final_transfer_qty} units. CA retains {burnaby_min_retain:.0f} for {actual_retention_months:.1f}-month coverage. Economic validation passed."
+                    # Calculate actual CA retention after transfer (not minimum requirement)
+                    ca_remaining_qty = burnaby_qty - final_transfer_qty
+                    ca_coverage_months = ca_remaining_qty / burnaby_corrected_demand if burnaby_corrected_demand > 0 else 0
+                    reason = f"Transfer {final_transfer_qty} units. CA retains {ca_remaining_qty:.0f} for {ca_coverage_months:.1f}-month coverage. Economic validation passed."
                 else:
                     reason = f"No transfer needed. KY has {kentucky_qty} units vs {kentucky_corrected_demand:.0f} monthly demand."
 
@@ -1441,7 +1453,7 @@ class TransferCalculator:
             # Coverage including pending orders
             kentucky_coverage_with_pending = (current_position + final_transfer_qty) / max(kentucky_corrected_demand, 1)
 
-            # Step 8: Return comprehensive recommendation including pending orders
+            # Step 8: Return comprehensive recommendation including pending orders and confirmation data
             return {
                 'sku_id': sku_id,
                 'description': sku_data.get('description', ''),
@@ -1474,7 +1486,18 @@ class TransferCalculator:
                 'burnaby_pending': burnaby_pending,
                 'days_until_arrival': days_until_arrival,
                 'pending_orders_included': pending_orders_included,
-                'current_position_with_pending': current_position
+                'current_position_with_pending': current_position,
+
+                # Transfer confirmation data
+                'confirmed_qty': sku_data.get('confirmed_qty'),
+                'original_suggested_qty': sku_data.get('original_suggested_qty'),
+                'confirmed_by': sku_data.get('confirmed_by'),
+                'confirmed_at': sku_data.get('confirmed_at'),
+                'confirmation_notes': sku_data.get('confirmation_notes'),
+                'variance_percent': sku_data.get('variance_percent', 0),
+                'is_confirmed': bool(sku_data.get('confirmed_qty') is not None),
+                'has_significant_variance': abs(sku_data.get('variance_percent', 0)) > 20,
+                'has_major_variance': abs(sku_data.get('variance_percent', 0)) > 50
             }
 
         except Exception as e:
@@ -1513,7 +1536,18 @@ class TransferCalculator:
                 'burnaby_pending': 0,
                 'days_until_arrival': None,
                 'pending_orders_included': False,
-                'current_position_with_pending': kentucky_qty
+                'current_position_with_pending': kentucky_qty,
+
+                # Transfer confirmation data (fallback values)
+                'confirmed_qty': sku_data.get('confirmed_qty'),
+                'original_suggested_qty': sku_data.get('original_suggested_qty'),
+                'confirmed_by': sku_data.get('confirmed_by'),
+                'confirmed_at': sku_data.get('confirmed_at'),
+                'confirmation_notes': sku_data.get('confirmation_notes'),
+                'variance_percent': sku_data.get('variance_percent', 0),
+                'is_confirmed': bool(sku_data.get('confirmed_qty') is not None),
+                'has_significant_variance': abs(sku_data.get('variance_percent', 0)) > 20,
+                'has_major_variance': abs(sku_data.get('variance_percent', 0)) > 50
             }
 
     def calculate_enhanced_transfer_with_pending(self, sku_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -1606,8 +1640,8 @@ class TransferCalculator:
             available_from_burnaby = burnaby_retention['available_for_transfer']
             recommended_qty = min(transfer_need, available_from_burnaby)
 
-            # Step 10: Round to multiple and apply minimum threshold
-            final_transfer_qty = self.round_to_multiple(recommended_qty, transfer_multiple)
+            # Step 10: Round to multiple and apply minimum threshold, ensuring availability
+            final_transfer_qty = self.round_to_multiple(recommended_qty, transfer_multiple, burnaby_qty)
 
             # Step 11: Calculate priority with comprehensive scoring
             score_data = {
@@ -2258,7 +2292,7 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
     """
     try:
         print("DEBUG: calculate_all_transfer_recommendations called")
-        # Get all active SKUs with current inventory and latest sales for BOTH warehouses
+        # Get all active SKUs with current inventory, latest sales, and confirmation data
         query = """
         SELECT
             s.sku_id,
@@ -2274,7 +2308,17 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
             COALESCE(ms.burnaby_sales, 0) as burnaby_sales,
             COALESCE(ms.burnaby_stockout_days, 0) as burnaby_stockout_days,
             COALESCE(ms.corrected_demand_kentucky, 0) as corrected_demand_kentucky,
-            COALESCE(ms.corrected_demand_burnaby, 0) as corrected_demand_burnaby
+            COALESCE(ms.corrected_demand_burnaby, 0) as corrected_demand_burnaby,
+            tc.confirmed_qty,
+            tc.original_suggested_qty,
+            tc.confirmed_by,
+            tc.confirmed_at,
+            tc.notes as confirmation_notes,
+            CASE
+                WHEN tc.original_suggested_qty > 0 THEN
+                    ROUND(((tc.confirmed_qty - tc.original_suggested_qty) / tc.original_suggested_qty) * 100, 2)
+                ELSE 0
+            END as variance_percent
         FROM skus s
         LEFT JOIN inventory_current ic ON s.sku_id = ic.sku_id
         LEFT JOIN monthly_sales ms ON s.sku_id = ms.sku_id
@@ -2284,6 +2328,7 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
                 WHERE ms2.sku_id = s.sku_id
                 AND (ms2.kentucky_sales > 0 OR ms2.burnaby_sales > 0)
             )
+        LEFT JOIN transfer_confirmations tc ON s.sku_id = tc.sku_id
         ORDER BY s.sku_id
         """
         
@@ -2420,7 +2465,18 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
                     'reason': 'Calculation failed or no recommendation needed',
                     'transfer_multiple': sku_data.get('transfer_multiple', 50),
                     'coverage_months': 0,
-                    'enhanced_calculation': False
+                    'enhanced_calculation': False,
+
+                    # Transfer confirmation data
+                    'confirmed_qty': sku_data.get('confirmed_qty'),
+                    'original_suggested_qty': sku_data.get('original_suggested_qty'),
+                    'confirmed_by': sku_data.get('confirmed_by'),
+                    'confirmed_at': sku_data.get('confirmed_at'),
+                    'confirmation_notes': sku_data.get('confirmation_notes'),
+                    'variance_percent': sku_data.get('variance_percent', 0),
+                    'is_confirmed': bool(sku_data.get('confirmed_qty') is not None),
+                    'has_significant_variance': abs(sku_data.get('variance_percent', 0)) > 20,
+                    'has_major_variance': abs(sku_data.get('variance_percent', 0)) > 50
                 }
                 recommendations.append(minimal_rec)
         

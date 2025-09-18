@@ -669,6 +669,37 @@
         }
 
         /**
+         * Update a single row in the DataTable without clearing filters
+         *
+         * @function updateSingleRow
+         * @param {Object} rec - Transfer recommendation data for the row to update
+         * @returns {void}
+         */
+        function updateSingleRow(rec) {
+            // Find the row with matching SKU
+            const rowNode = dataTable.rows().nodes().toArray().find(node => {
+                return $(node).data('sku') === rec.sku_id;
+            });
+
+            if (rowNode) {
+                // Get the row API object
+                const row = dataTable.row(rowNode);
+
+                // Create new row HTML
+                const newRowHtml = createTableRow(rec);
+                const $newRow = $(newRowHtml);
+
+                // Remove old row and add new one through DataTables API
+                // This ensures DataTables internal cache is updated properly
+                row.remove();
+                dataTable.row.add($newRow[0]);
+
+                // Redraw only the specific page without clearing filters
+                dataTable.draw(false);
+            }
+        }
+
+        /**
          * Populate DataTable with filtered transfer recommendations
          *
          * Clears existing data and populates table with current recommendationsData,
@@ -679,12 +710,12 @@
          */
         function populateTable() {
             dataTable.clear();
-            
+
             recommendationsData.forEach(rec => {
                 const row = createTableRow(rec);
                 dataTable.row.add($(row));
             });
-            
+
             dataTable.draw();
         }
 
@@ -811,15 +842,46 @@
                     </div>
                 `;
             } else {
+                // When unlocked, show an editable input field for flexible quantity entry
                 return `
-                    <div class="text-muted">
-                        --
-                        <button class="lock-btn" onclick="confirmTransferQty('${rec.sku_id}', ${rec.recommended_transfer_qty})" title="Lock current quantity">
+                    <div class="d-flex align-items-center">
+                        <input type="number"
+                               id="confirm-qty-${rec.sku_id}"
+                               class="form-control form-control-sm me-2"
+                               value="${rec.recommended_transfer_qty}"
+                               min="0"
+                               style="width: 80px;"
+                               placeholder="Qty">
+                        <button class="lock-btn" onclick="confirmTransferQtyFromInput('${rec.sku_id}')" title="Lock this quantity">
                             <i class="fas fa-lock"></i>
                         </button>
                     </div>
                 `;
             }
+        }
+
+        /**
+         * Confirm transfer quantity from the input field
+         *
+         * @function confirmTransferQtyFromInput
+         * @param {string} skuId - SKU identifier
+         * @returns {Promise<void>}
+         */
+        async function confirmTransferQtyFromInput(skuId) {
+            const inputEl = document.getElementById(`confirm-qty-${skuId}`);
+            if (!inputEl) {
+                alert('Unable to find quantity input field');
+                return;
+            }
+
+            const qty = parseInt(inputEl.value);
+            if (isNaN(qty) || qty < 0) {
+                alert('Please enter a valid quantity (0 or higher)');
+                inputEl.focus();
+                return;
+            }
+
+            await confirmTransferQty(skuId, qty);
         }
 
         /**
@@ -870,8 +932,8 @@
                 rec.has_significant_variance = Math.abs(rec.variance_percent) > 20;
                 rec.has_major_variance = Math.abs(rec.variance_percent) > 50;
 
-                // Refresh the table
-                populateTable();
+                // Update only the specific row instead of refreshing entire table
+                updateSingleRow(rec);
 
                 console.log(`Confirmed transfer quantity for ${skuId}: ${qty}`);
 
@@ -915,8 +977,8 @@
                     rec.has_major_variance = false;
                 }
 
-                // Refresh the table
-                populateTable();
+                // Update only the specific row instead of refreshing entire table
+                updateSingleRow(rec);
 
                 console.log(`Unlocked transfer quantity for ${skuId}`);
 
@@ -1759,17 +1821,25 @@
          */
         async function exportTransferOrderExcel() {
             showLoading(true, 'Generating Excel File', 'Creating professional Excel export with formatting...');
-            
+
             try {
-                const response = await fetch('/api/export/excel/transfer-orders');
-                
+                // Set extended timeout for Excel export (2 minutes)
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+                const response = await fetch('/api/export/excel/transfer-orders', {
+                    signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+
                 if (!response.ok) {
                     throw new Error(`Export failed: ${response.statusText}`);
                 }
 
                 // Get filename from response headers
                 const contentDisposition = response.headers.get('content-disposition');
-                const filename = contentDisposition 
+                const filename = contentDisposition
                     ? contentDisposition.split('filename=')[1].replace(/"/g, '')
                     : `transfer-orders-${new Date().toISOString().split('T')[0]}.xlsx`;
 
@@ -1791,7 +1861,11 @@
 
             } catch (error) {
                 console.error('Excel export error:', error);
-                alert(`Excel export failed: ${error.message}`);
+                if (error.name === 'AbortError') {
+                    alert('Excel export timed out. Please try again or contact support if the issue persists.');
+                } else {
+                    alert(`Excel export failed: ${error.message}`);
+                }
             } finally {
                 showLoading(false);
             }
@@ -1807,35 +1881,46 @@
          * @returns {void}
          */
         function exportTransferOrder() {
-            const selectedItems = recommendationsData.filter(rec => rec.recommended_transfer_qty > 0);
-            
-            if (selectedItems.length === 0) {
-                alert('No items with transfer quantities to export.');
-                return;
-            }
-            
-            // Create CSV content
-            const headers = ['SKU', 'Description', 'Transfer Qty', 'Priority', 'Reason'];
-            const rows = selectedItems.map(item => [
-                item.sku_id,
-                `"${item.description}"`,
-                item.recommended_transfer_qty,
-                item.priority,
-                `"${item.reason}"`
-            ]);
-            
-            const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n');
-            
-            // Download file
-            const blob = new Blob([csvContent], { type: 'text/csv' });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `transfer-order-${new Date().toISOString().split('T')[0]}.csv`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            window.URL.revokeObjectURL(url);
+            // Use backend CSV export for consistency and performance
+            showLoading(true, 'Generating CSV Export', 'Creating CSV file with all transfer recommendations...');
+
+            // Use the backend CSV export endpoint for better performance and consistency
+            fetch('/api/export/csv/transfer-orders')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`Export failed: ${response.statusText}`);
+                    }
+
+                    // Get filename from response headers
+                    const contentDisposition = response.headers.get('content-disposition');
+                    const filename = contentDisposition
+                        ? contentDisposition.split('filename=')[1].replace(/"/g, '')
+                        : `transfer-orders-${new Date().toISOString().split('T')[0]}.csv`;
+
+                    return response.blob().then(blob => ({ blob, filename }));
+                })
+                .then(({ blob, filename }) => {
+                    // Download file
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+
+                    setTimeout(() => {
+                        alert(`CSV file exported successfully: ${filename}\n\nThe file includes all transfer recommendations with current data.`);
+                    }, 500);
+                })
+                .catch(error => {
+                    console.error('CSV export error:', error);
+                    alert(`CSV export failed: ${error.message}`);
+                })
+                .finally(() => {
+                    showLoading(false);
+                });
         }
 
         /**

@@ -7,6 +7,7 @@ CREATE DATABASE IF NOT EXISTS warehouse_transfer;
 USE warehouse_transfer;
 
 -- Drop tables if they exist (for clean reinstall)
+DROP TABLE IF EXISTS transfer_confirmations;
 DROP TABLE IF EXISTS transfer_history;
 DROP TABLE IF EXISTS pending_inventory;
 DROP TABLE IF EXISTS stockout_dates;
@@ -134,6 +135,29 @@ CREATE TABLE transfer_history (
     INDEX idx_recommendation_date (recommendation_date),
     INDEX idx_transfer_date (transfer_date),
     INDEX idx_abc_xyz (abc_class, xyz_class)
+);
+
+-- ===================================================================
+-- Transfer Confirmations (Lock in transfer quantities)
+-- ===================================================================
+CREATE TABLE transfer_confirmations (
+    sku_id VARCHAR(50) PRIMARY KEY,
+    confirmed_qty INT NOT NULL,
+    original_suggested_qty INT,
+    confirmed_by VARCHAR(100),
+    confirmed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    notes TEXT,
+    variance_percent DECIMAL(5,2) GENERATED ALWAYS AS (
+        CASE
+            WHEN original_suggested_qty > 0 THEN
+                ((confirmed_qty - original_suggested_qty) / original_suggested_qty) * 100
+            ELSE 0
+        END
+    ) STORED,
+    FOREIGN KEY (sku_id) REFERENCES skus(sku_id) ON DELETE CASCADE,
+    INDEX idx_confirmed_at (confirmed_at),
+    INDEX idx_confirmed_by (confirmed_by),
+    INDEX idx_variance (variance_percent)
 );
 
 -- ===================================================================

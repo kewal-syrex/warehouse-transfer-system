@@ -4026,6 +4026,388 @@ async def test_cache_performance(num_queries: int = 100):
             detail=f"Performance test failed: {str(e)}"
         )
 
+# =============================================================================
+# TRANSFER CONFIRMATION ENDPOINTS
+# =============================================================================
+
+@app.get("/api/transfer-confirmations",
+         summary="Get All Transfer Confirmations",
+         description="Retrieve all confirmed transfer quantities with metadata",
+         tags=["Transfer Confirmations"],
+         responses={
+             200: {"description": "List of all transfer confirmations"},
+             500: {"description": "Database query failed"}
+         })
+async def get_all_transfer_confirmations():
+    """
+    Get all transfer confirmations with variance analysis
+
+    Returns confirmed quantities, original suggestions, and variance percentages
+    for all SKUs that have locked transfer quantities.
+
+    Usage: Display confirmed quantities in transfer planning interface
+    """
+    try:
+        from . import models
+        db = database.get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+
+        cursor.execute("""
+            SELECT tc.sku_id, tc.confirmed_qty, tc.original_suggested_qty,
+                   tc.confirmed_by, tc.confirmed_at, tc.notes,
+                   s.description,
+                   CASE
+                       WHEN tc.original_suggested_qty > 0 THEN
+                           ROUND(((tc.confirmed_qty - tc.original_suggested_qty) / tc.original_suggested_qty) * 100, 2)
+                       ELSE 0
+                   END as variance_percent
+            FROM transfer_confirmations tc
+            INNER JOIN skus s ON tc.sku_id = s.sku_id
+            ORDER BY tc.confirmed_at DESC
+        """)
+
+        confirmations = cursor.fetchall()
+        db.close()
+
+        return {
+            "confirmations": confirmations,
+            "count": len(confirmations),
+            "retrieved_at": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
+
+@app.get("/api/transfer-confirmations/{sku_id}",
+         summary="Get Transfer Confirmation for SKU",
+         description="Retrieve confirmation details for a specific SKU",
+         tags=["Transfer Confirmations"],
+         responses={
+             200: {"description": "Transfer confirmation details"},
+             404: {"description": "No confirmation found for this SKU"},
+             500: {"description": "Database query failed"}
+         })
+async def get_transfer_confirmation(sku_id: str):
+    """Get transfer confirmation for a specific SKU"""
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+
+        cursor.execute("""
+            SELECT tc.*, s.description,
+                   CASE
+                       WHEN tc.original_suggested_qty > 0 THEN
+                           ROUND(((tc.confirmed_qty - tc.original_suggested_qty) / tc.original_suggested_qty) * 100, 2)
+                       ELSE 0
+                   END as variance_percent
+            FROM transfer_confirmations tc
+            INNER JOIN skus s ON tc.sku_id = s.sku_id
+            WHERE tc.sku_id = %s
+        """, (sku_id,))
+
+        confirmation = cursor.fetchone()
+        db.close()
+
+        if not confirmation:
+            raise HTTPException(status_code=404, detail=f"No confirmation found for SKU {sku_id}")
+
+        return confirmation
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
+
+@app.post("/api/transfer-confirmations/{sku_id}",
+          summary="Create/Update Transfer Confirmation",
+          description="Lock in a transfer quantity for a specific SKU",
+          tags=["Transfer Confirmations"],
+          responses={
+              200: {"description": "Confirmation created/updated successfully"},
+              400: {"description": "Invalid input data"},
+              404: {"description": "SKU not found"},
+              500: {"description": "Database operation failed"}
+          })
+async def create_or_update_transfer_confirmation(
+    sku_id: str,
+    confirmation_data: dict = None
+):
+    """
+    Create or update a transfer confirmation for a SKU
+
+    Args:
+        sku_id: SKU identifier
+        confirmation_data: Dict containing confirmed_qty, original_suggested_qty, confirmed_by, notes
+
+    Returns:
+        dict: Confirmation details with success status
+    """
+    try:
+        if not confirmation_data:
+            raise HTTPException(status_code=400, detail="Confirmation data is required")
+
+        confirmed_qty = confirmation_data.get('confirmed_qty')
+        if confirmed_qty is None or confirmed_qty < 0:
+            raise HTTPException(status_code=400, detail="confirmed_qty must be a non-negative integer")
+
+        original_suggested_qty = confirmation_data.get('original_suggested_qty', 0)
+        confirmed_by = confirmation_data.get('confirmed_by', 'system')
+        notes = confirmation_data.get('notes', '')
+
+        db = database.get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+
+        # Verify SKU exists
+        cursor.execute("SELECT sku_id FROM skus WHERE sku_id = %s", (sku_id,))
+        if not cursor.fetchone():
+            db.close()
+            raise HTTPException(status_code=404, detail=f"SKU {sku_id} not found")
+
+        # Insert or update confirmation
+        cursor.execute("""
+            INSERT INTO transfer_confirmations
+            (sku_id, confirmed_qty, original_suggested_qty, confirmed_by, notes)
+            VALUES (%s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+            confirmed_qty = VALUES(confirmed_qty),
+            confirmed_by = VALUES(confirmed_by),
+            notes = VALUES(notes),
+            confirmed_at = CURRENT_TIMESTAMP
+        """, (sku_id, confirmed_qty, original_suggested_qty, confirmed_by, notes))
+
+        db.commit()
+
+        # Get the updated confirmation
+        cursor.execute("""
+            SELECT tc.*,
+                   CASE
+                       WHEN tc.original_suggested_qty > 0 THEN
+                           ROUND(((tc.confirmed_qty - tc.original_suggested_qty) / tc.original_suggested_qty) * 100, 2)
+                       ELSE 0
+                   END as variance_percent
+            FROM transfer_confirmations tc
+            WHERE tc.sku_id = %s
+        """, (sku_id,))
+
+        result = cursor.fetchone()
+        db.close()
+
+        return {
+            "success": True,
+            "message": f"Transfer confirmation {'updated' if result else 'created'} for SKU {sku_id}",
+            "confirmation": result
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database operation failed: {str(e)}")
+
+@app.delete("/api/transfer-confirmations/{sku_id}",
+            summary="Delete Transfer Confirmation",
+            description="Remove confirmation lock for a specific SKU",
+            tags=["Transfer Confirmations"],
+            responses={
+                200: {"description": "Confirmation deleted successfully"},
+                404: {"description": "No confirmation found for this SKU"},
+                500: {"description": "Database operation failed"}
+            })
+async def delete_transfer_confirmation(sku_id: str):
+    """Remove transfer confirmation for a specific SKU"""
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor()
+
+        cursor.execute("DELETE FROM transfer_confirmations WHERE sku_id = %s", (sku_id,))
+        rows_affected = cursor.rowcount
+
+        db.commit()
+        db.close()
+
+        if rows_affected == 0:
+            raise HTTPException(status_code=404, detail=f"No confirmation found for SKU {sku_id}")
+
+        return {
+            "success": True,
+            "message": f"Transfer confirmation removed for SKU {sku_id}"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database operation failed: {str(e)}")
+
+@app.delete("/api/transfer-confirmations",
+            summary="Clear All Transfer Confirmations",
+            description="Remove all transfer confirmations",
+            tags=["Transfer Confirmations"],
+            responses={
+                200: {"description": "All confirmations cleared successfully"},
+                500: {"description": "Database operation failed"}
+            })
+async def clear_all_transfer_confirmations():
+    """Clear all transfer confirmations"""
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor()
+
+        cursor.execute("DELETE FROM transfer_confirmations")
+        rows_affected = cursor.rowcount
+
+        db.commit()
+        db.close()
+
+        return {
+            "success": True,
+            "message": f"Cleared {rows_affected} transfer confirmations",
+            "cleared_count": rows_affected
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database operation failed: {str(e)}")
+
+@app.post("/api/transfer-confirmations/bulk",
+          summary="Bulk Transfer Confirmations",
+          description="Create or update multiple transfer confirmations at once",
+          tags=["Transfer Confirmations"],
+          responses={
+              200: {"description": "Bulk confirmations processed successfully"},
+              400: {"description": "Invalid input data"},
+              500: {"description": "Database operation failed"}
+          })
+async def bulk_transfer_confirmations(bulk_data: dict):
+    """
+    Create or update multiple transfer confirmations
+
+    Args:
+        bulk_data: Dict containing 'confirmations' list and optional 'confirmed_by'
+
+    Returns:
+        dict: Summary of bulk operation results
+    """
+    try:
+        confirmations = bulk_data.get('confirmations', [])
+        confirmed_by = bulk_data.get('confirmed_by', 'system')
+
+        if not confirmations:
+            raise HTTPException(status_code=400, detail="No confirmations provided")
+
+        db = database.get_database_connection()
+        cursor = db.cursor()
+
+        success_count = 0
+        error_count = 0
+        errors = []
+
+        for conf in confirmations:
+            try:
+                sku_id = conf.get('sku_id')
+                confirmed_qty = conf.get('confirmed_qty')
+                original_suggested_qty = conf.get('original_suggested_qty', 0)
+                notes = conf.get('notes', '')
+
+                if not sku_id or confirmed_qty is None or confirmed_qty < 0:
+                    raise ValueError("Invalid sku_id or confirmed_qty")
+
+                cursor.execute("""
+                    INSERT INTO transfer_confirmations
+                    (sku_id, confirmed_qty, original_suggested_qty, confirmed_by, notes)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                    confirmed_qty = VALUES(confirmed_qty),
+                    confirmed_by = VALUES(confirmed_by),
+                    notes = VALUES(notes),
+                    confirmed_at = CURRENT_TIMESTAMP
+                """, (sku_id, confirmed_qty, original_suggested_qty, confirmed_by, notes))
+
+                success_count += 1
+
+            except Exception as e:
+                error_count += 1
+                errors.append(f"SKU {sku_id}: {str(e)}")
+
+        db.commit()
+        db.close()
+
+        return {
+            "success": True,
+            "message": f"Processed {len(confirmations)} confirmations",
+            "success_count": success_count,
+            "error_count": error_count,
+            "errors": errors if errors else None
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Bulk operation failed: {str(e)}")
+
+@app.get("/api/export/confirmed-transfers",
+         summary="Export Confirmed Transfers",
+         description="Export only confirmed transfer quantities as CSV",
+         tags=["Export", "Transfer Confirmations"],
+         responses={
+             200: {"description": "CSV file with confirmed transfers"},
+             404: {"description": "No confirmed transfers found"},
+             500: {"description": "Export generation failed"}
+         })
+async def export_confirmed_transfers():
+    """Export only confirmed transfer quantities"""
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+
+        cursor.execute("""
+            SELECT tc.sku_id, s.description, tc.confirmed_qty,
+                   tc.original_suggested_qty, tc.confirmed_by, tc.confirmed_at,
+                   CASE
+                       WHEN tc.original_suggested_qty > 0 THEN
+                           ROUND(((tc.confirmed_qty - tc.original_suggested_qty) / tc.original_suggested_qty) * 100, 2)
+                       ELSE 0
+                   END as variance_percent
+            FROM transfer_confirmations tc
+            INNER JOIN skus s ON tc.sku_id = s.sku_id
+            WHERE tc.confirmed_qty > 0
+            ORDER BY tc.confirmed_at DESC
+        """)
+
+        confirmed_transfers = cursor.fetchall()
+        db.close()
+
+        if not confirmed_transfers:
+            raise HTTPException(status_code=404, detail="No confirmed transfers found")
+
+        # Generate CSV content
+        csv_lines = [
+            "SKU,Description,Confirmed Qty,Original Suggested,Variance %,Confirmed By,Confirmed At"
+        ]
+
+        for transfer in confirmed_transfers:
+            csv_lines.append(
+                f'"{transfer["sku_id"]}","{transfer["description"]}",{transfer["confirmed_qty"]},'
+                f'{transfer["original_suggested_qty"]},{transfer["variance_percent"]},'
+                f'"{transfer["confirmed_by"]}","{transfer["confirmed_at"]}"'
+            )
+
+        csv_content = "\n".join(csv_lines)
+
+        # Return CSV file
+        from fastapi.responses import Response
+        filename = f"confirmed-transfers-{datetime.now().strftime('%Y%m%d')}.csv"
+
+        return Response(
+            content=csv_content,
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Export generation failed: {str(e)}")
+
 # Serve the main dashboard
 @app.get("/dashboard")
 async def dashboard_redirect():
