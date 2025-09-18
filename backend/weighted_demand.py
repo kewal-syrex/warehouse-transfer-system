@@ -122,43 +122,63 @@ class WeightedDemandCalculator:
 
         return float(monthly_sales)
 
-    def get_weighted_3month_average(self, sku_id: str) -> dict:
+    def get_weighted_3month_average(self, sku_id: str, warehouse: str = 'kentucky') -> dict:
         """
-        Calculate 3-month weighted average demand with configurable weights
+        Calculate 3-month weighted average demand with configurable weights for specific warehouse
 
         Default weights: [0.5, 0.3, 0.2] (most recent month gets highest weight)
-        This approach reduces noise while maintaining responsiveness to recent trends
+        This approach reduces noise while maintaining responsiveness to recent trends.
+        Warehouse-specific calculations ensure accurate demand forecasting per location.
 
         Args:
             sku_id: SKU identifier to calculate average for
+            warehouse: Warehouse to calculate demand for ('kentucky' or 'burnaby')
 
         Returns:
             Dictionary containing:
-            - weighted_average: Calculated weighted average demand
+            - weighted_average: Calculated weighted average demand for specified warehouse
             - sample_months: Number of months used in calculation
             - data_quality: Quality score (0-1) based on data completeness
             - calculation_method: Method used for transparency
+            - warehouse: Warehouse this calculation applies to
 
         Example:
-            >>> calculator.get_weighted_3month_average('CHG-001')
+            >>> calculator.get_weighted_3month_average('CHG-001', 'burnaby')
             {
                 'weighted_average': 145.6,
                 'sample_months': 3,
                 'data_quality': 1.0,
-                'calculation_method': 'weighted_3mo_standard'
+                'calculation_method': 'weighted_3mo_standard',
+                'warehouse': 'burnaby'
             }
         """
         try:
+            # Validate warehouse parameter
+            if warehouse.lower() not in ['kentucky', 'burnaby']:
+                logger.warning(f"Invalid warehouse '{warehouse}' for SKU {sku_id}, defaulting to kentucky")
+                warehouse = 'kentucky'
+
             # Parse weights from configuration
             weights_str = self.config.get('weighted_3mo_weights', '0.5,0.3,0.2')
             weights = [float(w.strip()) for w in weights_str.split(',')]
 
-            # Get last 3 months of corrected demand data
-            query = """
+            # Dynamic column mapping based on warehouse
+            warehouse = warehouse.lower()
+            if warehouse == 'burnaby':
+                demand_col = 'corrected_demand_burnaby'
+                sales_col = 'burnaby_sales'
+                stockout_col = 'burnaby_stockout_days'
+            else:  # kentucky (default)
+                demand_col = 'corrected_demand_kentucky'
+                sales_col = 'kentucky_sales'
+                stockout_col = 'kentucky_stockout_days'
+
+            # Get last 3 months of warehouse-specific corrected demand data
+            query = f"""
             SELECT
-                corrected_demand_kentucky,
-                kentucky_sales,
-                kentucky_stockout_days,
+                {demand_col} as corrected_demand,
+                {sales_col} as sales,
+                {stockout_col} as stockout_days,
                 `year_month`
             FROM monthly_sales
             WHERE sku_id = %s
@@ -173,7 +193,8 @@ class WeightedDemandCalculator:
                     'weighted_average': 0.0,
                     'sample_months': 0,
                     'data_quality': 0.0,
-                    'calculation_method': 'no_data'
+                    'calculation_method': 'no_data',
+                    'warehouse': warehouse
                 }
 
             # Calculate weighted average using corrected demand where available
@@ -186,7 +207,8 @@ class WeightedDemandCalculator:
                     break
 
                 # Use corrected demand if available, otherwise raw sales (convert Decimal to float)
-                demand = month_data['corrected_demand_kentucky'] or month_data['kentucky_sales'] or 0
+                # Now using warehouse-agnostic column aliases
+                demand = month_data['corrected_demand'] or month_data['sales'] or 0
                 demand = float(demand) if demand is not None else 0.0
 
                 if demand >= 0:  # Include zero demand (valid data point)
@@ -212,43 +234,63 @@ class WeightedDemandCalculator:
                 'weighted_average': round(weighted_average, 2),
                 'sample_months': valid_months,
                 'data_quality': round(data_quality, 2),
-                'calculation_method': method
+                'calculation_method': method,
+                'warehouse': warehouse
             }
 
         except Exception as e:
-            logger.error(f"Failed to calculate 3-month weighted average for {sku_id}: {e}")
+            logger.error(f"Failed to calculate 3-month weighted average for {sku_id} ({warehouse}): {e}")
             return {
                 'weighted_average': 0.0,
                 'sample_months': 0,
                 'data_quality': 0.0,
-                'calculation_method': 'calculation_error'
+                'calculation_method': 'calculation_error',
+                'warehouse': warehouse
             }
 
-    def get_weighted_6month_average(self, sku_id: str) -> dict:
+    def get_weighted_6month_average(self, sku_id: str, warehouse: str = 'kentucky') -> dict:
         """
         Calculate 6-month exponentially weighted moving average for stable SKUs
 
         Uses exponential decay to give more weight to recent months while incorporating
         longer-term trends. Particularly effective for Class A and stable (X) SKUs.
+        Supports warehouse-specific calculations for accurate demand forecasting.
 
         Args:
             sku_id: SKU identifier to calculate average for
+            warehouse: Warehouse to calculate demand for ('kentucky' or 'burnaby')
 
         Returns:
-            Dictionary with weighted average and calculation metadata
+            Dictionary with weighted average and calculation metadata including warehouse info
         """
         try:
+            # Validate warehouse parameter
+            if warehouse.lower() not in ['kentucky', 'burnaby']:
+                logger.warning(f"Invalid warehouse '{warehouse}' for SKU {sku_id}, defaulting to kentucky")
+                warehouse = 'kentucky'
+
             # Check if 6-month averaging is enabled
             if not self.config.get('weighted_6mo_enabled', True):
-                return self.get_weighted_3month_average(sku_id)
+                return self.get_weighted_3month_average(sku_id, warehouse)
 
-            # Get last 6 months of data
-            query = """
+            # Dynamic column mapping based on warehouse
+            warehouse = warehouse.lower()
+            if warehouse == 'burnaby':
+                demand_col = 'corrected_demand_burnaby'
+                sales_col = 'burnaby_sales'
+                stockout_col = 'burnaby_stockout_days'
+            else:  # kentucky (default)
+                demand_col = 'corrected_demand_kentucky'
+                sales_col = 'kentucky_sales'
+                stockout_col = 'kentucky_stockout_days'
+
+            # Get last 6 months of warehouse-specific data
+            query = f"""
             SELECT
-                corrected_demand_kentucky,
-                kentucky_sales,
+                {demand_col} as corrected_demand,
+                {sales_col} as sales,
                 `year_month`,
-                kentucky_stockout_days
+                {stockout_col} as stockout_days
             FROM monthly_sales
             WHERE sku_id = %s
             ORDER BY `year_month` DESC
@@ -258,7 +300,7 @@ class WeightedDemandCalculator:
             sales_data = database.execute_query(query, (sku_id,))
 
             if len(sales_data) < 3:  # Need at least 3 months for 6-month calc
-                return self.get_weighted_3month_average(sku_id)
+                return self.get_weighted_3month_average(sku_id, warehouse)
 
             # Exponential decay weights (alpha = 0.3 for 6-month smoothing)
             alpha = 0.3
@@ -273,7 +315,8 @@ class WeightedDemandCalculator:
             valid_months = 0
 
             for i, month_data in enumerate(sales_data):
-                demand = month_data['corrected_demand_kentucky'] or month_data['kentucky_sales'] or 0
+                # Use warehouse-agnostic column aliases
+                demand = month_data['corrected_demand'] or month_data['sales'] or 0
                 demand = float(demand) if demand is not None else 0.0
 
                 if demand >= 0:
@@ -287,16 +330,17 @@ class WeightedDemandCalculator:
                 'weighted_average': round(weighted_sum, 2),
                 'sample_months': valid_months,
                 'data_quality': round(data_quality, 2),
-                'calculation_method': 'exponential_6mo'
+                'calculation_method': 'exponential_6mo',
+                'warehouse': warehouse
             }
 
         except Exception as e:
-            logger.error(f"Failed to calculate 6-month weighted average for {sku_id}: {e}")
-            return self.get_weighted_3month_average(sku_id)  # Fallback to 3-month
+            logger.error(f"Failed to calculate 6-month weighted average for {sku_id} ({warehouse}): {e}")
+            return self.get_weighted_3month_average(sku_id, warehouse)  # Fallback to 3-month
 
-    def calculate_demand_volatility(self, sku_id: str) -> dict:
+    def calculate_demand_volatility(self, sku_id: str, warehouse: str = 'kentucky') -> dict:
         """
-        Calculate demand volatility using coefficient of variation (CV)
+        Calculate demand volatility using coefficient of variation (CV) for specific warehouse
 
         Volatility Classification:
         - Low (CV < 0.25): Stable, predictable demand
@@ -305,17 +349,31 @@ class WeightedDemandCalculator:
 
         Args:
             sku_id: SKU identifier to analyze
+            warehouse: Warehouse to calculate volatility for ('kentucky' or 'burnaby')
 
         Returns:
-            Dictionary containing volatility metrics and classification
+            Dictionary containing volatility metrics and classification with warehouse info
         """
         try:
-            # Get 12 months of demand data for volatility calculation
-            # Using the same pattern that works in calculations.py
-            query = """
+            # Validate warehouse parameter
+            if warehouse.lower() not in ['kentucky', 'burnaby']:
+                logger.warning(f"Invalid warehouse '{warehouse}' for SKU {sku_id}, defaulting to kentucky")
+                warehouse = 'kentucky'
+
+            # Dynamic column mapping based on warehouse
+            warehouse = warehouse.lower()
+            if warehouse == 'burnaby':
+                demand_col = 'corrected_demand_burnaby'
+                sales_col = 'burnaby_sales'
+            else:  # kentucky (default)
+                demand_col = 'corrected_demand_kentucky'
+                sales_col = 'kentucky_sales'
+
+            # Get 12 months of warehouse-specific demand data for volatility calculation
+            query = f"""
             SELECT
-                corrected_demand_kentucky,
-                kentucky_sales,
+                {demand_col} as corrected_demand,
+                {sales_col} as sales,
                 `year_month`
             FROM monthly_sales
             WHERE sku_id = %s
@@ -331,13 +389,15 @@ class WeightedDemandCalculator:
                     'coefficient_variation': 0.0,
                     'volatility_class': 'insufficient_data',
                     'sample_size': len(sales_data),
-                    'mean_demand': 0.0
+                    'mean_demand': 0.0,
+                    'warehouse': warehouse
                 }
 
             # Extract demand values (convert Decimal to float)
             demands = []
             for month_data in sales_data:
-                demand = month_data['corrected_demand_kentucky'] or month_data['kentucky_sales'] or 0
+                # Use warehouse-agnostic column aliases
+                demand = month_data['corrected_demand'] or month_data['sales'] or 0
                 demands.append(float(demand) if demand is not None else 0.0)
 
             # Calculate statistical measures
@@ -363,26 +423,29 @@ class WeightedDemandCalculator:
                 'coefficient_variation': round(cv, 3),
                 'volatility_class': volatility_class,
                 'sample_size': len(demands),
-                'mean_demand': round(mean_demand, 2)
+                'mean_demand': round(mean_demand, 2),
+                'warehouse': warehouse
             }
 
         except Exception as e:
-            logger.error("Failed to calculate demand volatility for " + str(sku_id) + ": " + str(e))
+            logger.error(f"Failed to calculate demand volatility for {sku_id} ({warehouse}): {e}")
             return {
                 'standard_deviation': 0.0,
                 'coefficient_variation': 0.0,
                 'volatility_class': 'calculation_error',
                 'sample_size': 0,
-                'mean_demand': 0.0
+                'mean_demand': 0.0,
+                'warehouse': warehouse
             }
 
     def get_enhanced_demand_calculation(self, sku_id: str, abc_class: str, xyz_class: str,
-                                      current_month_sales: int = 0, stockout_days: int = 0) -> dict:
+                                      current_month_sales: int = 0, stockout_days: int = 0,
+                                      warehouse: str = 'kentucky') -> dict:
         """
         Calculate enhanced demand using weighted averages, volatility analysis, and ABC-XYZ strategy
 
         This is the main method that replaces single-month demand calculations with
-        sophisticated weighted averages tailored to each SKU's characteristics.
+        sophisticated weighted averages tailored to each SKU's characteristics and warehouse.
 
         Strategy by Classification:
         - AX (High value, stable): 6-month weighted average for maximum stability
@@ -395,13 +458,14 @@ class WeightedDemandCalculator:
             xyz_class: XYZ classification (X, Y, Z)
             current_month_sales: Latest month sales (fallback if needed)
             stockout_days: Stockout days for correction factor
+            warehouse: Warehouse to calculate demand for ('kentucky' or 'burnaby')
 
         Returns:
-            Dictionary with enhanced demand calculation and supporting metrics
+            Dictionary with enhanced demand calculation and supporting metrics including warehouse info
         """
         try:
-            # Get volatility analysis first
-            volatility_metrics = self.calculate_demand_volatility(sku_id)
+            # Get volatility analysis first for the specified warehouse
+            volatility_metrics = self.calculate_demand_volatility(sku_id, warehouse)
             volatility_class = volatility_metrics['volatility_class']
             cv = volatility_metrics['coefficient_variation']
 
@@ -422,12 +486,12 @@ class WeightedDemandCalculator:
                 # Medium volatility items use 3-month weighted average
                 use_6mo_average = False
 
-            # Get appropriate weighted average
+            # Get appropriate weighted average for the specified warehouse
             if use_6mo_average:
-                avg_result = self.get_weighted_6month_average(sku_id)
+                avg_result = self.get_weighted_6month_average(sku_id, warehouse)
                 primary_method = '6mo_weighted'
             else:
-                avg_result = self.get_weighted_3month_average(sku_id)
+                avg_result = self.get_weighted_3month_average(sku_id, warehouse)
                 primary_method = '3mo_weighted'
 
             weighted_demand = avg_result['weighted_average']
@@ -480,7 +544,8 @@ class WeightedDemandCalculator:
                 # Strategy context
                 'abc_class': abc_class,
                 'xyz_class': xyz_class,
-                'strategy_reason': self._get_strategy_reason(abc_class, xyz_class, volatility_class, use_6mo_average)
+                'strategy_reason': self._get_strategy_reason(abc_class, xyz_class, volatility_class, use_6mo_average),
+                'warehouse': warehouse
             }
 
             # Store/update demand statistics in database
@@ -489,13 +554,14 @@ class WeightedDemandCalculator:
             return result
 
         except Exception as e:
-            logger.error(f"Enhanced demand calculation failed for {sku_id}: {e}")
+            logger.error(f"Enhanced demand calculation failed for {sku_id} ({warehouse}): {e}")
             # Fallback to corrected current month
             fallback_demand = self.correct_monthly_demand(current_month_sales, stockout_days, 30)
             return {
                 'enhanced_demand': fallback_demand,
                 'calculation_method': 'error_fallback',
-                'error': str(e)
+                'error': str(e),
+                'warehouse': warehouse
             }
 
     def _get_strategy_reason(self, abc_class: str, xyz_class: str, volatility_class: str, use_6mo: bool) -> str:

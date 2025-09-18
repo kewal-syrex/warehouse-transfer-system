@@ -1,0 +1,288 @@
+sku_id,quantity,destination,order_date,expected_date,order_type,status,notes
+UB-YIX30L-BS,800,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB-YT12B-BS,200,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB-YT4B-BS,400,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB-YT7B-BS,500,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB-YTX12-BS,1500,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB-YTX14-BS,2000,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB-YTX14AH-BS,300,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB-YTX20CH-BS,200,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB-YTX20L-BS,1200,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB-YTX24HL-BS,200,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB-YTX4L-BS,1000,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB-YTX5L-BS,1000,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB-YTX7A-BS,200,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB-YTX9-BS,400,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB-YTZ10S-BS,700,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB12100-S,700,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB12120,1000,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB1213,200,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB12220,200,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB1234,200,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB12350,100,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB1250,600,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB1270,600,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB1290,700,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB6120,200,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB613,100,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+UB645,600,burnaby,2025-06-11,2025-09-29,VELA,ordered,VL050
+CSC-R44,1600,kentucky,2025-08-11,2025-09-29,Bolin,ordered,BOL073-US
+CSC-R56,1000,kentucky,2025-08-11,2025-09-29,Bolin,ordered,BOL073-US
+CSC-S39,300,kentucky,2025-08-11,2025-09-29,Bolin,ordered,BOL073-US
+CSC-S50,200,kentucky,2025-08-11,2025-09-29,Bolin,ordered,BOL073-US
+CSC-S52,600,kentucky,2025-08-11,2025-09-29,Bolin,ordered,BOL073-US
+CSC-S55,400,kentucky,2025-08-11,2025-09-29,Bolin,ordered,BOL073-US
+AP-4317943,432,kentucky,2025-08-11,2025-09-29,Chuzhou Ice Maker Refrigeration Technology Co,ordered,CIM003-US
+AP-5303918344,360,kentucky,2025-08-11,2025-09-29,Chuzhou Ice Maker Refrigeration Technology Co,ordered,CIM003-US
+AP-D7824706Q,432,kentucky,2025-08-11,2025-09-29,Chuzhou Ice Maker Refrigeration Technology Co,ordered,CIM003-US
+BD-18V-NICD-15,504,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+BD-18V-NICD-15,800,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+BD-3V-NICD-13,60,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+BO-18V-NICD-13,60,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+BT-1007,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+BT-183342,100,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+BT-905,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+BT-909,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+CAR-PLUG,200,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+CGA-S007A,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+CGA-S007A-CH,25,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+CR-V3-CH,25,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+DE-12V-NICD-13,100,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+DE-12V-NICD-13,240,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+DE-14V-NICD-13,100,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+DE-18V-NICD-13,360,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+DMW-BCF10,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+DMW-BLD10,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+DMW-BMB9,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+DR-7V-NIMH-15,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+DT-BP12RT,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+EN-EL10,500,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+EN-EL10,500,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+EN-EL11,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+EN-EL11-CH,25,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+EN-EL19,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+FLUKE-744,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+FUJ-NP-40,26,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+FUJ-NP-40,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+FUJ-NP-40-CH,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+FUJ-NP-60,100,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+GAMMABAT,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+GAMMACH,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+HHR-P103,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+HHR-P103,100,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+HI-12B-NICD-13,100,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+HI-12B-NICD-13,204,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+ICOM-BP210-CH,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+IPOD-3G,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+KLIC-8000,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+KNB-29N,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+KNB-29N,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+KNB-35L,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+LI-50B,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+LI-50B,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+LP-12V-NICD-13,300,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+LP-14V-NICD-20,200,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+LP-14V-NIMH-33,48,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+LP-14V-NIMH-33,100,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+LP-E8-CH,25,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+MDR-RF4000,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+MK-12V-NICD-13,100,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+MK-14V-NICD-13,400,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+MK-7V-NICD-13,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+MK-9V-NICD-13,100,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+MK-9V-NICD-STK,200,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+ML-BATT5R,100,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+MT-HKNN4002,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+MT-HNN9628,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+MT-HNN9628-CLIP,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+MT-MINITOR-V,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+MT-MINITOR-V,600,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+MW-18V-NICD-13,150,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+NB-11L,1,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+NB-11L,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+NB-11L,200,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+NB-11L-CH,25,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+NB-11L-CH,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+NB-2LH,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+NB-2LH-CH,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+NB-4L,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+NB-6L,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+NB-7L,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+NP-BG1,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+NP-BG1-CH,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+NP-BN1,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+NP-F970,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+P-P511,100,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+PL-CS50,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+RY-12V-NICD-13,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+RY-14V-NICD-13,400,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+RY-18V-NICD-13,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+SLB-10A,100,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+SN-BA150,100,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+SN-BA90,4,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+SN-BA90,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+VX-FNB-V83,100,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+VX-FNB-V83,200,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+VX-FNB-V83-CH,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+VX-FNB-V83-CH,50,burnaby,2025-06-09,2025-09-18,King Power,ordered,DBK142
+ALB-241555401,3000,burnaby,2025-06-11,2025-09-22,D-LIGHT,ordered,DLB011
+ALB-WB01X10239,3000,burnaby,2025-06-11,2025-09-22,D-LIGHT,ordered,DLB011
+ALB-WP4452164,3000,burnaby,2025-06-11,2025-09-22,D-LIGHT,ordered,DLB011
+AP-131450300,100,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+AP-134511600,100,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+AP-2187172,96,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+AP-240323001,96,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+AP-240356401,96,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+AP-240363701,96,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+AP-240530701,100,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+AP-3363394,96,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+AP-5231EL1001C,100,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+AP-5231EL1003B,100,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+AP-5304477398,100,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+AP-5304486359,100,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+AP-5304506471,200,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+AP-97012248,96,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+AP-DC61-02610A,100,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+AP-DE64-00760A,100,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+AP-MJX41178908,100,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+AP-W10518394,96,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+AP-WP33001003,200,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+AP-WP33001808,100,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+AP-WP53-0918,100,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+AP-WP8273103,100,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+AP-WPW10276397,108,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+CK-8181859,100,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+CK-WE1M652,100,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+HE-316075104,200,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+HE-WB44T10010,100,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+HE-WP74010750,100,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+HE-WP7406P428-60,100,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+MP-5304464116,100,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+MP-DE74-20002,100,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+MP-DE74-20015,100,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+MP-P23,100,burnaby,2025-06-11,2025-09-22,Mingxing Appliance,ordered,MX068
+AP-131450300,100,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-134412860,100,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-165314,100,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-218428101,200,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-2187172,96,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-240323001,108,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-240351601,100,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-240530701,100,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-279640,100,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-279834,100,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-280145,100,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-4389102,100,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-4681EA2001T,90,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-5304506471,200,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-5304513033,100,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-809006501,100,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-8318084,100,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-DA31-00146E,100,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-DC32-00007A,100,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-DE64-00760A,100,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-W10111905,200,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-WP33001003,500,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-WP33001808,100,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-WP3390719,100,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-WP4391960,100,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-WP53-0918,100,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-WPW10276397,108,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+AP-WPW10509257,200,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+CK-WE1M654,100,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+MP-203500,100,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+MP-5304464116,100,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+MP-NTNT-A108,100,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+MP-P23,100,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+MP-WB39X10032,100,burnaby,2025-07-11,2025-09-22,Mingxing Appliance,ordered,MX069
+RC-AA59-00600A,100,burnaby,2025-08-08,2025-09-22,Yangzhou Young,ordered,YYE031
+RC-AA59-00666A,100,burnaby,2025-08-08,2025-09-22,Yangzhou Young,ordered,YYE031
+RC-CT-90302,100,burnaby,2025-08-08,2025-09-22,Yangzhou Young,ordered,YYE031
+CAP-97F5705,100,burnaby,2025-07-11,2025-09-22,Jiayang,ordered,JC015
+CAP-97F9833,100,burnaby,2025-07-11,2025-09-22,Jiayang,ordered,JC015
+CAP-97F9834,300,burnaby,2025-07-11,2025-09-22,Jiayang,ordered,JC015
+CAP-97F9895,200,burnaby,2025-07-11,2025-09-22,Jiayang,ordered,JC015
+CAP-97F9897,200,burnaby,2025-07-11,2025-09-22,Jiayang,ordered,JC015
+AP-240338001,300,burnaby,2025-07-11,2025-09-18,Partsnet,ordered,PN041
+AP-3406107,200,burnaby,2025-07-11,2025-09-18,Partsnet,ordered,PN041
+AP-341241,750,burnaby,2025-07-11,2025-09-18,Partsnet,ordered,PN041
+AP-4581EL2002C,200,burnaby,2025-07-11,2025-09-18,Partsnet,ordered,PN041
+AP-ADQ56656401,200,burnaby,2025-07-11,2025-09-18,Partsnet,ordered,PN041
+AP-W10837240,200,burnaby,2025-07-11,2025-09-18,Partsnet,ordered,PN041
+AP-WPW10314173,300,burnaby,2025-07-11,2025-09-18,Partsnet,ordered,PN041
+LM-125-527,200,burnaby,2025-07-10,2025-09-29,JUN AN,ordered,JA018
+LM-1408315-S,100,burnaby,2025-07-10,2025-09-29,JUN AN,ordered,JA018
+LM-231855S,100,burnaby,2025-07-10,2025-09-29,JUN AN,ordered,JA018
+LM-2508301-S,300,burnaby,2025-07-10,2025-09-29,JUN AN,ordered,JA018
+LM-2508304-S,300,burnaby,2025-07-10,2025-09-29,JUN AN,ordered,JA018
+LM-530047721,400,burnaby,2025-07-10,2025-09-29,JUN AN,ordered,JA018
+LM-532194653,200,burnaby,2025-07-10,2025-09-29,JUN AN,ordered,JA018
+LM-725-0201,100,burnaby,2025-07-10,2025-09-29,JUN AN,ordered,JA018
+LM-748-0377E,100,burnaby,2025-07-10,2025-09-29,JUN AN,ordered,JA018
+LM-946-04661A,200,burnaby,2025-07-10,2025-09-29,JUN AN,ordered,JA018
+LM-AM116304,100,burnaby,2025-07-10,2025-09-29,JUN AN,ordered,JA018
+SP-RC12YC,100,burnaby,2025-07-10,2025-09-29,JUN AN,ordered,JA018
+SP-RN12YC,200,burnaby,2025-07-10,2025-09-29,JUN AN,ordered,JA018
+CALLAWAY-UPRO,50,burnaby,2025-07-11,,King Power,ordered,DBK143
+CGA-S006A,50,burnaby,2025-07-11,,King Power,ordered,DBK143
+FUJ-NP-85,50,burnaby,2025-07-11,,King Power,ordered,DBK143
+GN-9120,50,burnaby,2025-07-11,,King Power,ordered,DBK143
+LP-14V-NIMH-33,120,burnaby,2025-07-11,,King Power,ordered,DBK143
+LP-E5,50,burnaby,2025-07-11,,King Power,ordered,DBK143
+LP-E8,50,burnaby,2025-07-11,,King Power,ordered,DBK143
+NB-4L,150,burnaby,2025-07-11,,King Power,ordered,DBK143
+P-P511,50,burnaby,2025-07-11,,King Power,ordered,DBK143
+ROOMBA-500-20,50,burnaby,2025-07-11,,King Power,ordered,DBK143
+BD-12V-NICD-13,100,burnaby,2025-08-11,,King Power,ordered,DBK144
+BO-14V-NICD-13,100,burnaby,2025-08-11,,King Power,ordered,DBK144
+BP-38,200,burnaby,2025-08-11,,King Power,ordered,DBK144
+BP-827,50,burnaby,2025-08-11,,King Power,ordered,DBK144
+BT-1008,300,burnaby,2025-08-11,,King Power,ordered,DBK144
+BT-446,150,burnaby,2025-08-11,,King Power,ordered,DBK144
+BT-905,150,burnaby,2025-08-11,,King Power,ordered,DBK144
+CM-TR103,150,burnaby,2025-08-11,,King Power,ordered,DBK144
+COBRA-FA-BP,300,burnaby,2025-08-11,,King Power,ordered,DBK144
+CR-V3-CH,50,burnaby,2025-08-11,,King Power,ordered,DBK144
+DE-12V-NICD-13,180,burnaby,2025-08-11,,King Power,ordered,DBK144
+DE-9V-NICD-13,48,burnaby,2025-08-11,,King Power,ordered,DBK144
+DT-BP12RT,100,burnaby,2025-08-11,,King Power,ordered,DBK144
+DT-BP20R,50,burnaby,2025-08-11,,King Power,ordered,DBK144
+EN-EL12,50,burnaby,2025-08-11,,King Power,ordered,DBK144
+FLUKE-744,100,burnaby,2025-08-11,,King Power,ordered,DBK144
+FUJ-NP-40,150,burnaby,2025-08-11,,King Power,ordered,DBK144
+GA-GPSMAP,50,burnaby,2025-08-11,,King Power,ordered,DBK144
+GEB221,50,burnaby,2025-08-11,,King Power,ordered,DBK144
+IPOD-VID-60GB,100,burnaby,2025-08-11,,King Power,ordered,DBK144
+KNB-15-NICD,150,burnaby,2025-08-11,,King Power,ordered,DBK144
+KNB-29N,150,burnaby,2025-08-11,,King Power,ordered,DBK144
+KNB-35L,100,burnaby,2025-08-11,,King Power,ordered,DBK144
+LI-50B,50,burnaby,2025-08-11,,King Power,ordered,DBK144
+LP-12V-NICD-13,100,burnaby,2025-08-11,,King Power,ordered,DBK144
+MDR-RF4000,150,burnaby,2025-08-11,,King Power,ordered,DBK144
+MK-12V-NICD-13,250,burnaby,2025-08-11,,King Power,ordered,DBK144
+MK-7V-NICD-13,50,burnaby,2025-08-11,,King Power,ordered,DBK144
+MT-HNN9008,50,burnaby,2025-08-11,,King Power,ordered,DBK144
+MT-HNN9008-CLIP,50,burnaby,2025-08-11,,King Power,ordered,DBK144
+MT-HNN9049-CLIP,50,burnaby,2025-08-11,,King Power,ordered,DBK144
+MT-HNN9049-NICD,50,burnaby,2025-08-11,,King Power,ordered,DBK144
+MT-HNN9628-CLIP,50,burnaby,2025-08-11,,King Power,ordered,DBK144
+MT-HNN9628-NICD,50,burnaby,2025-08-11,,King Power,ordered,DBK144
+NB-11L,50,burnaby,2025-08-11,,King Power,ordered,DBK144
+NB-4L-CH,50,burnaby,2025-08-11,,King Power,ordered,DBK144
+NB-6L,200,burnaby,2025-08-11,,King Power,ordered,DBK144
+NB-6L-CH,50,burnaby,2025-08-11,,King Power,ordered,DBK144
+RA-M1-EP,100,burnaby,2025-08-11,,King Power,ordered,DBK144
+RY-12V-NICD-13,100,burnaby,2025-08-11,,King Power,ordered,DBK144
+SD-DC-17,50,burnaby,2025-08-11,,King Power,ordered,DBK144
+SN-BA300,50,burnaby,2025-08-11,,King Power,ordered,DBK144
+SS-7V-NIMH-15,100,burnaby,2025-08-11,,King Power,ordered,DBK144
+TR-R8,50,burnaby,2025-08-11,,King Power,ordered,DBK144
+VX-FNB-80-LION,50,burnaby,2025-08-11,,King Power,ordered,DBK144
+VX-FNB-V83,100,burnaby,2025-08-11,,King Power,ordered,DBK144
+AP-240338001,200,burnaby,2025-08-11,,Partsnet,ordered,PN042
+AP-312959,600,burnaby,2025-08-11,,Partsnet,ordered,PN042
+AP-3406107,200,burnaby,2025-08-11,,Partsnet,ordered,PN042
+AP-4933DD3001B,500,burnaby,2025-08-11,,Partsnet,ordered,PN042
+AP-EBF49827801,400,burnaby,2025-08-11,,Partsnet,ordered,PN042
+AP-W10404050,200,burnaby,2025-08-11,,Partsnet,ordered,PN042
+AP-W10861225,300,burnaby,2025-08-11,,Partsnet,ordered,PN042

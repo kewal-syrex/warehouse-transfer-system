@@ -390,7 +390,7 @@
                                 <th>Available CA</th>
                                 <th>Burnaby Pending</th>
                                 <th>Kentucky Pending</th>
-                                <th>Monthly Demand</th>
+                                <th>KY Monthly Demand</th>
                                 <th>CA Monthly Demand</th>
                                 <th>Coverage</th>
                                 <th>Transfer Qty</th>
@@ -630,7 +630,8 @@
                         ${rec.days_until_arrival ? `<small class="text-muted">(${rec.days_until_arrival}d)</small>` : ''}
                     </td>
                     <td>
-                        ${rec.corrected_monthly_demand.toFixed(0)}
+                        <strong>${rec.corrected_monthly_demand.toFixed(0)}</strong>
+                        <small class="text-muted">(${(rec.kentucky_6month_supply || rec.corrected_monthly_demand * 6).toFixed(0)} for 6mo)</small>
                         ${stockoutBadge}
                     </td>
                     <td>

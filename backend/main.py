@@ -557,11 +557,11 @@ async def get_sku_details(sku_id: str):
         if not sku:
             raise HTTPException(status_code=404, detail="SKU not found")
         
-        # Sales history
+        # Sales history with both warehouse corrected demands
         cursor.execute("""
-            SELECT `year_month`, burnaby_sales, kentucky_sales, 
+            SELECT `year_month`, burnaby_sales, kentucky_sales,
                    burnaby_stockout_days, kentucky_stockout_days,
-                   corrected_demand_kentucky
+                   corrected_demand_kentucky, corrected_demand_burnaby
             FROM monthly_sales
             WHERE sku_id = %s
             ORDER BY `year_month` DESC
@@ -704,22 +704,29 @@ async def test_weighted_demand_calculation(sku_id: str):
         abc_class = sku_info['abc_code'] or 'B'
         xyz_class = sku_info['xyz_code'] or 'Y'
 
-        weighted_result = calc.weighted_demand_calculator.get_enhanced_demand_calculation(
-            sku_id, abc_class, xyz_class, kentucky_sales, stockout_days
+        # Test Kentucky weighted calculation
+        kentucky_weighted_result = calc.weighted_demand_calculator.get_enhanced_demand_calculation(
+            sku_id, abc_class, xyz_class, kentucky_sales, stockout_days, warehouse='kentucky'
         )
 
-        # Calculate percentage difference
+        # Test Burnaby weighted calculation to verify warehouse-specific results
+        burnaby_weighted_result = calc.weighted_demand_calculator.get_enhanced_demand_calculation(
+            sku_id, abc_class, xyz_class, kentucky_sales, stockout_days, warehouse='burnaby'
+        )
+
+        # Calculate percentage difference for Kentucky
         traditional_demand = traditional_corrected
-        weighted_demand = weighted_result['enhanced_demand']
+        kentucky_weighted_demand = kentucky_weighted_result['enhanced_demand']
+        burnaby_weighted_demand = burnaby_weighted_result['enhanced_demand']
 
         if traditional_demand > 0:
-            difference_pct = round(((weighted_demand - traditional_demand) / traditional_demand) * 100, 2)
+            ky_difference_pct = round(((kentucky_weighted_demand - traditional_demand) / traditional_demand) * 100, 2)
         else:
-            difference_pct = 0
+            ky_difference_pct = 0
 
         # Determine method preference based on data quality
-        sample_size = weighted_result.get('sample_size_months', 0)
-        data_quality = weighted_result.get('data_quality_score', 0.0)
+        sample_size = kentucky_weighted_result.get('sample_size_months', 0)
+        data_quality = kentucky_weighted_result.get('data_quality_score', 0.0)
 
         if sample_size >= 3 and data_quality >= 0.7:
             method_preference = "weighted_average"
@@ -741,14 +748,22 @@ async def test_weighted_demand_calculation(sku_id: str):
                 "burnaby_qty": sku_info['burnaby_qty'] or 0
             },
             "traditional_calculation": traditional_calculation,
-            "weighted_calculation": weighted_result,
+            "kentucky_weighted_calculation": kentucky_weighted_result,
+            "burnaby_weighted_calculation": burnaby_weighted_result,
+            "warehouse_comparison": {
+                "kentucky_demand": kentucky_weighted_demand,
+                "burnaby_demand": burnaby_weighted_demand,
+                "different_values": kentucky_weighted_demand != burnaby_weighted_demand,
+                "warehouse_specific": "Calculations use warehouse-specific sales data"
+            },
             "comparison": {
-                "difference_percentage": difference_pct,
+                "difference_percentage": ky_difference_pct,
                 "method_preference": method_preference,
                 "preference_reason": preference_reason,
                 "improvement_notes": [
                     "Weighted average reduces single-month volatility impact",
                     "ABC-XYZ classification optimizes calculation strategy",
+                    "Warehouse-specific calculations ensure accurate demand per location",
                     "Volatility metrics help identify forecast reliability"
                 ]
             }

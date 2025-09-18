@@ -1192,12 +1192,16 @@ class TransferCalculator:
 
     def calculate_enhanced_transfer_with_economic_validation(self, sku_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Calculate transfer recommendation with economic validation and pending orders integration
+        Calculate transfer recommendation with economic validation and weighted demand calculations
 
-        This enhanced method prevents transfers that would leave the source warehouse (Burnaby)
-        understocked while incorporating pending orders data for accurate transfer calculations.
+        This enhanced method now uses sophisticated weighted moving averages instead of single-month
+        calculations to provide more stable and accurate demand predictions. It prevents transfers
+        that would leave the source warehouse (Burnaby) understocked while incorporating pending
+        orders data for accurate transfer calculations.
 
         Key Features:
+        - Weighted demand integration: Uses WeightedDemandCalculator for stable demand predictions
+        - Fallback mechanisms: Gracefully handles insufficient data with single-month calculations
         - Economic validation: prevents transfers when CA demand > KY demand * 1.5
         - Pending orders integration: accounts for incoming inventory in transfer calculations
         - Enhanced retention logic: adjusts Burnaby retention based on pending arrivals
@@ -1205,29 +1209,41 @@ class TransferCalculator:
         - Comprehensive coverage calculations including pending orders
         - Detailed business justification with pending orders context
 
+        Weighted Demand Integration:
+        1. Attempts to calculate weighted demand for both Kentucky and Burnaby warehouses
+        2. Uses 6-month weighted average for stable SKUs (ABC class A/B)
+        3. Uses 3-month weighted average for volatile SKUs (XYZ class Z)
+        4. Falls back to single-month stockout-corrected calculation for new SKUs
+        5. Applies exponential decay weights to recent months for better forecasting
+        6. Logs calculation method used for debugging and quality assurance
+
         Business Logic:
-        1. Retrieves pending orders data from v_pending_quantities view
-        2. Calculates current position as kentucky_qty + kentucky_pending
-        3. Adjusts Burnaby retention if significant pending arrivals expected
-        4. Determines transfer need considering pending orders already in transit
-        5. Provides comprehensive coverage metrics including pending orders impact
+        1. Calculates weighted demand using WeightedDemandCalculator
+        2. Retrieves pending orders data from v_pending_quantities view
+        3. Calculates current position as kentucky_qty + kentucky_pending
+        4. Adjusts Burnaby retention if significant pending arrivals expected
+        5. Determines transfer need considering pending orders already in transit
+        6. Provides comprehensive coverage metrics including pending orders impact
 
         Args:
             sku_data: Dictionary containing SKU information including sales and inventory data
 
         Returns:
             Dictionary with enhanced transfer recommendation including:
+            - Weighted demand calculations for both warehouses
             - All economic validation fields
             - Pending orders data (kentucky_pending, burnaby_pending, days_until_arrival)
             - Coverage calculations with and without pending orders
             - Flag indicating if pending orders were successfully included
+            - 6-month supply calculations for UI display
 
         Raises:
             ValueError: If required SKU data is missing or invalid
 
         Note:
-            If pending orders data cannot be retrieved, continues with pending quantities = 0
-            and sets pending_orders_included = False for transparency
+            If weighted demand calculation fails, falls back to database values or single-month
+            calculations. If pending orders data cannot be retrieved, continues with pending
+            quantities = 0 and sets pending_orders_included = False for transparency.
         """
         try:
             # Extract SKU data with proper null handling
@@ -1259,23 +1275,65 @@ class TransferCalculator:
                 days_until_arrival = None
                 pending_orders_included = False
 
-            # Step 2: Use corrected demand from database (already calculated with enhanced methods)
-            # Convert from Decimal to float to avoid type errors in calculations
-            kentucky_corrected_demand = float(sku_data.get('corrected_demand_kentucky', 0) or 0)
-            burnaby_corrected_demand = float(sku_data.get('corrected_demand_burnaby', 0) or 0)
-
-            # Fallback: if database values are 0 but we have sales, calculate them
-            if kentucky_corrected_demand == 0 and kentucky_sales > 0:
-                current_month = datetime.now().strftime('%Y-%m')
-                kentucky_corrected_demand = self.corrector.correct_monthly_demand_enhanced(
-                    sku_id, kentucky_sales, stockout_days, current_month
+            # Step 2: Use weighted demand calculations for more stable predictions
+            # This replaces single-month calculations with weighted moving averages to reduce
+            # the impact of monthly anomalies and provide more accurate demand forecasting
+            try:
+                # Get enhanced demand using WeightedDemandCalculator
+                # Uses 6-month weighted average for stable SKUs, 3-month for volatile SKUs
+                # Applies exponential decay weights (recent months weighted higher)
+                kentucky_enhanced_result = self.weighted_demand_calculator.get_enhanced_demand_calculation(
+                    sku_id, abc_class, xyz_class, kentucky_sales, stockout_days, warehouse='kentucky'
                 )
+                kentucky_corrected_demand = float(kentucky_enhanced_result.get('enhanced_demand', 0))
 
-            if burnaby_corrected_demand == 0 and burnaby_sales > 0:
-                current_month = datetime.now().strftime('%Y-%m')
-                burnaby_corrected_demand = self.corrector.correct_monthly_demand_enhanced(
-                    sku_id, burnaby_sales, burnaby_stockout_days, current_month
+                # Fallback mechanism: If weighted calculation returns 0 or insufficient data,
+                # use single-month calculation with stockout correction
+                if kentucky_corrected_demand == 0 and kentucky_sales > 0:
+                    current_month = datetime.now().strftime('%Y-%m')
+                    kentucky_corrected_demand = self.corrector.correct_monthly_demand_enhanced(
+                        sku_id, kentucky_sales, stockout_days, current_month
+                    )
+                    print(f"DEBUG: {sku_id} KY - fallback to single-month: {kentucky_corrected_demand:.2f}")
+                else:
+                    print(f"DEBUG: {sku_id} KY - using weighted demand: {kentucky_corrected_demand:.2f}")
+
+            except Exception as e:
+                logger.warning(f"WeightedDemandCalculator failed for KY {sku_id}: {e}")
+                # Final fallback: Use database value or calculate single-month with stockout correction
+                kentucky_corrected_demand = float(sku_data.get('corrected_demand_kentucky', 0) or 0)
+                if kentucky_corrected_demand == 0 and kentucky_sales > 0:
+                    current_month = datetime.now().strftime('%Y-%m')
+                    kentucky_corrected_demand = self.corrector.correct_monthly_demand_enhanced(
+                        sku_id, kentucky_sales, stockout_days, current_month
+                    )
+
+            # Calculate Burnaby demand using weighted calculation where applicable
+            try:
+                burnaby_enhanced_result = self.weighted_demand_calculator.get_enhanced_demand_calculation(
+                    sku_id, abc_class, xyz_class, burnaby_sales, burnaby_stockout_days, warehouse='burnaby'
                 )
+                burnaby_corrected_demand = float(burnaby_enhanced_result.get('enhanced_demand', 0))
+
+                # If weighted calculation returns 0 or fails, fallback to single-month with stockout correction
+                if burnaby_corrected_demand == 0 and burnaby_sales > 0:
+                    current_month = datetime.now().strftime('%Y-%m')
+                    burnaby_corrected_demand = self.corrector.correct_monthly_demand_enhanced(
+                        sku_id, burnaby_sales, burnaby_stockout_days, current_month
+                    )
+                    print(f"DEBUG: {sku_id} BY - fallback to single-month: {burnaby_corrected_demand:.2f}")
+                else:
+                    print(f"DEBUG: {sku_id} BY - using weighted demand: {burnaby_corrected_demand:.2f}")
+
+            except Exception as e:
+                logger.warning(f"WeightedDemandCalculator failed for BY {sku_id}: {e}")
+                # Fallback to database value or single-month calculation
+                burnaby_corrected_demand = float(sku_data.get('corrected_demand_burnaby', 0) or 0)
+                if burnaby_corrected_demand == 0 and burnaby_sales > 0:
+                    current_month = datetime.now().strftime('%Y-%m')
+                    burnaby_corrected_demand = self.corrector.correct_monthly_demand_enhanced(
+                        sku_id, burnaby_sales, burnaby_stockout_days, current_month
+                    )
 
             # Step 3: Economic Validation - Don't transfer if CA demand significantly higher than KY
             economic_validation_passed = True
@@ -1388,6 +1446,7 @@ class TransferCalculator:
                 'current_burnaby_qty': burnaby_qty,
                 'current_kentucky_qty': kentucky_qty,
                 'corrected_monthly_demand': kentucky_corrected_demand,
+                'kentucky_6month_supply': round(kentucky_corrected_demand * 6, 0),
                 'burnaby_corrected_demand': burnaby_corrected_demand,
                 'burnaby_monthly_demand': burnaby_corrected_demand,
                 'burnaby_6month_supply': round(burnaby_corrected_demand * 6, 0),
@@ -1601,6 +1660,7 @@ class TransferCalculator:
 
                 # Demand calculations
                 'corrected_monthly_demand': round(enhanced_kentucky_demand, 2),
+                'kentucky_6month_supply': round(enhanced_kentucky_demand * 6, 0),  # Add 6-month supply for UI display
                 'seasonal_multiplier': round(seasonal_multiplier, 2),
                 'growth_multiplier': round(growth_multiplier, 2),
 
@@ -2150,13 +2210,48 @@ class TransferCalculator:
 
 def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Dict[str, Any]]:
     """
-    Calculate transfer recommendations for all active SKUs using enhanced or basic calculations
+    Calculate transfer recommendations for all active SKUs with integrated weighted demand calculations
+
+    This function now integrates the WeightedDemandCalculator to replace single-month demand
+    calculations with sophisticated weighted moving averages, providing more stable and accurate
+    transfer recommendations for the main planning interface.
+
+    Key Enhancements:
+    - Weighted demand integration: Calculates 6-month and 3-month weighted averages
+    - Intelligent fallback: Uses single-month calculations for SKUs with insufficient history
+    - 6-month supply calculations: Provides UI-ready 6-month supply estimates
+    - Comprehensive error handling: Graceful degradation for calculation failures
+    - Strategy selection: Uses ABC-XYZ classification to select optimal weighting strategy
+
+    Weighted Demand Process:
+    1. Queries all active SKUs with latest sales and inventory data
+    2. For each SKU, calculates weighted demand for both Kentucky and Burnaby warehouses
+    3. Replaces database corrected_demand values with weighted calculations
+    4. Adds 6-month supply calculations for UI display formatting
+    5. Falls back to database values for SKUs where weighted calculation fails
+    6. Logs calculation improvements for quality assurance and debugging
+
+    Integration Benefits:
+    - Reduces impact of monthly demand anomalies
+    - Provides more stable transfer recommendations
+    - Improves forecasting accuracy for seasonal and volatile SKUs
+    - Maintains backward compatibility with existing data structures
+    - Enables better inventory planning with smoothed demand patterns
 
     Args:
         use_enhanced: Whether to use enhanced calculations with seasonal/growth analysis
 
     Returns:
-        List of transfer recommendations sorted by priority
+        List of transfer recommendations sorted by priority, each containing:
+        - Enhanced demand calculations using weighted averages
+        - 6-month supply estimates for UI display (kentucky_6month_supply, burnaby_6month_supply)
+        - All existing fields for backward compatibility
+        - Priority scoring based on weighted demand calculations
+
+    Note:
+        The function maintains full backward compatibility while enhancing demand accuracy.
+        SKUs with insufficient history (<3 months) automatically fall back to single-month
+        calculations with stockout correction.
     """
     try:
         print("DEBUG: calculate_all_transfer_recommendations called")
@@ -2198,6 +2293,75 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
         calculator = TransferCalculator()
         recommendations = []
 
+        # Process each SKU and calculate weighted demand for improved accuracy
+        # This integration replaces single-month demand calculations with sophisticated
+        # weighted moving averages to reduce monthly anomaly impact and improve forecasting
+        for sku_data in sku_data_list:
+            # Calculate weighted demand for Kentucky warehouse using our enhanced system
+            # Uses 6-month weighted average for stable SKUs, 3-month for volatile SKUs
+            # Falls back to single-month calculation for new SKUs with insufficient history
+            try:
+                kentucky_weighted_result = calculator.weighted_demand_calculator.get_enhanced_demand_calculation(
+                    sku_data['sku_id'],
+                    sku_data.get('abc_code', 'C'),
+                    sku_data.get('xyz_code', 'Z'),
+                    sku_data.get('kentucky_sales', 0),
+                    sku_data.get('kentucky_stockout_days', 0),
+                    warehouse='kentucky'
+                )
+
+                # Replace database corrected_demand with weighted calculation
+                if kentucky_weighted_result and kentucky_weighted_result.get('enhanced_demand', 0) > 0:
+                    sku_data['corrected_demand_kentucky'] = kentucky_weighted_result['enhanced_demand']
+                    # Add 6-month supply calculation for UI display
+                    sku_data['kentucky_6month_supply'] = round(kentucky_weighted_result['enhanced_demand'] * 6, 0)
+
+                    # Log the improvement for debugging
+                    logger.debug(f"SKU {sku_data['sku_id']} KY: Using weighted demand {kentucky_weighted_result['enhanced_demand']:.1f} "
+                                f"vs database {sku_data.get('corrected_demand_kentucky', 0)}")
+                else:
+                    # Keep database value as fallback and calculate 6-month supply
+                    current_demand = sku_data.get('corrected_demand_kentucky', 0) or 0
+                    sku_data['kentucky_6month_supply'] = round(float(current_demand) * 6, 0)
+
+            except Exception as e:
+                logger.warning(f"Failed to calculate Kentucky weighted demand for {sku_data['sku_id']}: {e}")
+                # Fallback to database value
+                current_demand = sku_data.get('corrected_demand_kentucky', 0) or 0
+                sku_data['kentucky_6month_supply'] = round(float(current_demand) * 6, 0)
+
+            # Calculate weighted demand for Burnaby warehouse using our enhanced system
+            try:
+                burnaby_weighted_result = calculator.weighted_demand_calculator.get_enhanced_demand_calculation(
+                    sku_data['sku_id'],
+                    sku_data.get('abc_code', 'C'),
+                    sku_data.get('xyz_code', 'Z'),
+                    sku_data.get('burnaby_sales', 0),
+                    sku_data.get('burnaby_stockout_days', 0),
+                    warehouse='burnaby'
+                )
+
+                # Replace database corrected_demand with weighted calculation
+                if burnaby_weighted_result and burnaby_weighted_result.get('enhanced_demand', 0) > 0:
+                    sku_data['corrected_demand_burnaby'] = burnaby_weighted_result['enhanced_demand']
+                    # Add 6-month supply calculation for UI display
+                    sku_data['burnaby_6month_supply'] = round(burnaby_weighted_result['enhanced_demand'] * 6, 0)
+
+                    # Log the improvement for debugging
+                    logger.debug(f"SKU {sku_data['sku_id']} BY: Using weighted demand {burnaby_weighted_result['enhanced_demand']:.1f} "
+                               f"vs database {sku_data.get('corrected_demand_burnaby', 0)}")
+                else:
+                    # Keep database value as fallback and calculate 6-month supply
+                    current_demand = sku_data.get('corrected_demand_burnaby', 0) or 0
+                    sku_data['burnaby_6month_supply'] = round(float(current_demand) * 6, 0)
+
+            except Exception as e:
+                logger.warning(f"Failed to calculate Burnaby weighted demand for {sku_data['sku_id']}: {e}")
+                # Fallback to database value
+                current_demand = sku_data.get('corrected_demand_burnaby', 0) or 0
+                sku_data['burnaby_6month_supply'] = round(float(current_demand) * 6, 0)
+
+
         for sku_data in sku_data_list:
             # Use the new economic validation method to prevent stockouts
             recommendation = calculator.calculate_enhanced_transfer_with_economic_validation(sku_data)
@@ -2207,6 +2371,10 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
                 recommendations.append(recommendation)
             else:
                 # Create a minimal recommendation for SKUs that failed calculation
+                # Use the weighted demand values that were calculated above
+                ky_demand = float(sku_data.get('corrected_demand_kentucky', 0) or 0)
+                ca_demand = float(sku_data.get('corrected_demand_burnaby', 0) or 0)
+
                 minimal_rec = {
                     'sku_id': sku_data['sku_id'],
                     'description': sku_data.get('description', ''),
@@ -2215,9 +2383,10 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
                     'xyz_class': sku_data.get('xyz_code', 'Z'),
                     'current_kentucky_qty': sku_data.get('kentucky_qty', 0),
                     'current_burnaby_qty': sku_data.get('burnaby_qty', 0),
-                    'corrected_monthly_demand': sku_data.get('corrected_demand_kentucky', 0),
-                    'burnaby_monthly_demand': sku_data.get('corrected_demand_burnaby', 0),
-                    'burnaby_6month_supply': round((sku_data.get('corrected_demand_burnaby', 0) or 0) * 6, 0),
+                    'corrected_monthly_demand': ky_demand,
+                    'kentucky_6month_supply': sku_data.get('kentucky_6month_supply', round(ky_demand * 6, 0)),
+                    'burnaby_monthly_demand': ca_demand,
+                    'burnaby_6month_supply': sku_data.get('burnaby_6month_supply', round(ca_demand * 6, 0)),
                     'recommended_transfer_qty': 0,
                     'priority': 'LOW',
                     'reason': 'Calculation failed or no recommendation needed',
