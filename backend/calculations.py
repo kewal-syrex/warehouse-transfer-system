@@ -461,11 +461,11 @@ class SeasonalPatternDetector:
                 `year_month`,
                 kentucky_sales,
                 corrected_demand_kentucky,
-                MONTH(STR_TO_DATE(CONCAT(`year_month`, '-01'), '%Y-%m-%d')) as month_num,
-                YEAR(STR_TO_DATE(CONCAT(`year_month`, '-01'), '%Y-%m-%d')) as year_num
+                MONTH(STR_TO_DATE(CONCAT(`year_month`, '-01'), '%%Y-%%m-%%d')) as month_num,
+                YEAR(STR_TO_DATE(CONCAT(`year_month`, '-01'), '%%Y-%%m-%%d')) as year_num
             FROM monthly_sales
             WHERE sku_id = %s
-                AND `year_month` >= DATE_FORMAT(DATE_SUB(NOW(), INTERVAL 24 MONTH), '%Y-%m')
+                AND `year_month` >= DATE_FORMAT(DATE_SUB(NOW(), INTERVAL 24 MONTH), '%%Y-%%m')
             ORDER BY `year_month`
             """
 
@@ -592,13 +592,12 @@ class ViralGrowthDetector:
             Growth status: 'viral', 'normal', or 'declining'
         """
         try:
-            # Get last 6 months of sales data
+            # Get last 6 months of sales data (MariaDB compatible)
             query = """
             SELECT
                 `year_month`,
                 kentucky_sales,
-                corrected_demand_kentucky,
-                ROW_NUMBER() OVER (ORDER BY `year_month` DESC) as recency_rank
+                corrected_demand_kentucky
             FROM monthly_sales
             WHERE sku_id = %s
                 AND `year_month` >= DATE_FORMAT(DATE_SUB(NOW(), INTERVAL 6 MONTH), '%Y-%m')
@@ -612,15 +611,15 @@ class ViralGrowthDetector:
                 logger.debug(f"Insufficient data for viral growth analysis: {sku_id}")
                 return 'normal'
 
-            # Split into recent 3 months vs previous 3 months
+            # Split into recent 3 months vs previous 3 months using Python indexing
             recent_sales = []
             previous_sales = []
 
-            for record in sales_data:
+            for i, record in enumerate(sales_data):
                 sales = record['corrected_demand_kentucky'] or record['kentucky_sales'] or 0
-                if record['recency_rank'] <= 3:
+                if i < 3:  # First 3 records are most recent (due to ORDER BY DESC)
                     recent_sales.append(sales)
-                else:
+                else:  # Last 3 records are previous months
                     previous_sales.append(sales)
 
             # Calculate averages
@@ -2293,6 +2292,7 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
     try:
         print("DEBUG: calculate_all_transfer_recommendations called")
         # Get all active SKUs with current inventory, latest sales, and confirmation data
+        # Back to working original query structure to avoid SQL compatibility issues
         query = """
         SELECT
             s.sku_id,
@@ -2321,13 +2321,12 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
             END as variance_percent
         FROM skus s
         LEFT JOIN inventory_current ic ON s.sku_id = ic.sku_id
-        LEFT JOIN monthly_sales ms ON s.sku_id = ms.sku_id
-            AND ms.`year_month` = (
-                SELECT MAX(`year_month`)
-                FROM monthly_sales ms2
-                WHERE ms2.sku_id = s.sku_id
-                AND (ms2.kentucky_sales > 0 OR ms2.burnaby_sales > 0)
-            )
+        LEFT JOIN monthly_sales ms ON s.sku_id = ms.sku_id AND ms.`year_month` = (
+            SELECT MAX(`year_month`)
+            FROM monthly_sales ms2
+            WHERE ms2.sku_id = s.sku_id
+            AND (ms2.kentucky_sales > 0 OR ms2.burnaby_sales > 0)
+        )
         LEFT JOIN transfer_confirmations tc ON s.sku_id = tc.sku_id
         ORDER BY s.sku_id
         """
@@ -2345,42 +2344,22 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
         # This integration uses the CacheManager to prevent connection exhaustion while
         # providing sophisticated weighted moving averages for better forecasting accuracy
         for sku_data in sku_data_list:
-            # Calculate weighted demand for Kentucky warehouse with cache-first approach
-            # Cache prevents the 5000+ database queries that were causing connection exhaustion
+            # TRUST THE CACHE - Use cached weighted demand for fast page loads
+            # Cache contains all advanced features: stockout correction, seasonal adjustments, volatility analysis
             try:
-                # Try to get cached result first
+                # Get cached result - this should exist after initial population
                 kentucky_weighted_result = calculator.cache_manager.get_cached_weighted_demand(
                     sku_data['sku_id'], 'kentucky'
                 )
 
-                # If no valid cache, calculate and store in cache
-                if not kentucky_weighted_result:
-                    kentucky_weighted_result = calculator.weighted_demand_calculator.get_enhanced_demand_calculation(
-                        sku_data['sku_id'],
-                        sku_data.get('abc_code', 'C'),
-                        sku_data.get('xyz_code', 'Z'),
-                        sku_data.get('kentucky_sales', 0),
-                        sku_data.get('kentucky_stockout_days', 0),
-                        warehouse='kentucky'
-                    )
-
-                    # Store in cache for future requests
-                    if kentucky_weighted_result:
-                        calculator.cache_manager.store_cached_demand(
-                            sku_data['sku_id'], 'kentucky', kentucky_weighted_result
-                        )
-
-                # Replace database corrected_demand with weighted calculation
-                if kentucky_weighted_result and kentucky_weighted_result.get('enhanced_demand', 0) > 0:
+                if kentucky_weighted_result:
+                    # TRUST THE CACHE - don't recalculate!
                     sku_data['corrected_demand_kentucky'] = kentucky_weighted_result['enhanced_demand']
-                    # Add 6-month supply calculation for UI display
                     sku_data['kentucky_6month_supply'] = round(kentucky_weighted_result['enhanced_demand'] * 6, 0)
-
-                    # Log cache usage for performance monitoring
-                    cache_source = "cached" if kentucky_weighted_result.get('cache_source') else "calculated"
-                    logger.debug(f"SKU {sku_data['sku_id']} KY: Using {cache_source} weighted demand {kentucky_weighted_result['enhanced_demand']:.1f}")
+                    logger.debug(f"SKU {sku_data['sku_id']} KY: Using cached weighted demand {kentucky_weighted_result['enhanced_demand']:.1f}")
                 else:
-                    # Keep database value as fallback and calculate 6-month supply
+                    # Only calculate if truly no cache (should rarely happen after population)
+                    logger.warning(f"No cache found for {sku_data['sku_id']} Kentucky - using database fallback")
                     current_demand = sku_data.get('corrected_demand_kentucky', 0) or 0
                     sku_data['kentucky_6month_supply'] = round(float(current_demand) * 6, 0)
 
@@ -2390,41 +2369,21 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
                 current_demand = sku_data.get('corrected_demand_kentucky', 0) or 0
                 sku_data['kentucky_6month_supply'] = round(float(current_demand) * 6, 0)
 
-            # Calculate weighted demand for Burnaby warehouse with cache-first approach
+            # TRUST THE CACHE - Use cached weighted demand for fast page loads
             try:
-                # Try to get cached result first
+                # Get cached result - this should exist after initial population
                 burnaby_weighted_result = calculator.cache_manager.get_cached_weighted_demand(
                     sku_data['sku_id'], 'burnaby'
                 )
 
-                # If no valid cache, calculate and store in cache
-                if not burnaby_weighted_result:
-                    burnaby_weighted_result = calculator.weighted_demand_calculator.get_enhanced_demand_calculation(
-                        sku_data['sku_id'],
-                        sku_data.get('abc_code', 'C'),
-                        sku_data.get('xyz_code', 'Z'),
-                        sku_data.get('burnaby_sales', 0),
-                        sku_data.get('burnaby_stockout_days', 0),
-                        warehouse='burnaby'
-                    )
-
-                    # Store in cache for future requests
-                    if burnaby_weighted_result:
-                        calculator.cache_manager.store_cached_demand(
-                            sku_data['sku_id'], 'burnaby', burnaby_weighted_result
-                        )
-
-                # Replace database corrected_demand with weighted calculation
-                if burnaby_weighted_result and burnaby_weighted_result.get('enhanced_demand', 0) > 0:
+                if burnaby_weighted_result:
+                    # TRUST THE CACHE - don't recalculate!
                     sku_data['corrected_demand_burnaby'] = burnaby_weighted_result['enhanced_demand']
-                    # Add 6-month supply calculation for UI display
                     sku_data['burnaby_6month_supply'] = round(burnaby_weighted_result['enhanced_demand'] * 6, 0)
-
-                    # Log cache usage for performance monitoring
-                    cache_source = "cached" if burnaby_weighted_result.get('cache_source') else "calculated"
-                    logger.debug(f"SKU {sku_data['sku_id']} BY: Using {cache_source} weighted demand {burnaby_weighted_result['enhanced_demand']:.1f}")
+                    logger.debug(f"SKU {sku_data['sku_id']} BY: Using cached weighted demand {burnaby_weighted_result['enhanced_demand']:.1f}")
                 else:
-                    # Keep database value as fallback and calculate 6-month supply
+                    # Only calculate if truly no cache (should rarely happen after population)
+                    logger.warning(f"No cache found for {sku_data['sku_id']} Burnaby - using database fallback")
                     current_demand = sku_data.get('corrected_demand_burnaby', 0) or 0
                     sku_data['burnaby_6month_supply'] = round(float(current_demand) * 6, 0)
 

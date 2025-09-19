@@ -20,4 +20,4 @@ python-dotenv
 
 # Development/Testing
 pytest
-pytest-asyncio
+pytest-asynciorequests

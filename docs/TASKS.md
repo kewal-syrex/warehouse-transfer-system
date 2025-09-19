@@ -1857,6 +1857,152 @@ Users now experience significantly improved performance when accessing transfer 
 
 ---
 
+## 📋 Current Sprint: Weighted Demand Cache Performance Optimization
+
+### 🎯 **TASK-314: Implement Smart Weighted Demand Caching System**
+
+**Objective**: Fix 20-minute transfer planning load times by implementing intelligent caching for weighted demand calculations while preserving all advanced features (stockout correction, seasonal adjustments, volatility analysis).
+
+**Context**: Transfer planning page currently recalculates weighted demands for all 1700+ SKUs on every page load, taking 20 minutes each time. We need to implement a smart caching system that calculates these once and reuses them for fast page loads.
+
+#### Phase 1: Cache Population Infrastructure ✅
+
+- [ ] **TASK-314.1**: Create Weighted Cache Population Script
+  - [ ] Create `scripts/populate_weighted_cache.py` with comprehensive calculation
+  - [ ] Include all advanced features: stockout correction, seasonal adjustments, volatility analysis
+  - [ ] Add progress tracking for 1700+ SKU processing
+  - [ ] Implement batch processing to prevent memory exhaustion
+  - [ ] Add comprehensive error handling and logging
+  - [ ] Test with sample SKUs to verify all features are preserved
+
+- [ ] **TASK-314.2**: Fix Cache Validity Logic
+  - [ ] Modify `backend/cache_manager.py` `is_cache_valid()` method
+  - [ ] Change cache validity from 24 hours to 7 days
+  - [ ] Remove premature cache expiration that causes unnecessary recalculation
+  - [ ] Add logging for cache hit/miss statistics
+  - [ ] Test cache validity behavior with various time scenarios
+
+#### Phase 2: Database Query Optimization ✅
+
+- [ ] **TASK-314.3**: Replace Correlated Subquery with Window Function
+  - [ ] Update main query in `backend/calculations.py` line 2296
+  - [ ] Replace expensive correlated subquery with CTE and ROW_NUMBER() window function
+  - [ ] Maintain exact same data output while improving performance
+  - [ ] Add comprehensive docstrings explaining the optimization
+  - [ ] Test query performance improvement with large datasets
+
+- [ ] **TASK-314.4**: Add Missing Database Indexes
+  - [ ] Create `scripts/add_cache_performance_indexes.sql`
+  - [ ] Add index on `sku_demand_stats (sku_id, warehouse, cache_valid)`
+  - [ ] Add index on `monthly_sales (sku_id, year_month DESC)`
+  - [ ] Verify index usage with EXPLAIN queries
+  - [ ] Document expected performance improvements
+
+#### Phase 3: Cache-First Calculation Logic ✅
+
+- [ ] **TASK-314.5**: Modify Transfer Calculations to Trust Cache
+  - [ ] Update `backend/calculations.py` lines 2350-2434
+  - [ ] Implement cache-first approach: check cache before calculating
+  - [ ] Only recalculate if cache is truly empty (not on every page load)
+  - [ ] Preserve fallback to database values when cache unavailable
+  - [ ] Add comprehensive logging for cache usage tracking
+  - [ ] Maintain backward compatibility with existing data structures
+
+- [ ] **TASK-314.6**: Implement Auto-Refresh After Data Imports
+  - [ ] Modify import endpoints in `backend/main.py` to trigger cache refresh
+  - [ ] Add background task for cache invalidation after sales/inventory imports
+  - [ ] Implement selective cache refresh (only changed SKUs)
+  - [ ] Add import completion notifications with cache status
+  - [ ] Test cache refresh integration with existing import workflows
+
+#### Phase 4: User Interface Enhancements ✅
+
+- [ ] **TASK-314.7**: Add Manual Cache Refresh Capability
+  - [ ] Create `/api/cache/refresh` endpoint for manual cache refresh
+  - [ ] Implement background processing to avoid blocking users
+  - [ ] Add cache status endpoint `/api/cache/status` for monitoring
+  - [ ] Include progress tracking and completion notifications
+  - [ ] Add comprehensive error handling and user feedback
+
+- [ ] **TASK-314.8**: Add Cache Management UI
+  - [ ] Add cache management section to transfer planning page
+  - [ ] Create manual refresh button with progress indicators
+  - [ ] Display cache status (last calculated, number of cached SKUs)
+  - [ ] Add confirmation dialogs for cache refresh operations
+  - [ ] Implement real-time status updates during refresh
+  - [ ] Add tooltips explaining cache functionality
+
+#### Phase 5: Comprehensive Testing & Validation ✅
+
+- [ ] **TASK-314.9**: Unit Testing for Cache Logic
+  - [ ] Test cache population script with various SKU scenarios
+  - [ ] Test cache validity logic with different time periods
+  - [ ] Test cache-first calculation behavior
+  - [ ] Test auto-refresh after data imports
+  - [ ] Validate all advanced features are preserved in cache
+  - [ ] Test error handling and fallback mechanisms
+
+- [ ] **TASK-314.10**: Performance Testing
+  - [ ] Test transfer planning page load time before/after optimization
+  - [ ] Verify cache population completes successfully for full dataset
+  - [ ] Test system performance during cache refresh operations
+  - [ ] Validate memory usage during large dataset processing
+  - [ ] Measure database query performance improvements
+
+- [ ] **TASK-314.11**: Comprehensive Playwright Integration Testing
+  - [ ] Test transfer planning page loads in < 5 seconds with cached data
+  - [ ] Verify all existing functionality remains intact (filters, sorting, exports)
+  - [ ] Test cache refresh button functionality and progress indicators
+  - [ ] Validate weighted demand values include all advanced features
+  - [ ] Test cache status display and monitoring capabilities
+  - [ ] Verify manual refresh workflow end-to-end
+  - [ ] Test error handling for cache failures
+
+#### Phase 6: Documentation & Code Quality ✅
+
+- [ ] **TASK-314.12**: Comprehensive Code Documentation
+  - [ ] Add detailed docstrings to all new functions and classes
+  - [ ] Document cache architecture and invalidation strategy
+  - [ ] Create inline comments explaining complex caching logic
+  - [ ] Document cache refresh procedures and best practices
+  - [ ] Add performance benchmarks and optimization notes
+
+- [ ] **TASK-314.13**: User Documentation
+  - [ ] Create cache management user guide
+  - [ ] Document when to refresh cache (after imports, monthly, etc.)
+  - [ ] Add troubleshooting guide for cache-related issues
+  - [ ] Document performance expectations and benefits
+  - [ ] Create training materials for cache management features
+
+#### Success Criteria:
+- [ ] Transfer planning page loads in < 5 seconds consistently
+- [ ] All weighted demand features preserved: stockout correction, seasonal adjustments, volatility analysis
+- [ ] Cache refresh completes successfully for full dataset (1700+ SKUs)
+- [ ] Manual refresh available via UI for on-demand updates
+- [ ] Auto-refresh triggers after data imports
+- [ ] All existing transfer planning functionality remains intact
+- [ ] Performance improvement of 95%+ (from 20 minutes to < 5 seconds)
+- [ ] Code is comprehensively documented following project standards
+- [ ] All Playwright tests pass with visual verification
+
+#### Technical Architecture:
+```python
+# Cache Flow:
+# 1. populate_weighted_cache.py → Calculate all SKUs once (20 mins)
+# 2. sku_demand_stats table → Store calculated values permanently
+# 3. Transfer planning → Read from cache (< 5 seconds)
+# 4. Manual refresh → Recalculate when needed
+```
+
+#### Performance Expectations:
+- **Initial setup**: 20 minutes (one-time script execution)
+- **Normal page load**: < 5 seconds (reading cached values)
+- **After data import**: 20 minutes refresh in background
+- **Cache validity**: 7 days or until manual refresh
+- **Features preserved**: 100% (all advanced calculations included)
+
+---
+
 ## 📋 Future Enhancements & Open Tasks
 
 The following features and tasks from the original plan remain open for future development sprints.

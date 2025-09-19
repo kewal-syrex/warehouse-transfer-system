@@ -79,6 +79,9 @@ class CacheManager:
         """
         Check if cached data exists and is valid for a specific SKU and warehouse
 
+        Cache is valid for 7 days OR until data import invalidation.
+        This balances performance with data freshness for transfer planning.
+
         Args:
             sku_id: SKU identifier
             warehouse: Warehouse ('kentucky' or 'burnaby')
@@ -96,11 +99,16 @@ class CacheManager:
             result = database.execute_query(query, (sku_id, warehouse), fetch_one=True)
 
             if result:
-                # Cache is considered valid if calculated within last 24 hours
                 last_calculated = result[1]
                 if last_calculated:
-                    age_hours = (datetime.now() - last_calculated).total_seconds() / 3600
-                    return age_hours < 24
+                    # Cache valid for 7 days (not 24 hours!) - balances performance with freshness
+                    age_days = (datetime.now() - last_calculated).days
+                    is_valid = age_days < 7
+
+                    if not is_valid:
+                        logger.debug(f"Cache expired for {sku_id}-{warehouse}: {age_days} days old")
+
+                    return is_valid
 
             return False
 

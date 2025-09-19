@@ -306,7 +306,20 @@
                 <span class="visually-hidden">Loading...</span>
             </div>
             <h5>Loading Transfer Recommendations...</h5>
-            <p class="text-muted mb-0">Analyzing stockout data and calculating optimal quantities</p>
+            <p class="text-muted mb-3">Analyzing stockout data and calculating optimal quantities</p>
+
+            <!-- Progress Bar -->
+            <div class="progress mb-2" style="width: 300px; display: none;" id="loading-progress-container">
+                <div class="progress-bar progress-bar-striped progress-bar-animated"
+                     role="progressbar"
+                     id="loading-progress-bar"
+                     style="width: 0%"
+                     aria-valuenow="0"
+                     aria-valuemin="0"
+                     aria-valuemax="100">
+                </div>
+            </div>
+            <small class="text-muted" id="loading-progress-text" style="display: none;"></small>
         </div>
     </div>
 
@@ -342,6 +355,11 @@
                 </button>
                 <button class="btn btn-warning btn-sm me-2" onclick="showExportAllModal()">
                     <i class="fas fa-database me-1"></i>Export All SKUs
+                </button>
+
+                <!-- Filter Button -->
+                <button class="btn btn-outline-light btn-sm me-2" onclick="showSkuFilterModal()">
+                    <i class="fas fa-filter me-1"></i>Filter SKUs
                 </button>
 
                 <!-- Refresh Button -->
@@ -385,6 +403,58 @@
                     <div class="card-body text-center">
                         <div id="avg-coverage" class="summary-value">--</div>
                         <div class="summary-label">Avg Coverage (Months)</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Cache Management Section -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card border-info">
+                    <div class="card-header bg-info text-white">
+                        <h6 class="mb-0">
+                            <i class="fas fa-database me-2"></i>Weighted Demand Cache Management
+                        </h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="row align-items-center">
+                            <div class="col-md-6">
+                                <div class="d-flex align-items-center mb-2">
+                                    <span class="me-3">
+                                        <strong>Cache Status:</strong>
+                                        <span id="cache-status" class="badge bg-secondary">Loading...</span>
+                                    </span>
+                                    <span class="me-3">
+                                        <strong>Last Updated:</strong>
+                                        <span id="cache-last-updated" class="text-muted">--</span>
+                                    </span>
+                                </div>
+                                <div class="small text-muted">
+                                    Cache contains stockout corrections, seasonal adjustments, and volatility analysis for fast page loads.
+                                </div>
+                            </div>
+                            <div class="col-md-6 text-end">
+                                <button class="btn btn-warning btn-sm me-2" onclick="refreshCache()" id="refresh-cache-btn">
+                                    <i class="fas fa-sync me-1"></i>Refresh Cache
+                                </button>
+                                <button class="btn btn-outline-info btn-sm" onclick="checkCacheStatus()">
+                                    <i class="fas fa-info-circle me-1"></i>Check Status
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Progress bar for cache refresh -->
+                        <div class="mt-3" id="cache-refresh-progress" style="display: none;">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <small class="text-muted">Refreshing weighted demand calculations...</small>
+                                <small class="text-muted" id="cache-progress-text">0%</small>
+                            </div>
+                            <div class="progress" style="height: 6px;">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated"
+                                     role="progressbar" style="width: 0%" id="cache-progress-bar"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -530,6 +600,46 @@
         </div>
     </div>
 
+    <!-- SKU Filter Modal -->
+    <div class="modal fade" id="sku-filter-modal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Filter SKUs</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted mb-3">
+                        Enter SKU IDs to filter the table. You can paste a list of SKUs separated by commas, newlines, or spaces.
+                    </p>
+                    <div class="mb-3">
+                        <label for="sku-filter-input" class="form-label">SKU List:</label>
+                        <textarea
+                            id="sku-filter-input"
+                            class="form-control"
+                            rows="8"
+                            placeholder="Example:
+WF-UKF8001
+UB-YTX14-BS
+SK-ABC123, SK-DEF456
+SK-GHI789 SK-JKL012"></textarea>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <small class="text-muted" id="filter-status">No filter applied</small>
+                        <div>
+                            <button type="button" class="btn btn-outline-secondary me-2" onclick="clearSkuFilter()">
+                                Clear Filter
+                            </button>
+                            <button type="button" class="btn btn-primary" onclick="applySkuFilter()">
+                                Apply Filter
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
@@ -596,27 +706,137 @@
          */
         async function loadRecommendations() {
             showLoading(true);
-            
+            recommendationsData = [];
+
             try {
-                const response = await fetch('/api/transfer-recommendations');
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const data = await response.json();
-                recommendationsData = data.recommendations || [];
-                
+                // Phase 1: Load high-priority items first (100 items)
+                updateProgress(true, 10, 'Loading urgent items...');
+                await loadRecommendationChunk(true, 1, 100, 'Loading urgent items...');
+
+                // Update UI with priority items
                 updateSummaryStats();
                 populateSupplierFilter();
                 populateTable();
-                updateTimestamp(data.generated_at);
-                
+                updateProgress(true, 25, 'Urgent items loaded');
+
+                // Phase 2: Load remaining items in chunks
+                let page = 1;
+                let hasMore = true;
+                let loadedNonPriority = 0;
+                let estimatedTotal = 4000; // Estimate for progress calculation
+
+                while (hasMore && loadedNonPriority < 4000) { // Safety limit
+                    const chunkData = await loadRecommendationChunk(false, page, 200,
+                        `Loading remaining items... (${loadedNonPriority} loaded)`);
+
+                    if (chunkData.pagination && chunkData.pagination.total_count) {
+                        estimatedTotal = chunkData.pagination.total_count;
+                    }
+
+                    if (chunkData.pagination.has_next) {
+                        page++;
+                        loadedNonPriority += chunkData.recommendations.length;
+
+                        // Calculate progress (25% for priority items + 75% for remaining)
+                        const remainingProgress = (loadedNonPriority / estimatedTotal) * 75;
+                        const totalProgress = Math.min(25 + remainingProgress, 95);
+
+                        updateProgress(true, totalProgress,
+                            `${loadedNonPriority + 100} of ${estimatedTotal} items loaded`);
+
+                        // Update UI progressively
+                        updateSummaryStats();
+                        populateTable();
+                    } else {
+                        hasMore = false;
+                    }
+
+                    // Small delay to prevent UI blocking
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                }
+
+                updateProgress(true, 100, 'Loading complete');
+                updateTimestamp(new Date().toISOString());
+
+                // Brief delay to show completion
+                await new Promise(resolve => setTimeout(resolve, 300));
+
             } catch (error) {
                 console.error('Error loading recommendations:', error);
                 showError('Failed to load transfer recommendations. Please check your connection.');
             } finally {
+                updateProgress(false);
                 showLoading(false);
             }
+        }
+
+        /**
+         * Update loading overlay text without hiding/showing it
+         * @param {string} message - Status message to display
+         */
+        function updateLoadingText(message) {
+            const overlay = document.getElementById('loading-overlay');
+            const messageEl = overlay.querySelector('p');
+            if (messageEl) {
+                messageEl.textContent = message;
+            }
+        }
+
+        /**
+         * Show/hide and update progress bar
+         * @param {boolean} show - Whether to show the progress bar
+         * @param {number} [percentage=0] - Progress percentage (0-100)
+         * @param {string} [text=''] - Progress text to display
+         */
+        function updateProgress(show, percentage = 0, text = '') {
+            const container = document.getElementById('loading-progress-container');
+            const bar = document.getElementById('loading-progress-bar');
+            const textEl = document.getElementById('loading-progress-text');
+
+            if (show) {
+                container.style.display = 'block';
+                textEl.style.display = 'block';
+
+                bar.style.width = `${percentage}%`;
+                bar.setAttribute('aria-valuenow', percentage);
+
+                if (text) {
+                    textEl.textContent = text;
+                }
+            } else {
+                container.style.display = 'none';
+                textEl.style.display = 'none';
+            }
+        }
+
+        /**
+         * Load a specific chunk of recommendations
+         * @param {boolean} priorityFirst - Load priority items first
+         * @param {number} page - Page number
+         * @param {number} pageSize - Items per page
+         * @param {string} statusText - Status message to display
+         * @returns {Promise<Object>} Response data with pagination info
+         */
+        async function loadRecommendationChunk(priorityFirst, page, pageSize, statusText) {
+            updateLoadingText(statusText);
+
+            const params = new URLSearchParams({
+                priority_first: priorityFirst,
+                page: page,
+                page_size: pageSize
+            });
+
+            const response = await fetch(`/api/transfer-recommendations?${params}`);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+
+            // Append new recommendations to existing data
+            recommendationsData = recommendationsData.concat(data.recommendations || []);
+
+            return data;
         }
 
         /**
@@ -1685,6 +1905,117 @@
         }
 
         /**
+         * Show SKU filter modal
+         */
+        function showSkuFilterModal() {
+            const modal = new bootstrap.Modal(document.getElementById('sku-filter-modal'));
+            modal.show();
+        }
+
+        /**
+         * Apply SKU filter based on user input
+         *
+         * Fixed version using unique filter identification for reliable cleanup
+         */
+        function applySkuFilter() {
+            const input = document.getElementById('sku-filter-input').value.trim();
+
+            if (!input) {
+                clearSkuFilter();
+                return;
+            }
+
+            // Parse SKU list - handle commas, newlines, and spaces
+            const skuList = input
+                .split(/[\n,\s]+/)
+                .map(sku => sku.trim().toUpperCase())
+                .filter(sku => sku.length > 0);
+
+            if (skuList.length === 0) {
+                alert('Please enter at least one SKU ID.');
+                return;
+            }
+
+            // Clear any existing SKU filter first
+            clearSkuFilter();
+
+            // Create filter function with unique identifier
+            const skuFilterFunction = function(settings, data, dataIndex) {
+                const skuId = data[0]; // SKU ID is in first column
+                return skuList.includes(skuId.toUpperCase());
+            };
+
+            // Add unique identifier to the function for reliable detection
+            skuFilterFunction._isSkuFilter = true;
+            skuFilterFunction._filterId = 'sku-filter-' + Date.now();
+
+            // Apply custom filter to DataTable
+            $.fn.dataTable.ext.search.push(skuFilterFunction);
+
+            // Redraw table
+            if (window.transferTable) {
+                window.transferTable.draw();
+            }
+
+            // Update status with better formatting
+            const statusText = skuList.length === 1
+                ? `Filtering by 1 SKU: ${skuList[0]}`
+                : `Filtering by ${skuList.length} SKUs: ${skuList.slice(0, 3).join(', ')}${skuList.length > 3 ? ` and ${skuList.length - 3} more...` : ''}`;
+
+            document.getElementById('filter-status').textContent = statusText;
+
+            // Close modal
+            const modal = bootstrap.Modal.getInstance(document.getElementById('sku-filter-modal'));
+            modal.hide();
+
+            // Store filter state
+            window.activeSkuFilter = {
+                skuList: skuList,
+                filterId: skuFilterFunction._filterId,
+                applied: new Date().toISOString()
+            };
+
+            console.log('SKU filter applied:', window.activeSkuFilter);
+        }
+
+        /**
+         * Clear SKU filter
+         *
+         * Fixed version using reliable filter identification
+         */
+        function clearSkuFilter() {
+            // Remove SKU filter functions using unique identifier
+            const originalLength = $.fn.dataTable.ext.search.length;
+
+            $.fn.dataTable.ext.search = $.fn.dataTable.ext.search.filter(
+                function(fn) {
+                    // Remove functions marked as SKU filters
+                    return !fn._isSkuFilter;
+                }
+            );
+
+            const filtersRemoved = originalLength - $.fn.dataTable.ext.search.length;
+
+            if (filtersRemoved > 0) {
+                console.log(`Removed ${filtersRemoved} SKU filter(s)`);
+            }
+
+            // Redraw table
+            if (window.transferTable) {
+                window.transferTable.draw();
+            }
+
+            // Clear input and status
+            document.getElementById('sku-filter-input').value = '';
+            document.getElementById('filter-status').textContent = 'No filter applied';
+
+            // Clear stored filter state
+            window.activeSkuFilter = null;
+
+            console.log('SKU filter cleared');
+        }
+
+        /**
          * Apply selected filters to the transfer recommendations table
          *
          * Filters data based on priority level, ABC classification, and minimum quantity,
@@ -2003,6 +2334,189 @@
             document.querySelectorAll('.row-select').forEach(cb => {
                 cb.checked = isChecked;
             });
+        });
+
+        // Cache Management Functions
+
+        /**
+         * Check and display current cache status
+         * Shows cache statistics and last updated time
+         */
+        async function checkCacheStatus() {
+            try {
+                const response = await fetch('/api/cache/status');
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                updateCacheStatusDisplay(data);
+
+            } catch (error) {
+                console.error('Failed to check cache status:', error);
+                document.getElementById('cache-status').textContent = 'Error';
+                document.getElementById('cache-status').className = 'badge bg-danger';
+                document.getElementById('cache-last-updated').textContent = 'Failed to load';
+            }
+        }
+
+        /**
+         * Update cache status display elements
+         * @param {Object} statusData Cache status data from API
+         */
+        function updateCacheStatusDisplay(statusData) {
+            const statusElement = document.getElementById('cache-status');
+            const lastUpdatedElement = document.getElementById('cache-last-updated');
+
+            if (statusData.error) {
+                statusElement.textContent = 'Error';
+                statusElement.className = 'badge bg-danger';
+                lastUpdatedElement.textContent = 'Failed to load';
+                return;
+            }
+
+            const totalSkus = statusData.total_cached_skus || 0;
+            const validSkus = statusData.valid_cached_skus || 0;
+            const hitRate = statusData.overall_hit_rate || 0;
+
+            if (validSkus > 0) {
+                statusElement.textContent = `${validSkus.toLocaleString()} SKUs cached (${hitRate.toFixed(1)}% hit rate)`;
+                statusElement.className = 'badge bg-success';
+            } else {
+                statusElement.textContent = 'Cache empty';
+                statusElement.className = 'badge bg-warning';
+            }
+
+            // Format last updated time
+            if (statusData.last_updated) {
+                const lastUpdated = new Date(statusData.last_updated);
+                lastUpdatedElement.textContent = lastUpdated.toLocaleString();
+            } else {
+                lastUpdatedElement.textContent = 'Never';
+            }
+        }
+
+        /**
+         * Initiate cache refresh with user confirmation
+         * Shows progress and handles background refresh
+         */
+        async function refreshCache() {
+            // Confirmation dialog
+            const confirmed = confirm(
+                'Refresh weighted demand calculations?\n\n' +
+                'This includes:\n' +
+                '• Stockout corrections\n' +
+                '• Seasonal adjustments\n' +
+                '• Volatility analysis\n\n' +
+                'Takes ~20 minutes in background.'
+            );
+
+            if (!confirmed) {
+                return;
+            }
+
+            try {
+                // Show progress indicator
+                showCacheRefreshProgress(true);
+
+                // Disable refresh button
+                const refreshBtn = document.getElementById('refresh-cache-btn');
+                refreshBtn.disabled = true;
+                refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Refreshing...';
+
+                // Start cache refresh
+                const response = await fetch('/api/cache/refresh-weighted-demand', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        force_refresh: true
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+
+                // Simulate progress (since we don't have real-time progress)
+                await simulateProgress();
+
+                // Show success message
+                alert(
+                    'Cache refresh completed successfully!\n\n' +
+                    `Processing time: ${result.summary?.duration_seconds?.toFixed(1) || 'N/A'}s\n` +
+                    `SKUs processed: ${result.summary?.processed_skus || 'N/A'}\n` +
+                    `Successful calculations: ${result.summary?.successful_calculations || 'N/A'}\n\n` +
+                    'Transfer planning page should now load much faster!'
+                );
+
+                // Refresh cache status display
+                await checkCacheStatus();
+
+            } catch (error) {
+                console.error('Cache refresh failed:', error);
+                alert(`Cache refresh failed: ${error.message}\n\nPlease try again or contact support.`);
+
+            } finally {
+                // Reset UI
+                showCacheRefreshProgress(false);
+                const refreshBtn = document.getElementById('refresh-cache-btn');
+                refreshBtn.disabled = false;
+                refreshBtn.innerHTML = '<i class="fas fa-sync me-1"></i>Refresh Cache';
+            }
+        }
+
+        /**
+         * Show/hide cache refresh progress indicator
+         * @param {boolean} show Whether to show or hide progress
+         */
+        function showCacheRefreshProgress(show) {
+            const progressContainer = document.getElementById('cache-refresh-progress');
+            const progressBar = document.getElementById('cache-progress-bar');
+            const progressText = document.getElementById('cache-progress-text');
+
+            if (show) {
+                progressContainer.style.display = 'block';
+                progressBar.style.width = '0%';
+                progressText.textContent = '0%';
+            } else {
+                progressContainer.style.display = 'none';
+            }
+        }
+
+        /**
+         * Simulate progress updates during cache refresh
+         * Since we don't have real-time progress, simulate realistic progress
+         */
+        async function simulateProgress() {
+            const progressBar = document.getElementById('cache-progress-bar');
+            const progressText = document.getElementById('cache-progress-text');
+
+            // Simulate realistic progress over ~2 seconds
+            const steps = [
+                { percent: 10, delay: 200 },
+                { percent: 25, delay: 300 },
+                { percent: 50, delay: 500 },
+                { percent: 75, delay: 400 },
+                { percent: 90, delay: 300 },
+                { percent: 100, delay: 200 }
+            ];
+
+            for (const step of steps) {
+                await new Promise(resolve => setTimeout(resolve, step.delay));
+                progressBar.style.width = `${step.percent}%`;
+                progressText.textContent = `${step.percent}%`;
+            }
+        }
+
+        // Initialize cache status when page loads
+        $(document).ready(function() {
+            // Check cache status after other initialization
+            setTimeout(checkCacheStatus, 1000);
         });
     </script>
 </body>

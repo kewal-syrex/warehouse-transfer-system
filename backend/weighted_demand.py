@@ -23,8 +23,10 @@ from scipy.stats import norm
 
 try:
     from . import database
+    from .seasonal_factors import SeasonalFactorCalculator
 except ImportError:
     import database
+    from seasonal_factors import SeasonalFactorCalculator
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +40,7 @@ class WeightedDemandCalculator:
         """Initialize the weighted demand calculator with configuration from database"""
         self.config = self._load_configuration()
         self.safety_stock_calculator = SafetyStockCalculator(self.config)
+        self.seasonal_calculator = SeasonalFactorCalculator()
 
     def _load_configuration(self) -> dict:
         """
@@ -503,14 +506,20 @@ class WeightedDemandCalculator:
                 weighted_demand, stockout_days, 30
             )
 
+            # Apply data-driven seasonal adjustment
+            seasonal_adjustment_result = self.seasonal_calculator.apply_seasonal_adjustment(
+                corrected_weighted_demand, sku_id, warehouse=warehouse
+            )
+            seasonally_adjusted_demand = seasonal_adjustment_result['adjusted_demand']
+
             # Apply volatility-based adjustment for safety
             volatility_adjustment = 1.0
             if volatility_class == 'high':
                 volatility_adjustment = self.config.get('volatility_adjustment_factor', 1.2)
             elif volatility_class == 'low' and data_quality > 0.8:
-                volatility_adjustment = 0.95  # Slight reduction for very stable items
+                volatility_adjustment = 1.0  # No reduction for stable items to avoid underestimation
 
-            final_demand = corrected_weighted_demand * volatility_adjustment
+            final_demand = seasonally_adjusted_demand * volatility_adjustment
 
             # Fallback to current month if data quality is poor
             if data_quality < 0.5 or sample_months < 2:
@@ -528,7 +537,14 @@ class WeightedDemandCalculator:
                 'enhanced_demand': round(final_demand, 2),
                 'weighted_average_base': round(weighted_demand, 2),
                 'stockout_corrected': round(corrected_weighted_demand, 2),
+                'seasonally_adjusted': round(seasonally_adjusted_demand, 2),
                 'volatility_adjustment': round(volatility_adjustment, 3),
+
+                # Seasonal adjustment details
+                'seasonal_factor': seasonal_adjustment_result['seasonal_factor'],
+                'seasonal_adjustment_percentage': seasonal_adjustment_result['adjustment_percentage'],
+                'seasonal_factor_source': seasonal_adjustment_result['factor_metadata']['source'],
+                'seasonal_pattern_type': seasonal_adjustment_result['factor_metadata']['pattern_type'],
 
                 # Calculation metadata
                 'calculation_method': calculation_method,

@@ -480,7 +480,11 @@ async def debug_test():
              },
              500: {"description": "Transfer calculation failed"}
          })
-async def get_transfer_recommendations():
+async def get_transfer_recommendations(
+    priority_first: bool = False,
+    page: int = 1,
+    page_size: int = 100
+):
     """
     Generate intelligent transfer recommendations using advanced inventory algorithms
     
@@ -523,13 +527,44 @@ async def get_transfer_recommendations():
         import logging
         logger = logging.getLogger(__name__)
         logger.error("DEBUG: transfer-recommendations endpoint called")
-        # Generate recommendations using sophisticated calculation engine
-        recommendations = calculations.calculate_all_transfer_recommendations()
-        logger.error(f"DEBUG: Got {len(recommendations)} recommendations")
-        
+
+        # Generate all recommendations using sophisticated calculation engine
+        all_recommendations = calculations.calculate_all_transfer_recommendations()
+        logger.error(f"DEBUG: Got {len(all_recommendations)} total recommendations")
+
+        # Apply priority sorting if requested
+        if priority_first:
+            # Sort by priority (red > yellow > green), then by urgency score
+            priority_map = {"red": 3, "yellow": 2, "green": 1, "": 0}
+            all_recommendations.sort(
+                key=lambda x: (
+                    priority_map.get(x.get("priority_level", ""), 0),
+                    x.get("urgency_score", 0)
+                ),
+                reverse=True
+            )
+
+        # Calculate pagination
+        total_count = len(all_recommendations)
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        page_recommendations = all_recommendations[start_idx:end_idx]
+
+        # Calculate pagination metadata
+        total_pages = (total_count + page_size - 1) // page_size
+        has_next = page < total_pages
+        has_prev = page > 1
+
         return {
-            "recommendations": recommendations,
-            "count": len(recommendations),
+            "recommendations": page_recommendations,
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total_count": total_count,
+                "total_pages": total_pages,
+                "has_next": has_next,
+                "has_prev": has_prev
+            },
             "generated_at": "2024-03-15T10:00:00Z",
             "algorithm_version": "1.0-monthly-stockout-correction",
             "business_rules": {
@@ -538,7 +573,7 @@ async def get_transfer_recommendations():
                 "max_correction_multiplier": 1.5,
                 "coverage_targets": {
                     "AX": 4, "AY": 5, "AZ": 6,
-                    "BX": 3, "BY": 4, "BZ": 5, 
+                    "BX": 3, "BY": 4, "BZ": 5,
                     "CX": 2, "CY": 2, "CZ": 1
                 }
             }

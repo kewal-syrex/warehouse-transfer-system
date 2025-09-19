@@ -515,22 +515,33 @@ class ImportExportManager:
                     result["import_details"].append(detail_entry)
                     continue
 
-                # Insert/update sales data
+                # Calculate stockout-corrected demand
+                burnaby_corrected = self._calculate_stockout_corrected_demand(
+                    row['burnaby_sales'], row['burnaby_stockout_days']
+                )
+                kentucky_corrected = self._calculate_stockout_corrected_demand(
+                    row['kentucky_sales'], row['kentucky_stockout_days']
+                )
+
+                # Insert/update sales data with corrected demand
                 query = """
                 INSERT INTO monthly_sales
                 (`sku_id`, `year_month`, `burnaby_sales`, `kentucky_sales`,
-                 `burnaby_stockout_days`, `kentucky_stockout_days`)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                 `burnaby_stockout_days`, `kentucky_stockout_days`,
+                 `corrected_demand_burnaby`, `corrected_demand_kentucky`)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     `burnaby_sales` = VALUES(`burnaby_sales`),
                     `kentucky_sales` = VALUES(`kentucky_sales`),
                     `burnaby_stockout_days` = VALUES(`burnaby_stockout_days`),
-                    `kentucky_stockout_days` = VALUES(`kentucky_stockout_days`)
+                    `kentucky_stockout_days` = VALUES(`kentucky_stockout_days`),
+                    `corrected_demand_burnaby` = VALUES(`corrected_demand_burnaby`),
+                    `corrected_demand_kentucky` = VALUES(`corrected_demand_kentucky`)
                 """
                 cursor.execute(query, (
                     sku_id, year_month, row['burnaby_sales'],
                     row['kentucky_sales'], row['burnaby_stockout_days'],
-                    row['kentucky_stockout_days']
+                    row['kentucky_stockout_days'], burnaby_corrected, kentucky_corrected
                 ))
 
                 detail_entry["status"] = "success"
@@ -1821,6 +1832,36 @@ class ImportExportManager:
 
         # Freeze header row
         ws.freeze_panes = "A2"
+
+    def _calculate_stockout_corrected_demand(self, monthly_sales: int, stockout_days: int, days_in_month: int = 30) -> float:
+        """
+        Calculate stockout-corrected demand using the simplified monthly approach
+
+        Args:
+            monthly_sales: Actual units sold in the month
+            stockout_days: Number of days out of stock in the month
+            days_in_month: Total days in the month (default 30)
+
+        Returns:
+            Corrected demand accounting for stockout periods
+        """
+        if stockout_days == 0 or monthly_sales == 0:
+            return float(monthly_sales)
+
+        availability_rate = (days_in_month - stockout_days) / days_in_month
+
+        if availability_rate < 1.0 and monthly_sales > 0:
+            # Apply 30% floor to prevent overcorrection
+            correction_factor = max(availability_rate, 0.3)
+            corrected_demand = monthly_sales / correction_factor
+
+            # Cap at 50% increase for very low availability
+            if availability_rate < 0.3:
+                corrected_demand = min(corrected_demand, monthly_sales * 1.5)
+
+            return round(corrected_demand, 2)
+
+        return float(monthly_sales)
 
 
 # Global instance
