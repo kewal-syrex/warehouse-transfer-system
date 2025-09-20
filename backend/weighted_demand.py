@@ -176,7 +176,8 @@ class WeightedDemandCalculator:
                 sales_col = 'kentucky_sales'
                 stockout_col = 'kentucky_stockout_days'
 
-            # Get last 3 months of warehouse-specific corrected demand data
+            # Get last 3 months of warehouse-specific sales and stockout data
+            # Only include months where actual sales data has been uploaded (either warehouse has sales)
             query = f"""
             SELECT
                 {demand_col} as corrected_demand,
@@ -185,6 +186,7 @@ class WeightedDemandCalculator:
                 `year_month`
             FROM monthly_sales
             WHERE sku_id = %s
+              AND (burnaby_sales > 0 OR kentucky_sales > 0)
             ORDER BY `year_month` DESC
             LIMIT 3
             """
@@ -200,7 +202,7 @@ class WeightedDemandCalculator:
                     'warehouse': warehouse
                 }
 
-            # Calculate weighted average using corrected demand where available
+            # Calculate weighted average applying stockout correction to EACH MONTH before averaging
             weighted_sum = 0.0
             weight_sum = 0.0
             valid_months = 0
@@ -209,13 +211,12 @@ class WeightedDemandCalculator:
                 if i >= len(weights):
                     break
 
-                # Use corrected demand if available, otherwise raw sales (convert Decimal to float)
-                # Now using warehouse-agnostic column aliases
-                demand = month_data['corrected_demand'] or month_data['sales'] or 0
-                demand = float(demand) if demand is not None else 0.0
+                # Use pre-calculated corrected demand values from database
+                corrected_demand = month_data['corrected_demand'] or 0
+                corrected_demand = float(corrected_demand) if corrected_demand is not None else 0.0
 
-                if demand >= 0:  # Include zero demand (valid data point)
-                    weighted_sum += demand * weights[i]
+                if corrected_demand >= 0:  # Include zero demand (valid data point)
+                    weighted_sum += corrected_demand * weights[i]
                     weight_sum += weights[i]
                     valid_months += 1
 
@@ -288,6 +289,7 @@ class WeightedDemandCalculator:
                 stockout_col = 'kentucky_stockout_days'
 
             # Get last 6 months of warehouse-specific data
+            # Only include months where actual sales data has been uploaded (either warehouse has sales)
             query = f"""
             SELECT
                 {demand_col} as corrected_demand,
@@ -296,6 +298,7 @@ class WeightedDemandCalculator:
                 {stockout_col} as stockout_days
             FROM monthly_sales
             WHERE sku_id = %s
+              AND (burnaby_sales > 0 OR kentucky_sales > 0)
             ORDER BY `year_month` DESC
             LIMIT 6
             """
@@ -313,17 +316,17 @@ class WeightedDemandCalculator:
             weight_sum = sum(weights)
             weights = [w / weight_sum for w in weights]
 
-            # Calculate exponentially weighted average
+            # Calculate exponentially weighted average applying stockout correction to EACH MONTH
             weighted_sum = 0.0
             valid_months = 0
 
             for i, month_data in enumerate(sales_data):
-                # Use warehouse-agnostic column aliases
-                demand = month_data['corrected_demand'] or month_data['sales'] or 0
-                demand = float(demand) if demand is not None else 0.0
+                # Use pre-calculated corrected demand values from database
+                corrected_demand = month_data['corrected_demand'] or 0
+                corrected_demand = float(corrected_demand) if corrected_demand is not None else 0.0
 
-                if demand >= 0:
-                    weighted_sum += demand * weights[i]
+                if corrected_demand >= 0:
+                    weighted_sum += corrected_demand * weights[i]
                     valid_months += 1
 
             # Data quality based on completeness
@@ -372,14 +375,18 @@ class WeightedDemandCalculator:
                 demand_col = 'corrected_demand_kentucky'
                 sales_col = 'kentucky_sales'
 
-            # Get 12 months of warehouse-specific demand data for volatility calculation
+            # Get 12 months of warehouse-specific demand data for volatility calculation including stockout days
+            # Only include months where actual sales data has been uploaded (either warehouse has sales)
+            stockout_col = f'{warehouse}_stockout_days'
             query = f"""
             SELECT
                 {demand_col} as corrected_demand,
                 {sales_col} as sales,
+                {stockout_col} as stockout_days,
                 `year_month`
             FROM monthly_sales
             WHERE sku_id = %s
+              AND (burnaby_sales > 0 OR kentucky_sales > 0)
             ORDER BY `year_month` DESC
             LIMIT 12
             """
@@ -396,12 +403,13 @@ class WeightedDemandCalculator:
                     'warehouse': warehouse
                 }
 
-            # Extract demand values (convert Decimal to float)
+            # Extract demand values using pre-calculated corrected demand
             demands = []
             for month_data in sales_data:
-                # Use warehouse-agnostic column aliases
-                demand = month_data['corrected_demand'] or month_data['sales'] or 0
-                demands.append(float(demand) if demand is not None else 0.0)
+                # Use pre-calculated corrected demand values from database
+                corrected_demand = month_data['corrected_demand'] or 0
+                corrected_demand = float(corrected_demand) if corrected_demand is not None else 0.0
+                demands.append(corrected_demand)
 
             # Calculate statistical measures
             mean_demand = np.mean(demands)
@@ -501,10 +509,9 @@ class WeightedDemandCalculator:
             data_quality = avg_result['data_quality']
             sample_months = avg_result['sample_months']
 
-            # Apply stockout correction to the weighted average
-            corrected_weighted_demand = self.correct_monthly_demand(
-                weighted_demand, stockout_days, 30
-            )
+            # Weighted demand already includes stockout correction applied to each month
+            # No need to apply correction again - this was the bug
+            corrected_weighted_demand = weighted_demand
 
             # Apply data-driven seasonal adjustment
             seasonal_adjustment_result = self.seasonal_calculator.apply_seasonal_adjustment(
@@ -524,8 +531,9 @@ class WeightedDemandCalculator:
             # Fallback to current month if data quality is poor
             if data_quality < 0.5 or sample_months < 2:
                 logger.info(f"Using fallback single-month calculation for {sku_id} (quality: {data_quality})")
-                fallback_demand = self.correct_monthly_demand(
-                    current_month_sales, stockout_days, 30
+                fallback_demand = self._get_corrected_demand_from_database(
+                    sku_id, self._get_current_month(), warehouse,
+                    current_month_sales, stockout_days
                 )
                 final_demand = max(final_demand, fallback_demand)
                 calculation_method = f"{primary_method}_with_fallback"
@@ -571,14 +579,78 @@ class WeightedDemandCalculator:
 
         except Exception as e:
             logger.error(f"Enhanced demand calculation failed for {sku_id} ({warehouse}): {e}")
-            # Fallback to corrected current month
-            fallback_demand = self.correct_monthly_demand(current_month_sales, stockout_days, 30)
+            # Fallback to corrected current month using pre-calculated values
+            fallback_demand = self._get_corrected_demand_from_database(
+                sku_id, self._get_current_month(), warehouse,
+                current_month_sales, stockout_days
+            )
             return {
                 'enhanced_demand': fallback_demand,
                 'calculation_method': 'error_fallback',
                 'error': str(e),
                 'warehouse': warehouse
             }
+
+    def _get_corrected_demand_from_database(self, sku_id: str, year_month: str,
+                                          warehouse: str, fallback_sales: int = 0,
+                                          fallback_stockout_days: int = 0) -> float:
+        """
+        Fetch pre-calculated corrected demand from database with fallback calculation
+
+        This method retrieves corrected demand values that were pre-calculated using
+        the hybrid historical+graduated algorithm. If no pre-calculated value exists,
+        it falls back to the old correction method for backwards compatibility.
+
+        Args:
+            sku_id: SKU identifier
+            year_month: Target month in YYYY-MM format
+            warehouse: 'burnaby' or 'kentucky'
+            fallback_sales: Raw sales for fallback calculation
+            fallback_stockout_days: Stockout days for fallback calculation
+
+        Returns:
+            Corrected demand value from database or fallback calculation
+
+        Business Logic:
+            1. Try to fetch pre-calculated corrected demand from monthly_sales table
+            2. If not found or zero, fall back to old correction method
+            3. Log which approach was used for transparency
+        """
+        try:
+            # Query pre-calculated corrected demand
+            field = f'corrected_demand_{warehouse}'
+            query = f"""
+            SELECT {field} as corrected_demand
+            FROM monthly_sales
+            WHERE sku_id = %s AND `year_month` = %s
+            """
+
+            result = database.execute_query(query, (sku_id, year_month), fetch_one=True)
+
+            if result and result.get('corrected_demand') is not None:
+                corrected_value = float(result['corrected_demand'])
+                if corrected_value > 0:
+                    logger.info(f"Using pre-calculated corrected demand for {sku_id} {warehouse} {year_month}: {corrected_value}")
+                    return corrected_value
+
+            # Fallback to old method if no pre-calculated value
+            logger.info(f"No pre-calculated value for {sku_id} {warehouse} {year_month}, using fallback calculation")
+            return self.correct_monthly_demand(fallback_sales, fallback_stockout_days, 30)
+
+        except Exception as e:
+            logger.error(f"Failed to fetch corrected demand for {sku_id} {warehouse} {year_month}: {e}")
+            # Final fallback to old method
+            return self.correct_monthly_demand(fallback_sales, fallback_stockout_days, 30)
+
+    def _get_current_month(self) -> str:
+        """
+        Get the current month in YYYY-MM format
+
+        Returns:
+            Current month string for database queries
+        """
+        from datetime import datetime
+        return datetime.now().strftime('%Y-%m')
 
     def _get_strategy_reason(self, abc_class: str, xyz_class: str, volatility_class: str, use_6mo: bool) -> str:
         """Generate human-readable explanation for calculation strategy chosen"""

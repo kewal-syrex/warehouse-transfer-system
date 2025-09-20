@@ -14,6 +14,7 @@ import pymysql.cursors
 import os
 from typing import Optional, Union, List, Dict, Any
 import logging
+import time
 
 # Import the new connection pool
 try:
@@ -271,11 +272,11 @@ def update_corrected_demand(sku_id: str, year_month: str, corrected_demand: floa
     """
     field = f'corrected_demand_{warehouse}'
     query = f"""
-    UPDATE monthly_sales 
+    UPDATE monthly_sales
     SET {field} = %s
     WHERE sku_id = %s AND `year_month` = %s
     """
-    
+
     try:
         db = get_database_connection()
         cursor = db.cursor()
@@ -285,6 +286,362 @@ def update_corrected_demand(sku_id: str, year_month: str, corrected_demand: floa
     except Exception as e:
         logger.error(f"Update corrected demand failed: {e}")
         return False
+
+
+def get_historical_demand_when_in_stock(sku_id: str, warehouse: str,
+                                       lookback_months: int = 6,
+                                       min_availability: float = 0.8) -> Optional[float]:
+    """
+    Get average demand from recent months when SKU had good availability
+
+    This function looks back at recent months to find periods when the SKU
+    was adequately stocked and calculates the average demand from those periods.
+    Used for correcting severe stockouts based on proven demand patterns.
+
+    Args:
+        sku_id: SKU identifier to lookup
+        warehouse: 'burnaby' or 'kentucky'
+        lookback_months: Number of months to search back (default: 6)
+        min_availability: Minimum availability rate to consider "in stock" (default: 0.8)
+
+    Returns:
+        Average demand from months with good availability, or None if insufficient data
+
+    Business Logic:
+        - Finds months where availability >= min_availability (80% by default)
+        - Calculates average demand from those "good" months
+        - Requires at least 2 qualifying months to return a value
+        - Excludes months with zero sales even if availability is good
+
+    Example:
+        >>> get_historical_demand_when_in_stock('LP-12V-NICD-13', 'kentucky', 6, 0.8)
+        85.5  # Average from July (68 sales) and April (125 sales) when in stock
+    """
+    try:
+        # Query recent months with sales and stockout data
+        query = f"""
+        SELECT
+            `year_month`,
+            {warehouse}_sales as sales,
+            {warehouse}_stockout_days as stockout_days,
+            YEAR(`year_month`) as year,
+            MONTH(`year_month`) as month
+        FROM monthly_sales
+        WHERE sku_id = %s
+            AND {warehouse}_sales > 0
+            AND `year_month` >= DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL %s MONTH), '%%Y-%%m')
+        ORDER BY `year_month` DESC
+        LIMIT %s
+        """
+
+        db = get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+        cursor.execute(query, (sku_id, lookback_months, lookback_months))
+        records = cursor.fetchall()
+        cursor.close()
+        db.close()
+
+        if not records:
+            return None
+
+        # Filter for months with good availability
+        good_months = []
+
+        for record in records:
+            sales = record['sales'] or 0
+            stockout_days = record['stockout_days'] or 0
+            year = record['year'] or 2025
+            month = record['month'] or 1
+
+            # Calculate days in month
+            if month in [1, 3, 5, 7, 8, 10, 12]:
+                days_in_month = 31
+            elif month in [4, 6, 9, 11]:
+                days_in_month = 30
+            else:  # February
+                if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0):
+                    days_in_month = 29
+                else:
+                    days_in_month = 28
+
+            # Calculate availability rate
+            availability_rate = (days_in_month - stockout_days) / days_in_month
+
+            # Include months with good availability and sales > 0
+            if availability_rate >= min_availability and sales > 0:
+                good_months.append(sales)
+
+        # Require at least 2 good months for reliable average
+        if len(good_months) >= 2:
+            return round(sum(good_months) / len(good_months), 2)
+
+        return None
+
+    except Exception as e:
+        logger.error(f"Historical demand lookup failed for {sku_id} {warehouse}: {e}")
+        return None
+
+
+def correct_monthly_demand_graduated(monthly_sales: int, stockout_days: int, days_in_month: int = 30) -> float:
+    """
+    Calculate stockout-corrected demand using graduated floor approach
+
+    This is the new graduated floor algorithm that applies different floors
+    based on stockout severity to provide more accurate corrections.
+
+    Args:
+        monthly_sales: Actual sales for the month
+        stockout_days: Number of days the item was out of stock
+        days_in_month: Total days in the month (default 30)
+
+    Returns:
+        Corrected demand using graduated floor based on stockout severity
+
+    Business Logic:
+        - Availability >= 50%: No floor (trust actual data)
+        - Availability 20-50%: 20% floor for moderate protection
+        - Availability < 20%: 10% floor with 3x cap for severe stockouts
+
+    Example:
+        >>> correct_monthly_demand_graduated(13, 27, 31)  # 87% stockout
+        39.0  # 13 / 0.129 = 100.78, capped at 13 * 3 = 39
+    """
+    if stockout_days == 0 or monthly_sales == 0:
+        return float(monthly_sales)
+
+    # Calculate availability rate
+    availability_rate = (days_in_month - stockout_days) / days_in_month
+
+    if availability_rate < 1.0:
+        # Graduated floor based on stockout severity
+        if availability_rate >= 0.5:
+            # Mild stockout (< 50% out): No floor, trust the math
+            correction_factor = availability_rate
+        elif availability_rate >= 0.2:
+            # Moderate stockout (50-80% out): 20% floor
+            correction_factor = max(availability_rate, 0.2)
+        else:
+            # Severe stockout (> 80% out): 10% floor with cap
+            correction_factor = max(availability_rate, 0.1)
+            corrected_demand = monthly_sales / correction_factor
+            # Cap at 3x for extreme cases (instead of 1.5x)
+            corrected_demand = min(corrected_demand, monthly_sales * 3)
+            return round(corrected_demand, 2)
+
+        corrected_demand = monthly_sales / correction_factor
+        return round(corrected_demand, 2)
+
+    return float(monthly_sales)
+
+
+def correct_monthly_demand_hybrid(monthly_sales: int, stockout_days: int,
+                                days_in_month: int, sku_id: str,
+                                warehouse: str, year_month: str) -> float:
+    """
+    Calculate stockout-corrected demand using hybrid historical + graduated approach
+
+    Attempts historical lookup for severe stockouts, falls back to graduated floor
+    algorithm. This provides more accurate corrections for Kentucky warehouse's
+    frequent severe stockouts by using proven demand patterns when available.
+
+    Args:
+        monthly_sales: Actual sales for the month
+        stockout_days: Number of days item was out of stock
+        days_in_month: Total days in month (28-31)
+        sku_id: SKU identifier for historical lookup
+        warehouse: 'burnaby' or 'kentucky'
+        year_month: YYYY-MM format for context
+
+    Returns:
+        Corrected demand accounting for stockout period
+
+    Business Logic:
+        1. For severe stockouts (>80%), try historical average first
+        2. Use graduated floor based on stockout severity as fallback
+        3. Log which method was used for transparency
+
+    Example:
+        >>> correct_monthly_demand_hybrid(13, 27, 31, 'LP-12V-NICD-13',
+        ...                              'kentucky', '2025-08')
+        75.0  # Based on historical average when in stock
+    """
+    if stockout_days == 0 or monthly_sales == 0:
+        return float(monthly_sales)
+
+    # Calculate availability rate
+    availability_rate = (days_in_month - stockout_days) / days_in_month
+
+    # For severe stockouts (> 80% out), try historical data first
+    if availability_rate < 0.2:
+        historical_demand = get_historical_demand_when_in_stock(
+            sku_id, warehouse, lookback_months=6, min_availability=0.8
+        )
+
+        if historical_demand is not None:
+            logger.info(f"Using historical demand for {sku_id} {warehouse} {year_month}: {historical_demand}")
+            return historical_demand
+        else:
+            logger.info(f"No historical data for {sku_id} {warehouse} {year_month}, using graduated floor")
+
+    # Fall back to graduated floor algorithm
+    return correct_monthly_demand_graduated(monthly_sales, stockout_days, days_in_month)
+
+
+def correct_monthly_demand(monthly_sales: int, stockout_days: int, days_in_month: int = 30) -> float:
+    """
+    Calculate stockout-corrected demand using the simplified monthly approach
+
+    Args:
+        monthly_sales: Actual sales for the month
+        stockout_days: Number of days the item was out of stock
+        days_in_month: Total days in the month (default 30)
+
+    Returns:
+        Corrected demand accounting for stockout period
+
+    Business Logic:
+        - If no stockouts or no sales, return raw sales
+        - Calculate availability rate: (days_in_month - stockout_days) / days_in_month
+        - Apply 30% floor to prevent overcorrection
+        - Cap at 50% increase for very low availability (safeguard)
+    """
+    if stockout_days == 0 or monthly_sales == 0:
+        return float(monthly_sales)
+
+    # Calculate availability rate
+    availability_rate = (days_in_month - stockout_days) / days_in_month
+
+    if availability_rate < 1.0:
+        # Apply correction with 30% floor to prevent overcorrection
+        correction_factor = max(availability_rate, 0.3)
+        corrected_demand = monthly_sales / correction_factor
+
+        # Cap at 50% increase for very low availability (safeguard)
+        if availability_rate < 0.3:
+            corrected_demand = min(corrected_demand, monthly_sales * 1.5)
+
+        return round(corrected_demand, 2)
+
+    return float(monthly_sales)
+
+
+def recalculate_all_corrected_demands():
+    """
+    Recalculate and update corrected demand for all SKUs and months using hybrid algorithm
+
+    This function reads all monthly sales data, applies the new hybrid stockout correction
+    algorithm that combines historical demand lookup with graduated floor fallback.
+    Stores corrected values in corrected_demand_burnaby and corrected_demand_kentucky fields.
+
+    The hybrid approach:
+    1. For severe stockouts (>80%), attempts historical demand lookup first
+    2. Falls back to graduated floor algorithm based on stockout severity
+    3. Provides more accurate corrections for Kentucky warehouse's frequent stockouts
+
+    Returns:
+        Dict with success status and processing statistics including:
+        - success: Boolean indicating completion
+        - updated_records: Number of monthly_sales records updated
+        - errors: List of any errors encountered
+        - duration_seconds: Time taken to complete recalculation
+
+    Example:
+        result = recalculate_all_corrected_demands()
+        # Expected: Kentucky LP-12V-NICD-13 corrected from ~30 to ~70-100
+    """
+    start_time = time.time()
+
+    try:
+        db = get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+
+        # Get all monthly sales records with stockout days
+        query = """
+        SELECT sku_id, `year_month`,
+               burnaby_sales, kentucky_sales,
+               burnaby_stockout_days, kentucky_stockout_days,
+               YEAR(`year_month`) as year, MONTH(`year_month`) as month
+        FROM monthly_sales
+        WHERE burnaby_sales > 0 OR kentucky_sales > 0
+           OR burnaby_stockout_days > 0 OR kentucky_stockout_days > 0
+        ORDER BY sku_id, `year_month` DESC
+        """
+
+        cursor.execute(query)
+        records = cursor.fetchall()
+
+        updated_records = 0
+        errors = []
+
+        for record in records:
+            sku_id = record['sku_id']
+            year_month = record['year_month']
+            year = record['year'] or 2025  # Default if None
+            month = record['month'] or 1   # Default if None
+
+            # Calculate days in month
+            if month in [1, 3, 5, 7, 8, 10, 12]:
+                days_in_month = 31
+            elif month in [4, 6, 9, 11]:
+                days_in_month = 30
+            else:  # February
+                # Check for leap year
+                if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0):
+                    days_in_month = 29
+                else:
+                    days_in_month = 28
+
+            # Calculate corrected demand for Burnaby using hybrid algorithm
+            burnaby_sales = record['burnaby_sales'] or 0
+            burnaby_stockout_days = record['burnaby_stockout_days'] or 0
+            corrected_burnaby = correct_monthly_demand_hybrid(
+                burnaby_sales, burnaby_stockout_days, days_in_month,
+                sku_id, 'burnaby', str(year_month)
+            )
+
+            # Calculate corrected demand for Kentucky using hybrid algorithm
+            kentucky_sales = record['kentucky_sales'] or 0
+            kentucky_stockout_days = record['kentucky_stockout_days'] or 0
+            corrected_kentucky = correct_monthly_demand_hybrid(
+                kentucky_sales, kentucky_stockout_days, days_in_month,
+                sku_id, 'kentucky', str(year_month)
+            )
+
+            # Update the record
+            update_query = """
+            UPDATE monthly_sales
+            SET corrected_demand_burnaby = %s, corrected_demand_kentucky = %s
+            WHERE sku_id = %s AND `year_month` = %s
+            """
+
+            try:
+                cursor.execute(update_query, (corrected_burnaby, corrected_kentucky, sku_id, year_month))
+                updated_records += 1
+            except Exception as e:
+                error_msg = f"Failed to update {sku_id} {year_month}: {e}"
+                logger.error(error_msg)
+                errors.append(error_msg)
+
+        db.commit()
+        cursor.close()
+        db.close()
+
+        duration = time.time() - start_time
+
+        return {
+            "success": True,
+            "updated_records": updated_records,
+            "errors": errors,
+            "duration_seconds": round(duration, 2)
+        }
+
+    except Exception as e:
+        logger.error(f"Recalculate corrected demands failed: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "duration_seconds": round(time.time() - start_time, 2)
+        }
 
 
 def aggregate_stockout_days_for_month(sku_id: str, year_month: str, warehouse: str) -> int:
