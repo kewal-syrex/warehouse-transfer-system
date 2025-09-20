@@ -2825,6 +2825,103 @@ async def import_stockout_history(file: UploadFile = File(...)):
             detail=f"CSV import failed: {str(e)}"
         )
 
+@app.post("/api/sync-stockout-days",
+          summary="Synchronize Stockout Days",
+          description="Aggregate stockout periods from stockout_dates table into monthly_sales",
+          tags=["Stockout Management"],
+          responses={
+              200: {
+                  "description": "Synchronization completed successfully",
+                  "content": {
+                      "application/json": {
+                          "example": {
+                              "success": True,
+                              "processed_records": 1234,
+                              "processed_skus": 567,
+                              "errors": [],
+                              "duration_seconds": 5.23,
+                              "message": "Stockout days synchronized successfully"
+                          }
+                      }
+                  }
+              },
+              500: {"description": "Synchronization operation failed"}
+          })
+async def sync_stockout_days():
+    """
+    Synchronize all stockout days from stockout_dates table to monthly_sales table
+
+    This endpoint processes all stockout periods and updates the monthly_sales table
+    with accurate stockout day counts for both warehouses. It should be run:
+    - After importing new stockout history data
+    - When discrepancies are found in stockout calculations
+    - As part of monthly data maintenance
+
+    Business Process:
+    1. Queries all stockout periods from stockout_dates table
+    2. Calculates monthly aggregations for each SKU and warehouse
+    3. Handles partial months and overlapping periods correctly
+    4. Updates both burnaby_stockout_days and kentucky_stockout_days fields
+    5. Creates missing monthly_sales records if needed
+
+    Performance Considerations:
+    - Processes data in batches to prevent memory issues
+    - Uses efficient SQL queries with proper indexing
+    - Includes progress logging for large datasets
+    - Completes in under 30 seconds for typical dataset sizes
+
+    Returns:
+        Dictionary with operation results including:
+        - success: boolean indicating if operation completed successfully
+        - processed_records: number of monthly_sales records updated
+        - processed_skus: number of unique SKUs processed
+        - errors: list of any errors encountered during processing
+        - duration_seconds: time taken to complete the operation
+        - message: human-readable summary of the operation
+
+    Raises:
+        HTTPException: 500 if synchronization fails with detailed error message
+    """
+    try:
+        logger.info("Starting stockout days synchronization via API endpoint")
+
+        # Import the sync function from database module
+        from . import database
+
+        # Execute the synchronization
+        result = database.sync_all_stockout_days()
+
+        # Add human-readable message based on results
+        if result["success"]:
+            if result["processed_records"] > 0:
+                message = f"Successfully synchronized {result['processed_records']} records for {result['processed_skus']} SKUs"
+            else:
+                message = "No stockout data found to synchronize"
+        else:
+            message = f"Synchronization failed with {len(result['errors'])} errors"
+
+        result["message"] = message
+
+        # Log completion
+        logger.info(f"Stockout synchronization API completed: {message}")
+
+        return result
+
+    except ImportError as e:
+        error_msg = f"Failed to import database module: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(
+            status_code=500,
+            detail=error_msg
+        )
+    except Exception as e:
+        error_msg = f"Stockout synchronization failed: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(
+            status_code=500,
+            detail=error_msg
+        )
+
 # ===================================================================
 # PENDING ORDERS API ENDPOINTS
 # ===================================================================

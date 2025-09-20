@@ -285,3 +285,254 @@ def update_corrected_demand(sku_id: str, year_month: str, corrected_demand: floa
     except Exception as e:
         logger.error(f"Update corrected demand failed: {e}")
         return False
+
+
+def aggregate_stockout_days_for_month(sku_id: str, year_month: str, warehouse: str) -> int:
+    """
+    Calculate the number of stockout days for a specific SKU, month, and warehouse
+
+    This function aggregates stockout periods from the stockout_dates table
+    and calculates how many days within the specified month the SKU was out of stock.
+
+    Business Logic:
+    - Handles partial stockout periods that span month boundaries
+    - Counts only days within the target month
+    - Handles overlapping stockout periods by using date ranges
+    - Returns 0 if no stockouts occurred in the specified month
+
+    Args:
+        sku_id: The SKU identifier
+        year_month: Target month in YYYY-MM format (e.g., '2025-08')
+        warehouse: Warehouse name ('kentucky' or 'burnaby')
+
+    Returns:
+        int: Number of days out of stock within the specified month (0-31)
+
+    Example:
+        # SKU was out from Aug 21 to Sep 2
+        days = aggregate_stockout_days_for_month('UB-YTX14AH-BS', '2025-08', 'burnaby')
+        # Returns 11 (Aug 21-31 = 11 days)
+
+        days = aggregate_stockout_days_for_month('UB-YTX14AH-BS', '2025-09', 'burnaby')
+        # Returns 2 (Sep 1-2 = 2 days)
+    """
+    try:
+        # Parse year and month
+        year, month = year_month.split('-')
+        year, month = int(year), int(month)
+
+        # Calculate month start and end dates
+        if month == 12:
+            next_year, next_month = year + 1, 1
+        else:
+            next_year, next_month = year, month + 1
+
+        month_start = f"{year:04d}-{month:02d}-01"
+        month_end = f"{next_year:04d}-{next_month:02d}-01"
+
+        # Query stockout periods that overlap with the target month
+        query = """
+        SELECT
+            stockout_date,
+            COALESCE(resolved_date, CURDATE()) as end_date,
+            is_resolved
+        FROM stockout_dates
+        WHERE sku_id = %s
+            AND warehouse = %s
+            AND stockout_date < %s
+            AND COALESCE(resolved_date, CURDATE()) >= %s
+        ORDER BY stockout_date
+        """
+
+        db = get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+        cursor.execute(query, (sku_id, warehouse, month_end, month_start))
+        stockout_periods = cursor.fetchall()
+        cursor.close()
+        db.close()
+
+        if not stockout_periods:
+            return 0
+
+        # Calculate total days within the month
+        total_days = 0
+
+        for period in stockout_periods:
+            period_start = period['stockout_date']
+            period_end = period['end_date']
+
+            # Convert to string format for comparison
+            period_start_str = period_start.strftime('%Y-%m-%d')
+            period_end_str = period_end.strftime('%Y-%m-%d')
+
+            # Find the overlap between stockout period and target month
+            overlap_start = max(period_start_str, month_start)
+            overlap_end = min(period_end_str, month_end)
+
+            # Calculate days in overlap (if any)
+            if overlap_start < overlap_end:
+                from datetime import datetime
+                start_date = datetime.strptime(overlap_start, '%Y-%m-%d')
+                end_date = datetime.strptime(overlap_end, '%Y-%m-%d')
+                days_in_period = (end_date - start_date).days
+                total_days += days_in_period
+
+        # Cap at maximum days in month (safety check)
+        import calendar
+        max_days = calendar.monthrange(year, month)[1]
+        return min(total_days, max_days)
+
+    except Exception as e:
+        logger.error(f"Stockout aggregation failed for {sku_id} {year_month} {warehouse}: {e}")
+        return 0
+
+
+def sync_all_stockout_days() -> Dict[str, Any]:
+    """
+    Synchronize all stockout days from stockout_dates table to monthly_sales table
+
+    This function processes all stockout periods and updates the monthly_sales table
+    with the correct stockout day counts for both warehouses. It handles:
+    - All SKUs that have stockout records
+    - All months that are affected by stockout periods
+    - Both Burnaby and Kentucky warehouses
+    - Proper aggregation of overlapping periods
+
+    Returns:
+        Dict containing:
+        - success: boolean indicating if operation completed
+        - processed_records: number of monthly_sales records updated
+        - processed_skus: number of unique SKUs processed
+        - errors: list of any errors encountered
+        - duration_seconds: time taken to complete
+
+    Example:
+        result = sync_all_stockout_days()
+        # {
+        #     "success": True,
+        #     "processed_records": 1234,
+        #     "processed_skus": 567,
+        #     "errors": [],
+        #     "duration_seconds": 5.23
+        # }
+    """
+    import time
+    from datetime import datetime, timedelta
+
+    start_time = time.time()
+    processed_records = 0
+    processed_skus = set()
+    errors = []
+
+    try:
+        logger.info("Starting stockout days synchronization")
+
+        # Get all unique SKU-warehouse combinations that have stockout data
+        db = get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+
+        # Find all month-year combinations that need updating
+        query = """
+        SELECT DISTINCT
+            sd.sku_id,
+            sd.warehouse,
+            DATE_FORMAT(sd.stockout_date, '%Y-%m') as start_month,
+            DATE_FORMAT(COALESCE(sd.resolved_date, CURDATE()), '%Y-%m') as end_month
+        FROM stockout_dates sd
+        JOIN skus s ON sd.sku_id = s.sku_id
+        WHERE s.status = 'Active'
+        ORDER BY sd.sku_id, sd.warehouse, start_month
+        """
+
+        cursor.execute(query)
+        stockout_records = cursor.fetchall()
+
+        if not stockout_records:
+            cursor.close()
+            db.close()
+            return {
+                "success": True,
+                "processed_records": 0,
+                "processed_skus": 0,
+                "errors": ["No stockout records found"],
+                "duration_seconds": time.time() - start_time
+            }
+
+        # Process each stockout record and generate all affected months
+        months_to_update = set()
+
+        for record in stockout_records:
+            sku_id = record['sku_id']
+            warehouse = record['warehouse']
+            start_month = record['start_month']
+            end_month = record['end_month']
+
+            processed_skus.add(sku_id)
+
+            # Generate all months between start and end
+            current_date = datetime.strptime(start_month + '-01', '%Y-%m-%d')
+            end_date = datetime.strptime(end_month + '-01', '%Y-%m-%d')
+
+            while current_date <= end_date:
+                year_month = current_date.strftime('%Y-%m')
+                months_to_update.add((sku_id, warehouse, year_month))
+
+                # Move to next month
+                if current_date.month == 12:
+                    current_date = current_date.replace(year=current_date.year + 1, month=1)
+                else:
+                    current_date = current_date.replace(month=current_date.month + 1)
+
+        logger.info(f"Found {len(months_to_update)} month-warehouse combinations to update")
+
+        # Update each month's stockout days
+        for sku_id, warehouse, year_month in months_to_update:
+            try:
+                # Calculate stockout days for this month
+                stockout_days = aggregate_stockout_days_for_month(sku_id, year_month, warehouse)
+
+                # Determine which field to update
+                field = f"{warehouse}_stockout_days"
+
+                # Update or insert monthly_sales record
+                update_query = f"""
+                INSERT INTO monthly_sales (sku_id, `year_month`, {field})
+                VALUES (%s, %s, %s)
+                ON DUPLICATE KEY UPDATE {field} = VALUES({field})
+                """
+
+                cursor.execute(update_query, (sku_id, year_month, stockout_days))
+                processed_records += 1
+
+                if processed_records % 100 == 0:
+                    logger.info(f"Processed {processed_records} records...")
+
+            except Exception as e:
+                error_msg = f"Failed to update {sku_id} {year_month} {warehouse}: {str(e)}"
+                errors.append(error_msg)
+                logger.error(error_msg)
+
+        cursor.close()
+        db.close()
+
+        duration = time.time() - start_time
+        logger.info(f"Stockout synchronization completed: {processed_records} records, {len(processed_skus)} SKUs in {duration:.2f}s")
+
+        return {
+            "success": True,
+            "processed_records": processed_records,
+            "processed_skus": len(processed_skus),
+            "errors": errors,
+            "duration_seconds": round(duration, 2)
+        }
+
+    except Exception as e:
+        error_msg = f"Stockout synchronization failed: {str(e)}"
+        logger.error(error_msg)
+        return {
+            "success": False,
+            "processed_records": processed_records,
+            "processed_skus": len(processed_skus),
+            "errors": errors + [error_msg],
+            "duration_seconds": time.time() - start_time
+        }

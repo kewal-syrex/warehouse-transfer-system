@@ -955,7 +955,10 @@ SK-GHI789 SK-JKL012"></textarea>
          */
         function createTableRow(rec) {
             const priorityClass = `priority-${rec.priority.toLowerCase()}`;
-            const stockoutBadge = rec.stockout_days > 0 ? `<span class="stockout-badge">SO:${rec.stockout_days}d</span>` : '';
+            // Create warehouse-specific stockout badges
+            const burnbyBadge = rec.burnaby_stockout_days > 0 ? `<span class="stockout-badge">CA:${rec.burnaby_stockout_days}d</span>` : '';
+            const kentuckyBadge = rec.kentucky_stockout_days > 0 ? `<span class="stockout-badge">US:${rec.kentucky_stockout_days}d</span>` : '';
+            const stockoutBadge = burnbyBadge + (burnbyBadge && kentuckyBadge ? ' ' : '') + kentuckyBadge;
             const coverageColor = rec.coverage_months < 1 ? 'text-danger' : rec.coverage_months < 2 ? 'text-warning' : 'text-success';
             
             return `
@@ -1509,16 +1512,18 @@ SK-GHI789 SK-JKL012"></textarea>
                                         <th>CA Sales</th>
                                         <th>US Sales</th>
                                         <th>Total</th>
-                                        <th>Stockout Days</th>
+                                        <th>CA Stockout</th>
+                                        <th>US Stockout</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     ${salesWithTotals.map(s => `
-                                        <tr ${s.kentucky_stockout_days > 0 ? 'class="table-warning"' : ''}>
+                                        <tr ${(s.kentucky_stockout_days > 0 || s.burnaby_stockout_days > 0) ? 'class="table-warning"' : ''}>
                                             <td><small>${s.year_month}</small></td>
                                             <td>${s.burnaby_sales}</td>
                                             <td>${s.kentucky_sales}</td>
                                             <td><strong>${s.total_sales}</strong></td>
+                                            <td>${s.burnaby_stockout_days > 0 ? '<span class="badge bg-warning">' + s.burnaby_stockout_days + '</span>' : '-'}</td>
                                             <td>${s.kentucky_stockout_days > 0 ? '<span class="badge bg-warning">' + s.kentucky_stockout_days + '</span>' : '-'}</td>
                                         </tr>
                                     `).join('')}
@@ -1587,22 +1592,40 @@ SK-GHI789 SK-JKL012"></textarea>
             const kentuckySales = salesData.map(s => s.kentucky_sales || 0).reverse();
             const burnabySales = salesData.map(s => s.burnaby_sales || 0).reverse();
             const totalSales = salesData.map(s => s.total_sales || 0).reverse();
-            const stockoutDays = salesData.map(s => s.kentucky_stockout_days || 0).reverse();
+            const kentuckyStockoutDays = salesData.map(s => s.kentucky_stockout_days || 0).reverse();
+            const burnabyStockoutDays = salesData.map(s => s.burnaby_stockout_days || 0).reverse();
 
-            // Create stockout background annotations - adjust for reversed data
+            // Create stockout background annotations for both warehouses - adjust for reversed data
             const stockoutAnnotations = {};
+            const maxSales = Math.max(...totalSales);
+
             salesData.forEach((s, originalIndex) => {
+                const reversedIndex = salesData.length - 1 - originalIndex;
+
+                // Kentucky stockout annotation (red)
                 if (s.kentucky_stockout_days > 0) {
-                    // Calculate reversed index position
-                    const reversedIndex = salesData.length - 1 - originalIndex;
-                    stockoutAnnotations[`stockout-${reversedIndex}`] = {
+                    stockoutAnnotations[`kentucky-stockout-${reversedIndex}`] = {
                         type: 'box',
                         xMin: reversedIndex - 0.4,
                         xMax: reversedIndex + 0.4,
                         yMin: 0,
-                        yMax: Math.max(...totalSales) * 1.1,
-                        backgroundColor: 'rgba(220, 53, 69, 0.1)',
-                        borderColor: 'rgba(220, 53, 69, 0.3)',
+                        yMax: maxSales * 0.5,
+                        backgroundColor: 'rgba(220, 53, 69, 0.15)',
+                        borderColor: 'rgba(220, 53, 69, 0.4)',
+                        borderWidth: 1
+                    };
+                }
+
+                // Burnaby stockout annotation (orange)
+                if (s.burnaby_stockout_days > 0) {
+                    stockoutAnnotations[`burnaby-stockout-${reversedIndex}`] = {
+                        type: 'box',
+                        xMin: reversedIndex - 0.4,
+                        xMax: reversedIndex + 0.4,
+                        yMin: maxSales * 0.5,
+                        yMax: maxSales * 1.1,
+                        backgroundColor: 'rgba(255, 193, 7, 0.15)',
+                        borderColor: 'rgba(255, 193, 7, 0.4)',
                         borderWidth: 1
                     };
                 }
@@ -1662,8 +1685,18 @@ SK-GHI789 SK-JKL012"></textarea>
                             callbacks: {
                                 afterBody: function(tooltipItems) {
                                     const index = tooltipItems[0].dataIndex;
-                                    const stockouts = stockoutDays[index];
-                                    return stockouts > 0 ? [`⚠️ Stockout: ${stockouts} days`] : [];
+                                    const kentuckyStockouts = kentuckyStockoutDays[index];
+                                    const burnabyStockouts = burnabyStockoutDays[index];
+
+                                    const stockoutInfo = [];
+                                    if (kentuckyStockouts > 0) {
+                                        stockoutInfo.push(`🇺🇸 US Stockout: ${kentuckyStockouts} days`);
+                                    }
+                                    if (burnabyStockouts > 0) {
+                                        stockoutInfo.push(`🇨🇦 CA Stockout: ${burnabyStockouts} days`);
+                                    }
+
+                                    return stockoutInfo;
                                 }
                             }
                         }
@@ -1690,17 +1723,30 @@ SK-GHI789 SK-JKL012"></textarea>
             // Create the chart
             window.salesChart = new Chart(ctx, config);
 
-            // Add stockout markers as points - adjust for reversed data
+            // Add stockout markers for both warehouses - adjust for reversed data
             salesData.forEach((s, originalIndex) => {
+                const reversedIndex = salesData.length - 1 - originalIndex;
+
+                // Kentucky stockout marker (red)
                 if (s.kentucky_stockout_days > 0) {
-                    const reversedIndex = salesData.length - 1 - originalIndex;
-                    const annotation = document.createElement('div');
-                    annotation.style.position = 'absolute';
-                    annotation.style.color = '#dc3545';
-                    annotation.style.fontSize = '12px';
-                    annotation.style.fontWeight = 'bold';
-                    annotation.innerHTML = '⚠️';
-                    annotation.title = `Stockout: ${s.kentucky_stockout_days} days`;
+                    const kentuckyAnnotation = document.createElement('div');
+                    kentuckyAnnotation.style.position = 'absolute';
+                    kentuckyAnnotation.style.color = '#dc3545';
+                    kentuckyAnnotation.style.fontSize = '12px';
+                    kentuckyAnnotation.style.fontWeight = 'bold';
+                    kentuckyAnnotation.innerHTML = '🇺🇸';
+                    kentuckyAnnotation.title = `US Stockout: ${s.kentucky_stockout_days} days`;
+                }
+
+                // Burnaby stockout marker (orange)
+                if (s.burnaby_stockout_days > 0) {
+                    const burnabyAnnotation = document.createElement('div');
+                    burnabyAnnotation.style.position = 'absolute';
+                    burnabyAnnotation.style.color = '#ffc107';
+                    burnabyAnnotation.style.fontSize = '12px';
+                    burnabyAnnotation.style.fontWeight = 'bold';
+                    burnabyAnnotation.innerHTML = '🇨🇦';
+                    burnabyAnnotation.title = `CA Stockout: ${s.burnaby_stockout_days} days`;
                 }
             });
         }

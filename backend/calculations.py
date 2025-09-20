@@ -985,22 +985,30 @@ class TransferCalculator:
             burnaby_qty = sku_data.get('burnaby_qty', 0)
             kentucky_qty = sku_data.get('kentucky_qty', 0)
             kentucky_sales = sku_data.get('kentucky_sales', 0)
-            stockout_days = sku_data.get('kentucky_stockout_days', 0)
+            burnaby_sales = sku_data.get('burnaby_sales', 0)
+            kentucky_stockout_days = sku_data.get('kentucky_stockout_days', 0)
+            burnaby_stockout_days = sku_data.get('burnaby_stockout_days', 0)
             abc_class = sku_data.get('abc_code', 'C')
             xyz_class = sku_data.get('xyz_code', 'Z')
             transfer_multiple = sku_data.get('transfer_multiple', 50)
-            
-            # Calculate corrected demand using enhanced method
-            corrected_demand = self.corrector.correct_monthly_demand_enhanced(
-                sku_id, kentucky_sales, stockout_days, '2024-03'
+
+            # Calculate corrected demand for Kentucky using enhanced method
+            kentucky_corrected_demand = self.corrector.correct_monthly_demand_enhanced(
+                sku_id, kentucky_sales, kentucky_stockout_days, '2024-03'
             )
-            
-            # Update database with corrected demand
-            database.update_corrected_demand(sku_id, '2024-03', corrected_demand)
-            
-            # Calculate target inventory
+
+            # Calculate corrected demand for Burnaby using its own stockout data
+            burnaby_corrected_demand = self.corrector.correct_monthly_demand_enhanced(
+                sku_id, burnaby_sales, burnaby_stockout_days, '2024-03'
+            )
+
+            # Update database with corrected demand for both warehouses
+            database.update_corrected_demand(sku_id, '2024-03', kentucky_corrected_demand, 'kentucky')
+            database.update_corrected_demand(sku_id, '2024-03', burnaby_corrected_demand, 'burnaby')
+
+            # Calculate target inventory using Kentucky demand (since we're transferring TO Kentucky)
             coverage_months = self.get_coverage_target(abc_class, xyz_class)
-            target_inventory = corrected_demand * coverage_months
+            target_inventory = kentucky_corrected_demand * coverage_months
 
             # Account for pending inventory with time-weighted quantities
             kentucky_pending = get_pending_quantities(sku_id, 'kentucky')
@@ -1010,10 +1018,9 @@ class TransferCalculator:
             current_position = kentucky_qty + pending_qty
             transfer_need = target_inventory - current_position
 
-            # Calculate Burnaby availability considering pending orders and retention requirements
+            # Calculate Burnaby availability using Burnaby-specific corrected demand for retention
             burnaby_coverage_multiplier = calculate_burnaby_coverage_multiplier(sku_id)
-            burnaby_demand = corrected_demand  # Use same corrected demand for Burnaby retention
-            burnaby_min_retain = burnaby_demand * 2 * burnaby_coverage_multiplier  # 2 months base coverage
+            burnaby_min_retain = burnaby_corrected_demand * 2 * burnaby_coverage_multiplier  # 2 months base coverage
 
             # Available for transfer from Burnaby (never go below minimum retention)
             burnaby_available = max(0, burnaby_qty - burnaby_min_retain)
@@ -1022,25 +1029,27 @@ class TransferCalculator:
             # Round to multiple, ensuring we don't exceed available inventory
             recommended_qty = self.round_to_multiple(available_to_transfer, transfer_multiple, burnaby_qty)
             
-            # Calculate priority
+            # Calculate priority using Kentucky corrected demand
             if kentucky_qty == 0:
                 priority = "CRITICAL"
-            elif kentucky_qty / max(corrected_demand, 1) < 1:  # Less than 1 month coverage
+            elif kentucky_qty / max(kentucky_corrected_demand, 1) < 1:  # Less than 1 month coverage
                 priority = "HIGH"
-            elif kentucky_qty / max(corrected_demand, 1) < 2:  # Less than 2 months coverage
+            elif kentucky_qty / max(kentucky_corrected_demand, 1) < 2:  # Less than 2 months coverage
                 priority = "MEDIUM"
             else:
                 priority = "LOW"
-            
-            # Create reason
+
+            # Create reason with warehouse-specific stockout information
             reason_parts = []
-            if stockout_days > 0:
-                reason_parts.append(f"Stockout correction applied ({stockout_days} days out)")
+            if kentucky_stockout_days > 0:
+                reason_parts.append(f"Kentucky stockout correction applied ({kentucky_stockout_days} days out)")
+            if burnaby_stockout_days > 0:
+                reason_parts.append(f"Burnaby stockout correction applied ({burnaby_stockout_days} days out)")
             if kentucky_qty == 0:
                 reason_parts.append("Currently out of stock")
-            elif kentucky_qty / max(corrected_demand, 1) < coverage_months:
+            elif kentucky_qty / max(kentucky_corrected_demand, 1) < coverage_months:
                 reason_parts.append(f"Below target coverage ({coverage_months:.1f} months)")
-            
+
             reason = "; ".join(reason_parts) if reason_parts else "Maintain optimal stock level"
             
             # Get Burnaby pending data for coverage calculations
@@ -1051,16 +1060,18 @@ class TransferCalculator:
                 'description': sku_data.get('description', ''),
                 'current_kentucky_qty': kentucky_qty,
                 'current_burnaby_qty': burnaby_qty,
-                'corrected_monthly_demand': corrected_demand,
+                'corrected_monthly_demand': kentucky_corrected_demand,
+                'corrected_burnaby_demand': burnaby_corrected_demand,
                 'recommended_transfer_qty': recommended_qty,
-                'coverage_months': round(kentucky_qty / max(corrected_demand, 1), 1),
+                'coverage_months': round(kentucky_qty / max(kentucky_corrected_demand, 1), 1),
                 'target_coverage_months': coverage_months,
                 'priority': priority,
                 'reason': reason,
                 'abc_class': abc_class,
                 'xyz_class': xyz_class,
                 'transfer_multiple': transfer_multiple,
-                'stockout_days': stockout_days,
+                'kentucky_stockout_days': kentucky_stockout_days,
+                'burnaby_stockout_days': burnaby_stockout_days,
 
                 # Pending orders data
                 'pending_kentucky_qty': kentucky_pending['total_weighted'],

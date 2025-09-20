@@ -2140,6 +2140,121 @@ A task is complete when:
 
 ---
 
+## 🎯 **TASK-315: Fix Stockout Days Display and Calculations for All SKUs**
+
+**Objective**: Fix the critical issue where stockout days are not being properly displayed and calculated for all SKUs. The stockout_dates table contains the data but it's not being aggregated into monthly_sales table, and the frontend only shows Kentucky stockout days.
+
+**Started**: September 19, 2025
+**Status**: In Progress
+
+### Root Cause Analysis:
+- stockout_dates table contains stockout period data for all SKUs
+- No aggregation function exists to convert date ranges to monthly counts
+- monthly_sales table stockout_days columns are mostly empty (except UB645 test data)
+- Frontend only displays kentucky_stockout_days, ignoring burnaby_stockout_days
+- Transfer calculations only use Kentucky stockout correction
+
+#### Phase 1: Backend - Create Stockout Aggregation System
+
+- [ ] **TASK-315.1**: Create Stockout Aggregation Function
+  - [ ] Add aggregate_stockout_days_for_month() function in backend/database.py
+  - [ ] Calculate days within month boundaries for partial periods
+  - [ ] Handle overlapping stockout periods correctly
+  - [ ] Support both warehouses in single function call
+  - [ ] Add comprehensive error handling and logging
+  - [ ] Document function with clear examples and edge cases
+
+- [ ] **TASK-315.2**: Add Stockout Data Sync Endpoint
+  - [ ] Create /api/sync-stockout-days POST endpoint in backend/main.py
+  - [ ] Implement batch processing for large datasets
+  - [ ] Add progress tracking and status reporting
+  - [ ] Include validation for data integrity
+  - [ ] Add option to sync specific date ranges or all data
+  - [ ] Document API endpoint with OpenAPI schema
+
+- [ ] **TASK-315.3**: Fix Transfer Calculations for Both Warehouses
+  - [ ] Update calculate_transfer_recommendation() in backend/calculations.py
+  - [ ] Apply stockout correction to Burnaby demand calculations
+  - [ ] Use burnaby_stockout_days in Burnaby retention logic
+  - [ ] Ensure both warehouses use warehouse-specific stockout data
+  - [ ] Add unit tests for calculation scenarios
+  - [ ] Document calculation changes with examples
+
+#### Phase 2: Frontend - Display Both Warehouse Stockouts
+
+- [ ] **TASK-315.4**: Update SKU Details Modal Display
+  - [ ] Add separate "CA Stockout" and "US Stockout" columns in frontend/transfer-planning.html
+  - [ ] Update table headers and responsive design
+  - [ ] Highlight rows when either warehouse has stockouts
+  - [ ] Show appropriate badges for each warehouse
+  - [ ] Maintain backward compatibility with existing data
+
+- [ ] **TASK-315.5**: Update Charts and Tooltips
+  - [ ] Add Burnaby stockout annotations to sales charts
+  - [ ] Use different colors for Burnaby vs Kentucky stockouts
+  - [ ] Update tooltip callbacks to show both warehouses
+  - [ ] Add legend to distinguish warehouse stockout indicators
+  - [ ] Test chart rendering with various stockout combinations
+
+- [ ] **TASK-315.6**: Update Transfer Planning Table Badges
+  - [ ] Replace single SO:Xd badge with CA:Xd and US:Xd badges
+  - [ ] Apply appropriate color coding for stockout severity
+  - [ ] Update createTableRow() function logic
+  - [ ] Ensure badges display correctly in all screen sizes
+  - [ ] Test badge display with edge cases (0 days, high numbers)
+
+#### Phase 3: Data Population and Testing
+
+- [ ] **TASK-315.7**: Populate Historical Stockout Data
+  - [ ] Run sync endpoint to aggregate all existing stockout_dates
+  - [ ] Verify data accuracy for test SKUs (UB-YTX14AH-BS, BT-183342)
+  - [ ] Validate monthly totals against stockout periods
+  - [ ] Handle edge cases like month boundaries and leap years
+  - [ ] Create data validation report
+
+- [ ] **TASK-315.8**: Comprehensive Playwright Testing
+  - [ ] Test SKU details modal shows both warehouse columns
+  - [ ] Verify specific SKUs show correct stockout days
+  - [ ] Test transfer calculations use both warehouses
+  - [ ] Verify chart annotations and tooltips work correctly
+  - [ ] Test performance with 4000+ SKUs
+  - [ ] Test edge cases and error conditions
+
+- [ ] **TASK-315.9**: Unit Testing and Validation
+  - [ ] Create unit tests for aggregation function
+  - [ ] Test calculation changes with mock data
+  - [ ] Validate frontend rendering with test data
+  - [ ] Test API endpoint with various scenarios
+  - [ ] Add integration tests for end-to-end flow
+
+#### Phase 4: Documentation and Code Quality
+
+- [ ] **TASK-315.10**: Comprehensive Code Documentation
+  - [ ] Add detailed docstrings to all new functions
+  - [ ] Document aggregation algorithm with examples
+  - [ ] Add inline comments for complex business logic
+  - [ ] Update API documentation for new endpoint
+  - [ ] Follow project documentation standards
+
+- [ ] **TASK-315.11**: Performance Optimization
+  - [ ] Optimize aggregation queries for large datasets
+  - [ ] Add database indexes if needed
+  - [ ] Test memory usage with full dataset
+  - [ ] Implement caching for frequently accessed data
+  - [ ] Monitor query execution times
+
+#### Success Criteria:
+- [ ] UB-YTX14AH-BS shows Burnaby stockout Aug 21-Sep 2 in modal
+- [ ] BT-183342 shows Kentucky stockout May 29-June 12 in modal
+- [ ] All SKUs display both warehouse stockout columns
+- [ ] Transfer calculations factor in both warehouses' stockouts
+- [ ] Aggregation completes in under 30 seconds for full dataset
+- [ ] Performance remains under 5 seconds for transfer planning page
+- [ ] All Playwright tests pass
+- [ ] Code follows project standards and is well documented
+
+---
+
 ## 📞 Escalation & Support
 
 ### Issue Categories
