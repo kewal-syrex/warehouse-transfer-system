@@ -381,22 +381,54 @@ class ABCXYZClassifier:
     """Handles ABC-XYZ classification for inventory management"""
     
     @staticmethod
+    def classify_abc_batch(sku_values: List[tuple]) -> Dict[str, str]:
+        """
+        Classify all SKUs based on cumulative annual value (Pareto 80/15/5 rule)
+
+        Args:
+            sku_values: List of (sku_id, annual_value) tuples
+
+        Returns:
+            Dictionary mapping sku_id to ABC classification ('A', 'B', or 'C')
+        """
+        if not sku_values:
+            return {}
+
+        # Sort by annual value descending
+        sorted_skus = sorted(sku_values, key=lambda x: x[1], reverse=True)
+        total_value = sum(value for _, value in sorted_skus)
+
+        if total_value == 0:
+            return {sku_id: 'C' for sku_id, _ in sorted_skus}
+
+        classifications = {}
+        cumulative_value = 0
+
+        for sku_id, annual_value in sorted_skus:
+            cumulative_value += annual_value
+            cumulative_percentage = (cumulative_value / total_value) * 100
+
+            if cumulative_percentage <= 80:  # Top 80% of cumulative value
+                classifications[sku_id] = 'A'
+            elif cumulative_percentage <= 95:  # Next 15% of cumulative value
+                classifications[sku_id] = 'B'
+            else:  # Bottom 5% of cumulative value
+                classifications[sku_id] = 'C'
+
+        return classifications
+
+    @staticmethod
     def classify_abc(annual_value: float, total_value: float) -> str:
         """
-        Classify SKU based on annual value (Pareto 80/15/5 rule)
-        
-        Args:
-            annual_value: Annual sales value for the SKU
-            total_value: Total annual sales value across all SKUs
-        
-        Returns:
-            ABC classification ('A', 'B', or 'C')
+        Legacy method - kept for backward compatibility
+        Note: This method is flawed and should not be used for new implementations
+        Use classify_abc_batch() instead for proper ABC classification
         """
         if total_value == 0:
             return 'C'
-        
+
         percentage = (annual_value / total_value) * 100
-        
+
         if percentage >= 80:  # Top 80% of value
             return 'A'
         elif percentage >= 15:  # Next 15% of value
@@ -2558,13 +2590,19 @@ def update_abc_xyz_classifications():
 
         updated_count = 0
 
-        # Update classifications in batch for better performance
-        updates = []
+        # Calculate ABC classifications using correct batch method
+        sku_values = []
         for sku_id, sku_data in sku_sales.items():
             annual_sales = sum(sku_data['sales'])
             annual_value = annual_sales * sku_data['cost_per_unit']
-            
-            abc_class = classifier.classify_abc(annual_value, total_annual_value)
+            sku_values.append((sku_id, annual_value))
+
+        abc_classifications = classifier.classify_abc_batch(sku_values)
+
+        # Update classifications in batch for better performance
+        updates = []
+        for sku_id, sku_data in sku_sales.items():
+            abc_class = abc_classifications.get(sku_id, 'C')
             xyz_class = classifier.classify_xyz(sku_data['sales'])
 
             updates.append((abc_class, xyz_class, sku_id))
