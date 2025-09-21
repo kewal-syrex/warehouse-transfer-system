@@ -504,6 +504,50 @@ Performance: Optimized for handling 50+ SKU updates in seconds
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
+                    <!-- Search and Filter Controls -->
+                    <div class="row mb-3" id="stockoutControls" style="display: none;">
+                        <div class="col-md-5">
+                            <div class="input-group">
+                                <span class="input-group-text">
+                                    <i class="fas fa-search"></i>
+                                </span>
+                                <input type="text"
+                                       id="stockoutSearch"
+                                       class="form-control"
+                                       placeholder="Search by SKU or description..."
+                                       oninput="filterStockouts()">
+                                <button class="btn btn-outline-secondary" type="button" onclick="clearStockoutSearch()">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <select id="warehouseFilter" class="form-select" onchange="filterStockouts()">
+                                <option value="">All Warehouses</option>
+                                <option value="kentucky">Kentucky Only</option>
+                                <option value="burnaby">Burnaby Only</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="form-check">
+                                <input class="form-check-input"
+                                       type="checkbox"
+                                       id="hideDiscontinued"
+                                       onchange="filterStockouts()">
+                                <label class="form-check-label" for="hideDiscontinued">
+                                    Hide discontinued
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Results Summary -->
+                    <div id="stockoutSummary" class="mb-2" style="display: none;">
+                        <small class="text-muted">
+                            Showing <span id="filteredCount">0</span> of <span id="totalCount">0</span> stockouts
+                        </small>
+                    </div>
+
                     <div id="stockoutsContent">
                         <!-- Current stockouts will be loaded here -->
                     </div>
@@ -541,6 +585,7 @@ Performance: Optimized for handling 50+ SKU updates in seconds
         let currentStatus = null;
         let currentWarehouse = null;
         let recentUpdatesCache = [];
+        let allStockouts = [];  // Store unfiltered stockouts data for filtering
 
         /**
          * Initialize the page when DOM is loaded
@@ -1075,6 +1120,136 @@ Performance: Optimized for handling 50+ SKU updates in seconds
         }
 
         /**
+         * Filter stockouts based on search term, warehouse, and discontinued status
+         */
+        function filterStockouts() {
+            const searchTerm = document.getElementById('stockoutSearch').value.toLowerCase();
+            const warehouseFilter = document.getElementById('warehouseFilter').value;
+            const hideDisc = document.getElementById('hideDiscontinued').checked;
+
+            let filtered = allStockouts.filter(stockout => {
+                // Search filter - check SKU and description
+                const matchesSearch = !searchTerm ||
+                    stockout.sku_id.toLowerCase().includes(searchTerm) ||
+                    (stockout.description && stockout.description.toLowerCase().includes(searchTerm));
+
+                // Warehouse filter - exact match
+                const matchesWarehouse = !warehouseFilter ||
+                    stockout.warehouse === warehouseFilter;
+
+                // Discontinued filter - using exact match like transfer planning
+                const isDiscontinued = stockout.status === 'Discontinued';
+                const matchesStatus = !hideDisc || !isDiscontinued;
+
+                return matchesSearch && matchesWarehouse && matchesStatus;
+            });
+
+            // Update counts
+            document.getElementById('filteredCount').textContent = filtered.length;
+            document.getElementById('totalCount').textContent = allStockouts.length;
+
+            // Render filtered table
+            renderStockoutsTable(filtered);
+        }
+
+        /**
+         * Clear search input and reapply filters
+         */
+        function clearStockoutSearch() {
+            document.getElementById('stockoutSearch').value = '';
+            filterStockouts();
+        }
+
+        /**
+         * Reset all filters to default state
+         */
+        function resetFilters() {
+            document.getElementById('stockoutSearch').value = '';
+            document.getElementById('warehouseFilter').value = '';
+            document.getElementById('hideDiscontinued').checked = false;
+            filterStockouts();
+        }
+
+        /**
+         * Render the stockouts table with filtered data
+         */
+        function renderStockoutsTable(stockouts) {
+            const content = document.getElementById('stockoutsContent');
+
+            if (stockouts.length === 0) {
+                content.innerHTML = `
+                    <div class="text-center p-4">
+                        <i class="fas fa-filter fa-3x text-muted mb-3"></i>
+                        <h5>No Matching Stockouts</h5>
+                        <p class="text-muted">Try adjusting your search or filters</p>
+                        <button class="btn btn-sm btn-secondary" onclick="resetFilters()">
+                            <i class="fas fa-undo me-1"></i>Reset Filters
+                        </button>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = `
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>SKU</th>
+                                <th>Description</th>
+                                <th>Status</th>
+                                <th>Warehouse</th>
+                                <th>Days Out</th>
+                                <th>Urgency</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+
+            stockouts.forEach(stockout => {
+                const urgencyClass = {
+                    'CRITICAL': 'bg-danger',
+                    'HIGH': 'bg-warning',
+                    'MEDIUM': 'bg-info',
+                    'LOW': 'bg-secondary'
+                }[stockout.urgency_level] || 'bg-secondary';
+
+                // Status badge styling
+                let statusBadge = '';
+                if (stockout.status === 'Discontinued') {
+                    statusBadge = '<span class="badge bg-secondary">Discontinued</span>';
+                } else if (stockout.status === 'Death Row') {
+                    statusBadge = '<span class="badge bg-warning text-dark">Death Row</span>';
+                }
+
+                html += `
+                    <tr>
+                        <td><code>${stockout.sku_id}</code></td>
+                        <td>${stockout.description || 'N/A'}</td>
+                        <td>${statusBadge}</td>
+                        <td><span class="badge bg-primary">${stockout.warehouse.toUpperCase()}</span></td>
+                        <td>${stockout.days_out}</td>
+                        <td><span class="badge ${urgencyClass}">${stockout.urgency_level}</span></td>
+                        <td>
+                            <button class="btn btn-sm btn-success" onclick="quickMarkInStock('${stockout.sku_id}', '${stockout.warehouse}')" title="Mark In Stock">
+                                <i class="fas fa-check"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
+
+            content.innerHTML = html;
+        }
+
+        /**
          * Show current stockouts in modal
          */
         async function showCurrentStockouts() {
@@ -1087,7 +1262,7 @@ Performance: Optimized for handling 50+ SKU updates in seconds
                     <p class="text-muted mt-2">Loading current stockouts...</p>
                 </div>
             `;
-            
+
             modal.show();
 
             try {
@@ -1095,6 +1270,7 @@ Performance: Optimized for handling 50+ SKU updates in seconds
                 if (!response.ok) throw new Error('Failed to load stockouts');
 
                 const stockouts = await response.json();
+                allStockouts = stockouts;  // Store for filtering
 
                 if (stockouts.length === 0) {
                     content.innerHTML = `
@@ -1107,53 +1283,21 @@ Performance: Optimized for handling 50+ SKU updates in seconds
                     return;
                 }
 
-                let html = `
-                    <div class="table-responsive">
-                        <table class="table table-hover">
-                            <thead class="table-dark">
-                                <tr>
-                                    <th>SKU</th>
-                                    <th>Description</th>
-                                    <th>Warehouse</th>
-                                    <th>Days Out</th>
-                                    <th>Urgency</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                `;
+                // Show filter controls
+                document.getElementById('stockoutControls').style.display = 'flex';
+                document.getElementById('stockoutSummary').style.display = 'block';
 
-                stockouts.forEach(stockout => {
-                    const urgencyClass = {
-                        'CRITICAL': 'bg-danger',
-                        'HIGH': 'bg-warning',
-                        'MEDIUM': 'bg-info',
-                        'LOW': 'bg-secondary'
-                    }[stockout.urgency_level] || 'bg-secondary';
+                // Initial counts
+                document.getElementById('totalCount').textContent = stockouts.length;
+                document.getElementById('filteredCount').textContent = stockouts.length;
 
-                    html += `
-                        <tr>
-                            <td><code>${stockout.sku_id}</code></td>
-                            <td>${stockout.description || 'N/A'}</td>
-                            <td><span class="badge bg-primary">${stockout.warehouse.toUpperCase()}</span></td>
-                            <td>${stockout.days_out}</td>
-                            <td><span class="badge ${urgencyClass}">${stockout.urgency_level}</span></td>
-                            <td>
-                                <button class="btn btn-sm btn-success" onclick="quickMarkInStock('${stockout.sku_id}', '${stockout.warehouse}')" title="Mark In Stock">
-                                    <i class="fas fa-check"></i>
-                                </button>
-                            </td>
-                        </tr>
-                    `;
-                });
+                // Reset filters to default
+                document.getElementById('stockoutSearch').value = '';
+                document.getElementById('warehouseFilter').value = '';
+                document.getElementById('hideDiscontinued').checked = false;
 
-                html += `
-                            </tbody>
-                        </table>
-                    </div>
-                `;
-
-                content.innerHTML = html;
+                // Initial render with all data
+                renderStockoutsTable(stockouts);
 
             } catch (error) {
                 console.error('Failed to load stockouts:', error);

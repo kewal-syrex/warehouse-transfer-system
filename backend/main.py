@@ -2405,6 +2405,7 @@ async def get_current_stockouts():
             SELECT
                 sd.sku_id,
                 s.description,
+                s.status,
                 s.category,
                 sd.warehouse,
                 sd.stockout_date,
@@ -2916,6 +2917,119 @@ async def sync_stockout_days():
         )
     except Exception as e:
         error_msg = f"Stockout synchronization failed: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(
+            status_code=500,
+            detail=error_msg
+        )
+
+@app.post("/api/recalculate-corrected-demands",
+          summary="Recalculate Corrected Demands",
+          description="Recalculate and update corrected demand values for all SKUs using stockout correction",
+          tags=["Stockout Management"],
+          responses={
+              200: {
+                  "description": "Recalculation completed successfully",
+                  "content": {
+                      "application/json": {
+                          "example": {
+                              "success": True,
+                              "updated_records": 3153,
+                              "errors": [],
+                              "duration_seconds": 12.45,
+                              "message": "Successfully recalculated corrected demand for 3153 records"
+                          }
+                      }
+                  }
+              },
+              500: {
+                  "description": "Recalculation failed",
+                  "content": {
+                      "application/json": {
+                          "example": {
+                              "detail": "Recalculation failed: Database connection error"
+                          }
+                      }
+                  }
+              }
+          })
+async def recalculate_corrected_demands():
+    """
+    Recalculate and update corrected demand values for all SKUs and months
+
+    This endpoint processes all monthly sales data and applies the stockout correction
+    algorithm to calculate proper corrected demand values. It reads sales data and
+    stockout days, then stores the corrected values in the corrected_demand_burnaby
+    and corrected_demand_kentucky fields.
+
+    Business Logic:
+    1. Reads all monthly sales records with sales or stockout data
+    2. Calculates corrected demand using availability rate with 30% floor
+    3. Applies 50% increase cap for very low availability as safeguard
+    4. Updates database with actual corrected values instead of raw sales
+    5. Handles leap years and variable month lengths correctly
+
+    Use Cases:
+    - After fixing stockout correction algorithm
+    - When corrected_demand fields contain raw sales instead of corrected values
+    - As part of data maintenance and integrity checks
+    - Before generating transfer recommendations
+
+    Algorithm:
+    - corrected_demand = sales / max(availability_rate, 0.3)
+    - availability_rate = (days_in_month - stockout_days) / days_in_month
+    - Cap correction at 1.5x raw sales for extreme cases
+
+    Performance:
+    - Processes ~3000 records in under 15 seconds
+    - Uses batch updates with proper transaction handling
+    - Includes detailed error reporting for failed updates
+
+    Returns:
+        Dictionary with operation results including:
+        - success: boolean indicating if operation completed successfully
+        - updated_records: number of monthly_sales records updated
+        - errors: list of any errors encountered during processing
+        - duration_seconds: time taken to complete the operation
+        - message: human-readable summary of the operation
+
+    Raises:
+        HTTPException: 500 if recalculation fails with detailed error message
+    """
+    try:
+        logger.info("Starting corrected demand recalculation via API endpoint")
+
+        # Import the recalculation function from database module
+        from . import database
+
+        # Execute the recalculation
+        result = database.recalculate_all_corrected_demands()
+
+        # Add human-readable message based on results
+        if result["success"]:
+            if result["updated_records"] > 0:
+                message = f"Successfully recalculated corrected demand for {result['updated_records']} records"
+            else:
+                message = "No records found to recalculate"
+        else:
+            message = f"Recalculation failed with {len(result.get('errors', []))} errors"
+
+        result["message"] = message
+
+        # Log completion
+        logger.info(f"Corrected demand recalculation API completed: {message}")
+
+        return result
+
+    except ImportError as e:
+        error_msg = f"Failed to import database module: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(
+            status_code=500,
+            detail=error_msg
+        )
+    except Exception as e:
+        error_msg = f"Corrected demand recalculation failed: {str(e)}"
         logger.error(error_msg)
         raise HTTPException(
             status_code=500,

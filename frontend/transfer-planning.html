@@ -274,6 +274,47 @@
             font-weight: 600;
         }
 
+        /* Multi-select status filter styles */
+        #status-filter-dropdown {
+            max-height: 250px;
+            overflow-y: auto;
+        }
+
+        #status-filter-dropdown .dropdown-item {
+            padding: 0.25rem 0.5rem;
+            cursor: pointer;
+        }
+
+        #status-filter-dropdown .dropdown-item:hover {
+            background-color: #f8f9fa;
+        }
+
+        #status-filter-dropdown .dropdown-item label {
+            cursor: pointer;
+            margin-bottom: 0;
+            width: 100%;
+            display: flex;
+            align-items: center;
+        }
+
+        #status-filter-dropdown .form-check-input {
+            margin-top: 0;
+        }
+
+        #status-filter-toggle {
+            text-align: left;
+            justify-content: space-between;
+            display: flex;
+            align-items: center;
+        }
+
+        #status-filter-text {
+            flex-grow: 1;
+            text-overflow: ellipsis;
+            overflow: hidden;
+            white-space: nowrap;
+        }
+
         /* Responsive adjustments */
         @media (max-width: 768px) {
             .action-btn-group {
@@ -489,6 +530,37 @@
                         <option value="">All Suppliers</option>
                         <!-- Options will be populated dynamically -->
                     </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">SKU Status</label>
+                    <div class="dropdown">
+                        <button class="btn btn-outline-secondary btn-sm form-control form-control-sm dropdown-toggle" type="button" id="status-filter-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                            <span id="status-filter-text">All Statuses</span>
+                        </button>
+                        <ul class="dropdown-menu w-100" aria-labelledby="status-filter-toggle" id="status-filter-dropdown">
+                            <li>
+                                <label class="dropdown-item">
+                                    <input type="checkbox" id="status-select-all" class="form-check-input me-2"> Select All
+                                </label>
+                            </li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li>
+                                <label class="dropdown-item">
+                                    <input type="checkbox" value="Active" class="form-check-input me-2 status-checkbox"> Active
+                                </label>
+                            </li>
+                            <li>
+                                <label class="dropdown-item">
+                                    <input type="checkbox" value="Death Row" class="form-check-input me-2 status-checkbox"> Death Row
+                                </label>
+                            </li>
+                            <li>
+                                <label class="dropdown-item">
+                                    <input type="checkbox" value="Discontinued" class="form-check-input me-2 status-checkbox"> Discontinued
+                                </label>
+                            </li>
+                        </ul>
+                    </div>
                 </div>
                 <div class="col-md-2">
                     <label class="form-label">Min Transfer Qty</label>
@@ -886,6 +958,106 @@ SK-GHI789 SK-JKL012"></textarea>
                 option.textContent = supplier;
                 supplierFilter.appendChild(option);
             });
+        }
+
+        /**
+         * Initialize status filter functionality and event handlers
+         *
+         * Sets up the multi-select dropdown behavior for SKU status filtering
+         * including select all/none functionality and status text updates
+         *
+         * @function initializeStatusFilter
+         * @returns {void}
+         */
+        function initializeStatusFilter() {
+            const selectAllCheckbox = document.getElementById('status-select-all');
+            const statusCheckboxes = document.querySelectorAll('.status-checkbox');
+            const statusFilterText = document.getElementById('status-filter-text');
+
+            // Handle Select All checkbox
+            selectAllCheckbox.addEventListener('change', function() {
+                const isChecked = this.checked;
+                statusCheckboxes.forEach(checkbox => {
+                    checkbox.checked = isChecked;
+                });
+                updateStatusFilterText();
+            });
+
+            // Handle individual status checkboxes
+            statusCheckboxes.forEach(checkbox => {
+                checkbox.addEventListener('change', function() {
+                    updateSelectAllState();
+                    updateStatusFilterText();
+                });
+            });
+
+            // Prevent dropdown from closing when clicking checkboxes
+            const dropdown = document.getElementById('status-filter-dropdown');
+            dropdown.addEventListener('click', function(e) {
+                e.stopPropagation();
+            });
+
+            // Update status filter text based on selections
+            function updateStatusFilterText() {
+                const checkedBoxes = document.querySelectorAll('.status-checkbox:checked');
+                const statusText = document.getElementById('status-filter-text');
+
+                if (checkedBoxes.length === 0) {
+                    statusText.textContent = 'All Statuses';
+                } else if (checkedBoxes.length === statusCheckboxes.length) {
+                    statusText.textContent = 'All Statuses';
+                } else if (checkedBoxes.length === 1) {
+                    statusText.textContent = checkedBoxes[0].value;
+                } else {
+                    statusText.textContent = `${checkedBoxes.length} Selected`;
+                }
+            }
+
+            // Update Select All checkbox state based on individual selections
+            function updateSelectAllState() {
+                const checkedBoxes = document.querySelectorAll('.status-checkbox:checked');
+                const selectAllCheckbox = document.getElementById('status-select-all');
+
+                if (checkedBoxes.length === statusCheckboxes.length) {
+                    selectAllCheckbox.checked = true;
+                    selectAllCheckbox.indeterminate = false;
+                } else if (checkedBoxes.length === 0) {
+                    selectAllCheckbox.checked = false;
+                    selectAllCheckbox.indeterminate = false;
+                } else {
+                    selectAllCheckbox.checked = false;
+                    selectAllCheckbox.indeterminate = true;
+                }
+            }
+        }
+
+        /**
+         * Get currently selected status values from the filter
+         *
+         * Returns an array of selected status values for filtering
+         *
+         * @function getSelectedStatuses
+         * @returns {Array<string>} Array of selected status values
+         */
+        function getSelectedStatuses() {
+            const checkedBoxes = document.querySelectorAll('.status-checkbox:checked');
+            return Array.from(checkedBoxes).map(checkbox => checkbox.value);
+        }
+
+        /**
+         * Clear all status filter selections
+         *
+         * Unchecks all status checkboxes and updates the display text
+         *
+         * @function clearStatusFilter
+         * @returns {void}
+         */
+        function clearStatusFilter() {
+            document.getElementById('status-select-all').checked = false;
+            document.querySelectorAll('.status-checkbox').forEach(checkbox => {
+                checkbox.checked = false;
+            });
+            document.getElementById('status-filter-text').textContent = 'All Statuses';
         }
 
         /**
@@ -2074,6 +2246,7 @@ SK-GHI789 SK-JKL012"></textarea>
             const priority = document.getElementById('priority-filter').value;
             const abc = document.getElementById('abc-filter').value;
             const supplier = document.getElementById('supplier-filter').value;
+            const selectedStatuses = getSelectedStatuses();
             const minQty = parseInt(document.getElementById('min-qty-filter').value) || 0;
             const showRecommendationsOnly = document.getElementById('show-recommendations-only').checked;
 
@@ -2089,6 +2262,10 @@ SK-GHI789 SK-JKL012"></textarea>
 
             if (supplier) {
                 filteredData = filteredData.filter(r => r.supplier === supplier);
+            }
+
+            if (selectedStatuses.length > 0) {
+                filteredData = filteredData.filter(r => selectedStatuses.includes(r.status));
             }
 
             if (minQty > 0) {
@@ -2121,6 +2298,7 @@ SK-GHI789 SK-JKL012"></textarea>
             document.getElementById('priority-filter').value = '';
             document.getElementById('abc-filter').value = '';
             document.getElementById('supplier-filter').value = '';
+            clearStatusFilter();
             document.getElementById('min-qty-filter').value = '';
             document.getElementById('show-recommendations-only').checked = false;
             populateTable();
@@ -2561,6 +2739,9 @@ SK-GHI789 SK-JKL012"></textarea>
 
         // Initialize cache status when page loads
         $(document).ready(function() {
+            // Initialize status filter functionality
+            initializeStatusFilter();
+
             // Check cache status after other initialization
             setTimeout(checkCacheStatus, 1000);
         });

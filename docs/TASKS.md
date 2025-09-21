@@ -300,6 +300,137 @@ Successfully enhanced the pending orders system to include both order date and e
 
 ---
 
+## 📋 Current Sprint: Multi-Select SKU Status Filter Enhancement
+
+### 🎯 **TASK-305: Implement Multi-Select SKU Status Filter with Export Integration**
+
+**Objective**: Add a multi-select dropdown filter for SKU status (Active, Death Row, Discontinued) to the transfer planning page and include the status field in all export formats for better inventory management decisions.
+
+**Context**: Users need to filter transfer recommendations by SKU status to focus on active items, identify death row products for special handling, or exclude discontinued items from regular transfers. The status information should also be included in exported data for warehouse operations.
+
+#### Phase 1: Frontend Implementation
+
+- [ ] **TASK-305.1**: Add Multi-Select Status Filter HTML Component
+  - [ ] Add status filter column after supplier filter in frontend/transfer-planning.html
+  - [ ] Create multi-select dropdown with checkboxes for Active, Death Row, Discontinued
+  - [ ] Position filter in existing filter row structure (line ~486-492)
+  - [ ] Add proper Bootstrap styling classes for consistency
+  - [ ] Include clear "Select All" and "Deselect All" options
+
+- [ ] **TASK-305.2**: Implement CSS Styling for Multi-Select Dropdown
+  - [ ] Add custom CSS for multi-select dropdown appearance
+  - [ ] Style checkbox interactions and hover effects
+  - [ ] Ensure responsive design for mobile devices
+  - [ ] Match existing filter styling patterns
+  - [ ] Add visual indicators for selected options count
+
+- [ ] **TASK-305.3**: Add JavaScript Multi-Select Functionality
+  - [ ] Create populateStatusFilter() function to populate options
+  - [ ] Implement multi-select event handlers for checkbox interactions
+  - [ ] Add "Select All" / "Deselect All" toggle functionality
+  - [ ] Store selected statuses in array for filter processing
+  - [ ] Add helper functions for status management
+
+- [ ] **TASK-305.4**: Update Filter Logic and UI Integration
+  - [ ] Modify applyFilters() function to handle multiple selected statuses
+  - [ ] Update clearFilters() to reset status selections
+  - [ ] Add status filter to existing filter chain logic
+  - [ ] Update filter summary display to show selected statuses
+  - [ ] Ensure filter persists during table refresh operations
+
+#### Phase 2: Backend Integration
+
+- [ ] **TASK-305.5**: Update Transfer Recommendations API
+  - [ ] Modify calculations.py to include status field in recommendations
+  - [ ] Update calculate_all_transfer_recommendations() function
+  - [ ] Ensure status field from skus table is included in API response
+  - [ ] Add status to recommendation data structure consistently
+  - [ ] Test API response includes status for all SKUs
+
+- [ ] **TASK-305.6**: Update Database Queries for Status Inclusion
+  - [ ] Review and update SQL queries in calculations.py
+  - [ ] Ensure status field is selected in all relevant queries
+  - [ ] Verify join conditions include skus.status field
+  - [ ] Update any cached calculation results to include status
+  - [ ] Maintain query performance with additional field
+
+#### Phase 3: Export Enhancement
+
+- [ ] **TASK-305.7**: Update Excel Export to Include Status Column
+  - [ ] Modify _create_enhanced_transfer_orders_sheet() in import_export.py
+  - [ ] Add "Status" column to transfer orders sheet headers
+  - [ ] Include status data in Excel export data rows
+  - [ ] Position status column logically (after Description, before Priority)
+  - [ ] Apply consistent Excel formatting for status values
+
+- [ ] **TASK-305.8**: Update CSV Export to Include Status Column
+  - [ ] Update CSV export headers to include status field
+  - [ ] Ensure status data is included in CSV export rows
+  - [ ] Verify CSV format compatibility with Excel and other tools
+  - [ ] Test export functionality with filtered and unfiltered data
+  - [ ] Maintain proper CSV encoding and formatting
+
+#### Phase 4: Testing & Validation
+
+- [ ] **TASK-305.9**: Unit Testing for Filter Logic
+  - [ ] Test multi-select filter functionality with various combinations
+  - [ ] Verify status filter works independently and with other filters
+  - [ ] Test edge cases (no selection, all selected, single selection)
+  - [ ] Validate filter reset and clear functionality
+  - [ ] Test filter performance with large datasets
+
+- [ ] **TASK-305.10**: Backend API Testing
+  - [ ] Verify status field included in all API responses
+  - [ ] Test transfer recommendations include accurate status data
+  - [ ] Validate database query performance impact
+  - [ ] Test export APIs return status information correctly
+  - [ ] Confirm backward compatibility of API changes
+
+- [ ] **TASK-305.11**: Comprehensive Playwright UI Testing
+  - [ ] Test multi-select dropdown functionality and interactions
+  - [ ] Verify filter combinations work correctly (status + priority + supplier)
+  - [ ] Test filter state persistence during page operations
+  - [ ] Validate export functionality includes status column
+  - [ ] Test responsive design on different screen sizes
+  - [ ] Verify performance with 4000+ SKU dataset
+
+#### Phase 5: Documentation & Code Quality
+
+- [ ] **TASK-305.12**: Code Documentation
+  - [ ] Add comprehensive docstrings to all new functions
+  - [ ] Document multi-select filter implementation patterns
+  - [ ] Update inline comments for complex filter logic
+  - [ ] Document status field integration in calculations
+  - [ ] Add JSDoc comments for JavaScript functions
+
+- [ ] **TASK-305.13**: User Documentation
+  - [ ] Update help text and tooltips for new status filter
+  - [ ] Document filter usage patterns in user guide
+  - [ ] Add explanation of status values (Active, Death Row, Discontinued)
+  - [ ] Update export documentation to mention status column
+  - [ ] Create screenshots for documentation if needed
+
+- [ ] **TASK-305.14**: Code Quality & Standards
+  - [ ] Follow existing codebase patterns and conventions
+  - [ ] Ensure clean, maintainable code structure
+  - [ ] Validate HTML accessibility standards
+  - [ ] Check CSS follows existing styling patterns
+  - [ ] Verify JavaScript follows ES6+ standards and project conventions
+
+#### Success Criteria:
+- [ ] Multi-select status filter displays and functions correctly
+- [ ] Users can select multiple status values (Active, Death Row, Discontinued)
+- [ ] Filter works independently and in combination with other filters
+- [ ] Status column included in both Excel and CSV exports
+- [ ] Filter state persists during table operations
+- [ ] Performance remains under 5-second threshold for 4000+ SKUs
+- [ ] All existing functionality remains intact
+- [ ] Comprehensive test coverage with Playwright
+- [ ] Clean, well-documented code following project standards
+- [ ] Mobile-responsive design works correctly
+
+---
+
 ## 📋 Current Sprint: Critical System Fixes
 
 ### 🎯 **TASK-312: Fix Critical Issues with Seasonal Adjustments, Stockout Corrections, and UI Problems**

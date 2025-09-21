@@ -912,7 +912,7 @@ class ImportExportManager:
 
         # Enhanced headers with pending orders and coverage data
         headers = [
-            "SKU", "Description", "Priority", "Current KY Qty", "Available CA Qty",
+            "SKU", "Description", "Status", "Priority", "Current KY Qty", "Available CA Qty",
             "Pending CA", "Pending KY", "CA Coverage After", "KY Coverage After",
             "Monthly Demand", "Coverage (Months)", "Recommended Transfer",
             "ABC/XYZ Class", "Stockout Override", "Reason", "Transfer Multiple"
@@ -934,9 +934,10 @@ class ImportExportManager:
 
             ws.cell(row=row, column=1, value=sku_id)
             ws.cell(row=row, column=2, value=rec['description'])
+            ws.cell(row=row, column=3, value=rec.get('status', 'Active'))
 
             # Priority with color coding
-            priority_cell = ws.cell(row=row, column=3, value=rec['priority'])
+            priority_cell = ws.cell(row=row, column=4, value=rec['priority'])
             if rec['priority'] in priority_fills:
                 priority_cell.fill = priority_fills[rec['priority']]
                 if rec['priority'] in ['CRITICAL', 'HIGH', 'LOW']:
@@ -944,14 +945,14 @@ class ImportExportManager:
                 else:
                     priority_cell.font = Font(bold=True)
 
-            ws.cell(row=row, column=4, value=rec['current_kentucky_qty'])
-            ws.cell(row=row, column=5, value=rec['current_burnaby_qty'])
+            ws.cell(row=row, column=5, value=rec['current_kentucky_qty'])
+            ws.cell(row=row, column=6, value=rec['current_burnaby_qty'])
 
             # Pending orders data
             pending_ca = pending_data.get(sku_id, {}).get('burnaby_pending', 0)
             pending_ky = pending_data.get(sku_id, {}).get('kentucky_pending', 0)
-            ws.cell(row=row, column=6, value=pending_ca)
-            ws.cell(row=row, column=7, value=pending_ky)
+            ws.cell(row=row, column=7, value=pending_ca)
+            ws.cell(row=row, column=8, value=pending_ky)
 
             # Coverage after transfer calculations
             monthly_demand = rec.get('corrected_monthly_demand', 0)
@@ -964,23 +965,23 @@ class ImportExportManager:
                 ca_coverage_after = 0
                 ky_coverage_after = 0
 
-            ws.cell(row=row, column=8, value=round(ca_coverage_after, 1))
-            ws.cell(row=row, column=9, value=round(ky_coverage_after, 1))
+            ws.cell(row=row, column=9, value=round(ca_coverage_after, 1))
+            ws.cell(row=row, column=10, value=round(ky_coverage_after, 1))
 
-            ws.cell(row=row, column=10, value=round(monthly_demand))
-            ws.cell(row=row, column=11, value=round(rec['coverage_months'], 1))
-            ws.cell(row=row, column=12, value=transfer_qty)
-            ws.cell(row=row, column=13, value=f"{rec['abc_class']}{rec['xyz_class']}")
+            ws.cell(row=row, column=11, value=round(monthly_demand))
+            ws.cell(row=row, column=12, value=round(rec['coverage_months'], 1))
+            ws.cell(row=row, column=13, value=transfer_qty)
+            ws.cell(row=row, column=14, value=f"{rec['abc_class']}{rec['xyz_class']}")
 
             # Stockout override indicator
             stockout_override = "YES" if rec.get('stockout_override_applied', False) else "NO"
-            override_cell = ws.cell(row=row, column=14, value=stockout_override)
+            override_cell = ws.cell(row=row, column=15, value=stockout_override)
             if stockout_override == "YES":
                 override_cell.fill = PatternFill(start_color="FFE6CC", end_color="FFE6CC", fill_type="solid")
                 override_cell.font = Font(bold=True)
 
-            ws.cell(row=row, column=15, value=rec['reason'])
-            ws.cell(row=row, column=16, value=rec['transfer_multiple'])
+            ws.cell(row=row, column=16, value=rec['reason'])
+            ws.cell(row=row, column=17, value=rec['transfer_multiple'])
 
         # Auto-adjust column widths
         for column in ws.columns:
