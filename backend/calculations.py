@@ -1058,6 +1058,8 @@ class TransferCalculator:
             return {
                 'sku_id': sku_id,
                 'description': sku_data.get('description', ''),
+                'supplier': sku_data.get('supplier', ''),
+                'status': sku_data.get('status', 'Active'),
                 'current_kentucky_qty': kentucky_qty,
                 'current_burnaby_qty': burnaby_qty,
                 'corrected_monthly_demand': kentucky_corrected_demand,
@@ -1468,6 +1470,7 @@ class TransferCalculator:
                 'sku_id': sku_id,
                 'description': sku_data.get('description', ''),
                 'supplier': sku_data.get('supplier', ''),
+                'status': sku_data.get('status', 'Active'),
                 'current_burnaby_qty': burnaby_qty,
                 'current_kentucky_qty': kentucky_qty,
                 'corrected_monthly_demand': kentucky_corrected_demand,
@@ -1519,6 +1522,7 @@ class TransferCalculator:
                 'sku_id': sku_id,
                 'description': sku_data.get('description', ''),
                 'supplier': sku_data.get('supplier', ''),
+                'status': sku_data.get('status', 'Active'),
                 'current_burnaby_qty': burnaby_qty,
                 'current_kentucky_qty': kentucky_qty,
                 'corrected_monthly_demand': 0,
@@ -1693,6 +1697,8 @@ class TransferCalculator:
             result = {
                 'sku_id': sku_id,
                 'description': sku_data.get('description', ''),
+                'supplier': sku_data.get('supplier', ''),
+                'status': sku_data.get('status', 'Active'),
 
                 # Current state
                 'current_kentucky_qty': kentucky_qty,
@@ -2309,6 +2315,7 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
             s.sku_id,
             s.description,
             s.supplier,
+            s.status,
             s.abc_code,
             s.xyz_code,
             s.transfer_multiple,
@@ -2422,6 +2429,7 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
                     'sku_id': sku_data['sku_id'],
                     'description': sku_data.get('description', ''),
                     'supplier': sku_data.get('supplier', ''),
+                    'status': sku_data.get('status', 'Active'),
                     'abc_class': sku_data.get('abc_code', 'C'),
                     'xyz_class': sku_data.get('xyz_code', 'Z'),
                     'current_kentucky_qty': sku_data.get('kentucky_qty', 0),
