@@ -314,6 +314,72 @@ async def get_sku_count():
             detail=f"SKU count query failed: {str(e)}"
         )
 
+@app.get("/api/suppliers",
+         summary="Get All Suppliers",
+         description="Retrieve all unique suppliers from the SKU database for filter dropdown",
+         tags=["Reference Data"],
+         responses={
+             200: {
+                 "description": "List of unique suppliers sorted alphabetically",
+                 "content": {
+                     "application/json": {
+                         "example": {
+                             "suppliers": [
+                                 "Allied Eastern",
+                                 "Chengde",
+                                 "Gpaiplus",
+                                 "JINZHEN"
+                             ]
+                         }
+                     }
+                 }
+             },
+             500: {"description": "Database query failed"}
+         })
+async def get_suppliers():
+    """
+    Get all unique suppliers from the SKU database
+
+    Retrieves all distinct supplier names from the skus table,
+    filtering out empty/null values and system entries like "0" or "Discontinued".
+    Results are sorted alphabetically for consistent UI display.
+
+    Returns:
+        dict: List of supplier names for filter dropdown population
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+
+        # Get unique suppliers, excluding invalid entries
+        query = """
+        SELECT DISTINCT supplier
+        FROM skus
+        WHERE supplier IS NOT NULL
+          AND supplier != ''
+          AND supplier != '0'
+          AND supplier != 'Discontinued'
+        ORDER BY supplier ASC
+        """
+
+        cursor.execute(query)
+        results = cursor.fetchall()
+        db.close()
+
+        # Extract supplier names from query results
+        suppliers = [row['supplier'] for row in results]
+
+        return {
+            "suppliers": suppliers,
+            "count": len(suppliers)
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Suppliers query failed: {str(e)}"
+        )
+
 @app.get("/api/dashboard",
          summary="Get Dashboard Metrics",
          description="Retrieve key business metrics and alerts for the main dashboard",
@@ -399,21 +465,56 @@ async def get_dashboard_metrics():
         result = cursor.fetchone()
         total_value = float(result['value']) if result['value'] else 0
         
-        # Recent sales (current month)
+        # Get current month in YYYY-MM format
+        from datetime import datetime
+        current_month = datetime.now().strftime('%Y-%m')
+
+        # Recent sales (current month) - both quantity and revenue
         cursor.execute("""
-            SELECT SUM(kentucky_sales) as sales
-            FROM monthly_sales 
-            WHERE `year_month` = '2024-03'
-        """)
+            SELECT
+                SUM(kentucky_sales + burnaby_sales) as total_sales,
+                SUM(kentucky_revenue + burnaby_revenue) as total_revenue,
+                SUM(kentucky_revenue) as kentucky_revenue,
+                SUM(burnaby_revenue) as burnaby_revenue
+            FROM monthly_sales
+            WHERE `year_month` = %s
+        """, (current_month,))
         result = cursor.fetchone()
-        current_sales = result['sales'] if result['sales'] else 0
-        
+        current_sales = result['total_sales'] if result['total_sales'] else 0
+        revenue_mtd = float(result['total_revenue']) if result['total_revenue'] else 0
+        kentucky_revenue_mtd = float(result['kentucky_revenue']) if result['kentucky_revenue'] else 0
+        burnaby_revenue_mtd = float(result['burnaby_revenue']) if result['burnaby_revenue'] else 0
+
+        # Calculate average revenue per unit for current month
+        avg_revenue_per_unit = round(revenue_mtd / current_sales, 2) if current_sales > 0 else 0
+
+        # Previous month revenue for comparison
+        import datetime as dt
+        prev_month = (datetime.now().replace(day=1) - dt.timedelta(days=1)).strftime('%Y-%m')
+        cursor.execute("""
+            SELECT SUM(kentucky_revenue + burnaby_revenue) as prev_revenue
+            FROM monthly_sales
+            WHERE `year_month` = %s
+        """, (prev_month,))
+        result = cursor.fetchone()
+        revenue_prev_month = float(result['prev_revenue']) if result['prev_revenue'] else 0
+
+        # Year to date revenue
+        current_year = datetime.now().strftime('%Y')
+        cursor.execute("""
+            SELECT SUM(kentucky_revenue + burnaby_revenue) as ytd_revenue
+            FROM monthly_sales
+            WHERE `year_month` LIKE %s
+        """, (f"{current_year}-%",))
+        result = cursor.fetchone()
+        revenue_ytd = float(result['ytd_revenue']) if result['ytd_revenue'] else 0
+
         # SKUs with stockouts this month
         cursor.execute("""
             SELECT COUNT(*) as count
             FROM monthly_sales
-            WHERE `year_month` = '2024-03' AND kentucky_stockout_days > 0
-        """)
+            WHERE `year_month` = %s AND kentucky_stockout_days > 0
+        """, (current_month,))
         stockout_skus = cursor.fetchone()['count']
         
         db.close()
@@ -424,7 +525,14 @@ async def get_dashboard_metrics():
                 "low_stock": low_stock,
                 "total_inventory_value": round(total_value, 2),
                 "current_month_sales": current_sales,
-                "stockout_affected_skus": stockout_skus
+                "stockout_affected_skus": stockout_skus,
+                # Revenue metrics
+                "revenue_mtd": round(revenue_mtd, 2),
+                "burnaby_revenue_mtd": round(burnaby_revenue_mtd, 2),
+                "kentucky_revenue_mtd": round(kentucky_revenue_mtd, 2),
+                "avg_revenue_per_unit_mtd": avg_revenue_per_unit,
+                "revenue_prev_month": round(revenue_prev_month, 2),
+                "revenue_ytd": round(revenue_ytd, 2)
             },
             "alerts": [
                 {"type": "danger", "message": f"{out_of_stock} SKUs are out of stock"} if out_of_stock > 0 else None,
@@ -1247,7 +1355,7 @@ async def update_sku(sku_id: str, update_data: models.SKUUpdateRequest):
              400: {"description": "Invalid file format or missing required data"},
              500: {"description": "Import processing failed"}
          })
-async def import_excel_file(file: UploadFile = File(...)):
+async def import_excel_file(file: UploadFile = File(...), import_mode: str = Form("append")):
     """
     Import Excel file with comprehensive data validation and processing
     
@@ -1293,8 +1401,9 @@ async def import_excel_file(file: UploadFile = File(...)):
         
         # Process import using import_export manager
         result = import_export.import_export_manager.import_excel_file(
-            file_content, 
-            file.filename
+            file_content,
+            file.filename,
+            import_mode
         )
         
         return result
@@ -1309,7 +1418,7 @@ async def import_excel_file(file: UploadFile = File(...)):
          summary="Import CSV File", 
          description="Upload and import CSV file with data validation",
          tags=["Import/Export"])
-async def import_csv_file(file: UploadFile = File(...)):
+async def import_csv_file(file: UploadFile = File(...), import_mode: str = Form("append")):
     """Import CSV file with automatic format detection and validation"""
     
     if not file.filename or not file.filename.lower().endswith('.csv'):
@@ -1320,10 +1429,12 @@ async def import_csv_file(file: UploadFile = File(...)):
     
     try:
         file_content = await file.read()
-        
+        logger.info(f"CSV IMPORT: Received import_mode parameter: '{import_mode}'")
+
         result = import_export.import_export_manager.import_csv_file(
             file_content,
-            file.filename
+            file.filename,
+            import_mode
         )
         
         return result

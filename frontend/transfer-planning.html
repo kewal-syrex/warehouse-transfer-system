@@ -787,7 +787,7 @@ SK-GHI789 SK-JKL012"></textarea>
 
                 // Update UI with priority items
                 updateSummaryStats();
-                populateSupplierFilter();
+                await populateSupplierFilter();
                 populateTable();
                 updateProgress(true, 25, 'Urgent items loaded');
 
@@ -933,31 +933,58 @@ SK-GHI789 SK-JKL012"></textarea>
         }
 
         /**
-         * Populate supplier filter dropdown with unique suppliers from data
+         * Populate supplier filter dropdown with all suppliers from database
          *
-         * Extracts unique supplier values from recommendations data and populates
-         * the supplier filter dropdown for user selection
+         * Loads all unique suppliers from the dedicated API endpoint and populates
+         * the supplier filter dropdown for comprehensive filtering options
          *
          * @function populateSupplierFilter
-         * @returns {void}
+         * @returns {Promise<void>}
          */
-        function populateSupplierFilter() {
+        async function populateSupplierFilter() {
             const supplierFilter = document.getElementById('supplier-filter');
-            const suppliers = [...new Set(recommendationsData
-                .map(rec => rec.supplier)
-                .filter(supplier => supplier && supplier.trim() !== '')
-            )].sort();
 
-            // Clear existing options except "All Suppliers"
-            supplierFilter.innerHTML = '<option value="">All Suppliers</option>';
+            try {
+                // Fetch all suppliers from the dedicated API endpoint
+                const response = await fetch('/api/suppliers');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
 
-            // Add unique suppliers
-            suppliers.forEach(supplier => {
-                const option = document.createElement('option');
-                option.value = supplier;
-                option.textContent = supplier;
-                supplierFilter.appendChild(option);
-            });
+                const data = await response.json();
+                const suppliers = data.suppliers || [];
+
+                // Clear existing options except "All Suppliers"
+                supplierFilter.innerHTML = '<option value="">All Suppliers</option>';
+
+                // Add all suppliers from database
+                suppliers.forEach(supplier => {
+                    const option = document.createElement('option');
+                    option.value = supplier;
+                    option.textContent = supplier;
+                    supplierFilter.appendChild(option);
+                });
+
+            } catch (error) {
+                console.error('Error loading suppliers:', error);
+
+                // Fallback to extracting suppliers from recommendations data
+                const suppliers = [...new Set(recommendationsData
+                    .map(rec => rec.supplier)
+                    .filter(supplier => supplier && supplier.trim() !== '')
+                )].sort();
+
+                // Clear existing options except "All Suppliers"
+                supplierFilter.innerHTML = '<option value="">All Suppliers</option>';
+
+                // Add unique suppliers from recommendations as fallback
+                suppliers.forEach(supplier => {
+                    const option = document.createElement('option');
+                    option.value = supplier;
+                    option.textContent = supplier;
+                    supplierFilter.appendChild(option);
+                });
+            }
         }
 
         /**
