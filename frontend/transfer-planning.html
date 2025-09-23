@@ -619,7 +619,7 @@
                             <tr>
                                 <th><input type="checkbox" id="select-all"></th>
                                 <th>SKU</th>
-                                <th>Description</th>
+                                <th>Stockout Status</th>
                                 <th>Priority</th>
                                 <th>Current KY</th>
                                 <th>Available CA</th>
@@ -630,6 +630,8 @@
                                 <th>Coverage</th>
                                 <th>Transfer Qty</th>
                                 <th>Confirmed Qty</th>
+                                <th>CA to Order</th>
+                                <th>KY to Order</th>
                                 <th>CA Coverage After</th>
                                 <th>KY Coverage After</th>
                                 <th>ABC/XYZ</th>
@@ -839,6 +841,26 @@ SK-GHI789 SK-JKL012"></textarea>
             } finally {
                 updateProgress(false);
                 showLoading(false);
+            }
+        }
+
+        /**
+         * Get appropriate Bootstrap badge class for SKU status
+         * @param {string} status - SKU status (Active, Death Row, Discontinued)
+         * @returns {string} Bootstrap badge class
+         */
+        function getStatusBadgeClass(status) {
+            if (!status) return 'bg-success';
+
+            switch (status.toLowerCase()) {
+                case 'active':
+                    return 'bg-success';
+                case 'death row':
+                    return 'bg-warning';
+                case 'discontinued':
+                    return 'bg-danger';
+                default:
+                    return 'bg-secondary';
             }
         }
 
@@ -1154,9 +1176,9 @@ SK-GHI789 SK-JKL012"></textarea>
          */
         function createTableRow(rec) {
             const priorityClass = `priority-${rec.priority.toLowerCase()}`;
-            // Create warehouse-specific stockout badges
-            const burnbyBadge = rec.burnaby_stockout_days > 0 ? `<span class="stockout-badge">CA:${rec.burnaby_stockout_days}d</span>` : '';
-            const kentuckyBadge = rec.kentucky_stockout_days > 0 ? `<span class="stockout-badge">US:${rec.kentucky_stockout_days}d</span>` : '';
+            // Create warehouse-specific stockout badges based on actual stockout status
+            const burnbyBadge = rec.burnaby_stockout ? `<span class="badge bg-danger">CA</span>` : '';
+            const kentuckyBadge = rec.kentucky_stockout ? `<span class="badge bg-danger">US</span>` : '';
             const stockoutBadge = burnbyBadge + (burnbyBadge && kentuckyBadge ? ' ' : '') + kentuckyBadge;
             const coverageColor = rec.coverage_months < 1 ? 'text-danger' : rec.coverage_months < 2 ? 'text-warning' : 'text-success';
             
@@ -1164,11 +1186,7 @@ SK-GHI789 SK-JKL012"></textarea>
                 <tr data-sku="${rec.sku_id}">
                     <td><input type="checkbox" class="row-select" value="${rec.sku_id}"></td>
                     <td><strong>${rec.sku_id}</strong></td>
-                    <td>
-                        <span class="text-truncate d-inline-block" style="max-width: 200px;" title="${rec.description}">
-                            ${rec.description}
-                        </span>
-                    </td>
+                    <td>${stockoutBadge || '<span class="text-muted">-</span>'}</td>
                     <td><span class="badge ${priorityClass}">${rec.priority}</span></td>
                     <td>${rec.current_kentucky_qty}</td>
                     <td>${rec.current_burnaby_qty}</td>
@@ -1201,6 +1219,12 @@ SK-GHI789 SK-JKL012"></textarea>
                     </td>
                     <td>
                         ${createConfirmedQtyColumn(rec)}
+                    </td>
+                    <td>
+                        ${createCAOrderColumn(rec)}
+                    </td>
+                    <td>
+                        ${createKYOrderColumn(rec)}
                     </td>
                     <td>
                         <span class="text-success">${(rec.burnaby_coverage_after_transfer || 0).toFixed(1)}m</span>
@@ -1275,6 +1299,84 @@ SK-GHI789 SK-JKL012"></textarea>
                                style="width: 80px;"
                                placeholder="Qty">
                         <button class="lock-btn" onclick="confirmTransferQtyFromInput('${rec.sku_id}')" title="Lock this quantity">
+                            <i class="fas fa-lock"></i>
+                        </button>
+                    </div>
+                `;
+            }
+        }
+
+        /**
+         * Create CA to Order column with lock/unlock functionality
+         *
+         * @function createCAOrderColumn
+         * @param {Object} rec - Transfer recommendation data
+         * @returns {string} HTML for CA order quantity column
+         */
+        function createCAOrderColumn(rec) {
+            const caOrderQty = rec.ca_order_qty || 0;
+            const isLocked = rec.ca_order_qty !== null && rec.ca_order_qty !== undefined;
+
+            if (isLocked) {
+                return `
+                    <div class="confirmed-qty" title="CA Order quantity locked">
+                        ${caOrderQty}
+                        <i class="fas fa-lock lock-icon"></i>
+                        <button class="lock-btn locked" onclick="unlockCAOrder('${rec.sku_id}')" title="Unlock CA order quantity">
+                            <i class="fas fa-unlock"></i>
+                        </button>
+                    </div>
+                `;
+            } else {
+                return `
+                    <div class="d-flex align-items-center">
+                        <input type="number"
+                               id="ca-order-${rec.sku_id}"
+                               class="form-control form-control-sm me-2"
+                               value="0"
+                               min="0"
+                               style="width: 80px;"
+                               placeholder="0">
+                        <button class="lock-btn" onclick="lockCAOrder('${rec.sku_id}')" title="Lock CA order quantity">
+                            <i class="fas fa-lock"></i>
+                        </button>
+                    </div>
+                `;
+            }
+        }
+
+        /**
+         * Create KY to Order column with lock/unlock functionality
+         *
+         * @function createKYOrderColumn
+         * @param {Object} rec - Transfer recommendation data
+         * @returns {string} HTML for KY order quantity column
+         */
+        function createKYOrderColumn(rec) {
+            const kyOrderQty = rec.ky_order_qty || 0;
+            const isLocked = rec.ky_order_qty !== null && rec.ky_order_qty !== undefined;
+
+            if (isLocked) {
+                return `
+                    <div class="confirmed-qty" title="KY Order quantity locked">
+                        ${kyOrderQty}
+                        <i class="fas fa-lock lock-icon"></i>
+                        <button class="lock-btn locked" onclick="unlockKYOrder('${rec.sku_id}')" title="Unlock KY order quantity">
+                            <i class="fas fa-unlock"></i>
+                        </button>
+                    </div>
+                `;
+            } else {
+                return `
+                    <div class="d-flex align-items-center">
+                        <input type="number"
+                               id="ky-order-${rec.sku_id}"
+                               class="form-control form-control-sm me-2"
+                               value="0"
+                               min="0"
+                               style="width: 80px;"
+                               placeholder="0">
+                        <button class="lock-btn" onclick="lockKYOrder('${rec.sku_id}')" title="Lock KY order quantity">
                             <i class="fas fa-lock"></i>
                         </button>
                     </div>
@@ -1457,6 +1559,187 @@ SK-GHI789 SK-JKL012"></textarea>
             } catch (error) {
                 console.error('Failed to clear confirmations:', error);
                 alert(`Failed to clear confirmations: ${error.message}`);
+            }
+        }
+
+        /**
+         * Lock CA order quantity for a specific SKU
+         *
+         * @function lockCAOrder
+         * @param {string} skuId - SKU identifier
+         * @returns {Promise<void>}
+         */
+        async function lockCAOrder(skuId) {
+            const input = document.getElementById(`ca-order-${skuId}`);
+            if (!input) {
+                alert('Input field not found');
+                return;
+            }
+
+            const qty = parseInt(input.value);
+            if (isNaN(qty) || qty < 0) {
+                alert('Please enter a valid quantity (0 or greater)');
+                return;
+            }
+
+            try {
+                // Get current KY order quantity to preserve it
+                let rec = recommendationsData.find(r => r.sku_id === skuId);
+                const currentKYQty = rec ? rec.ky_order_qty : null;
+
+                // Prepare request body
+                const requestBody = { ca_order_qty: qty };
+                if (currentKYQty !== null && currentKYQty !== undefined) {
+                    requestBody.ky_order_qty = currentKYQty;
+                }
+
+                const response = await fetch(`/api/order-quantities/${skuId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Failed to save CA order quantity: ${response.statusText}`);
+                }
+
+                // Update local data
+                rec = recommendationsData.find(r => r.sku_id === skuId);
+                if (rec) {
+                    rec.ca_order_qty = qty;
+                    // Refresh the row to show locked state
+                    updateSingleRow(rec);
+                }
+
+            } catch (error) {
+                console.error('Failed to lock CA order quantity:', error);
+                alert(`Failed to save CA order quantity: ${error.message}`);
+            }
+        }
+
+        /**
+         * Unlock CA order quantity for a specific SKU
+         *
+         * @function unlockCAOrder
+         * @param {string} skuId - SKU identifier
+         * @returns {Promise<void>}
+         */
+        async function unlockCAOrder(skuId) {
+            try {
+                const response = await fetch(`/api/order-quantities/${skuId}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Failed to clear CA order quantity: ${response.statusText}`);
+                }
+
+                // Update local data
+                const rec = recommendationsData.find(r => r.sku_id === skuId);
+                if (rec) {
+                    rec.ca_order_qty = null;
+                }
+
+                // Update only the specific row
+                updateSingleRow(rec);
+
+            } catch (error) {
+                console.error('Failed to unlock CA order quantity:', error);
+                alert(`Failed to clear CA order quantity: ${error.message}`);
+            }
+        }
+
+        /**
+         * Lock KY order quantity for a specific SKU
+         *
+         * @function lockKYOrder
+         * @param {string} skuId - SKU identifier
+         * @returns {Promise<void>}
+         */
+        async function lockKYOrder(skuId) {
+            const input = document.getElementById(`ky-order-${skuId}`);
+            if (!input) {
+                alert('Input field not found');
+                return;
+            }
+
+            console.log('KY Input element:', input);
+            console.log('KY Input value before parsing:', input.value);
+            const qty = parseInt(input.value);
+            console.log('KY Parsed quantity:', qty);
+            if (isNaN(qty) || qty < 0) {
+                alert('Please enter a valid quantity (0 or greater)');
+                return;
+            }
+
+            try {
+                // Get current CA order quantity to preserve it
+                let rec = recommendationsData.find(r => r.sku_id === skuId);
+                const currentCAQty = rec ? rec.ca_order_qty : null;
+
+                // Prepare request body
+                const requestBody = { ky_order_qty: qty };
+                if (currentCAQty !== null && currentCAQty !== undefined) {
+                    requestBody.ca_order_qty = currentCAQty;
+                }
+
+                const response = await fetch(`/api/order-quantities/${skuId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Failed to save KY order quantity: ${response.statusText}`);
+                }
+
+                // Update local data
+                rec = recommendationsData.find(r => r.sku_id === skuId);
+                if (rec) {
+                    rec.ky_order_qty = qty;
+                    // Refresh the row to show locked state
+                    updateSingleRow(rec);
+                }
+
+            } catch (error) {
+                console.error('Failed to lock KY order quantity:', error);
+                alert(`Failed to save KY order quantity: ${error.message}`);
+            }
+        }
+
+        /**
+         * Unlock KY order quantity for a specific SKU
+         *
+         * @function unlockKYOrder
+         * @param {string} skuId - SKU identifier
+         * @returns {Promise<void>}
+         */
+        async function unlockKYOrder(skuId) {
+            try {
+                const response = await fetch(`/api/order-quantities/${skuId}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Failed to clear KY order quantity: ${response.statusText}`);
+                }
+
+                // Update local data
+                const rec = recommendationsData.find(r => r.sku_id === skuId);
+                if (rec) {
+                    rec.ky_order_qty = null;
+                }
+
+                // Update only the specific row
+                updateSingleRow(rec);
+
+            } catch (error) {
+                console.error('Failed to unlock KY order quantity:', error);
+                alert(`Failed to clear KY order quantity: ${error.message}`);
             }
         }
 
@@ -1646,6 +1929,7 @@ SK-GHI789 SK-JKL012"></textarea>
                             <tr><th>Description:</th><td>${skuData.sku.description}</td></tr>
                             <tr><th>Supplier:</th><td>${skuData.sku.supplier || 'N/A'}</td></tr>
                             <tr><th>ABC/XYZ:</th><td><span class="badge bg-info">${skuData.sku.abc_code}${skuData.sku.xyz_code}</span></td></tr>
+                            <tr><th>Status:</th><td><span class="badge ${getStatusBadgeClass(skuData.sku.status)}">${skuData.sku.status || 'Active'}</span></td></tr>
                             <tr><th>Transfer Multiple:</th><td>${skuData.sku.transfer_multiple}</td></tr>
                         </table>
                     </div>

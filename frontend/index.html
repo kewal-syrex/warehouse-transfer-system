@@ -235,6 +235,79 @@ Performance: Optimized for fast loading with API-driven data updates
             </div>
         </div>
 
+        <!-- Revenue Metrics Row -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <h5 class="text-muted mb-3"><i class="fas fa-money-bill-wave me-2"></i>Revenue Analytics</h5>
+            </div>
+
+            <!-- Total Revenue MTD -->
+            <div class="col-md-2">
+                <div class="card metric-card h-100">
+                    <div class="card-body text-center">
+                        <i class="fas fa-dollar-sign text-success mb-2" style="font-size: 1.5rem;"></i>
+                        <div id="revenue-mtd" class="metric-value text-success">--</div>
+                        <div class="metric-label">Revenue MTD</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Burnaby Revenue -->
+            <div class="col-md-2">
+                <div class="card metric-card h-100">
+                    <div class="card-body text-center">
+                        <i class="fas fa-warehouse text-primary mb-2" style="font-size: 1.5rem;"></i>
+                        <div id="burnaby-revenue-mtd" class="metric-value text-primary">--</div>
+                        <div class="metric-label">Burnaby Revenue</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Kentucky Revenue -->
+            <div class="col-md-2">
+                <div class="card metric-card h-100">
+                    <div class="card-body text-center">
+                        <i class="fas fa-warehouse text-info mb-2" style="font-size: 1.5rem;"></i>
+                        <div id="kentucky-revenue-mtd" class="metric-value text-info">--</div>
+                        <div class="metric-label">Kentucky Revenue</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Average Revenue per Unit -->
+            <div class="col-md-2">
+                <div class="card metric-card h-100">
+                    <div class="card-body text-center">
+                        <i class="fas fa-calculator text-warning mb-2" style="font-size: 1.5rem;"></i>
+                        <div id="avg-revenue-per-unit" class="metric-value text-warning">--</div>
+                        <div class="metric-label">Avg Revenue/Unit</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Previous Month Revenue -->
+            <div class="col-md-2">
+                <div class="card metric-card h-100">
+                    <div class="card-body text-center">
+                        <i class="fas fa-chart-line text-secondary mb-2" style="font-size: 1.5rem;"></i>
+                        <div id="revenue-prev-month" class="metric-value text-secondary">--</div>
+                        <div class="metric-label">Prev Month</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Year to Date Revenue -->
+            <div class="col-md-2">
+                <div class="card metric-card h-100">
+                    <div class="card-body text-center">
+                        <i class="fas fa-calendar-year text-dark mb-2" style="font-size: 1.5rem;"></i>
+                        <div id="revenue-ytd" class="metric-value text-dark">--</div>
+                        <div class="metric-label">Revenue YTD</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Action Buttons -->
         <div class="row mb-4">
             <div class="col-12">
@@ -406,11 +479,20 @@ Performance: Optimized for fast loading with API-driven data updates
          * - Uses locale string formatting for large numbers
          */
         function updateMetrics(metrics) {
+            // Original metrics
             document.getElementById('out-of-stock').textContent = metrics.out_of_stock || 0;
             document.getElementById('low-stock').textContent = metrics.low_stock || 0;
             document.getElementById('inventory-value').textContent = '$' + (metrics.total_inventory_value || 0).toLocaleString();
             document.getElementById('current-sales').textContent = metrics.current_month_sales || 0;
             document.getElementById('stockout-skus').textContent = metrics.stockout_affected_skus || 0;
+
+            // Revenue metrics
+            document.getElementById('revenue-mtd').textContent = '$' + (metrics.revenue_mtd || 0).toLocaleString();
+            document.getElementById('burnaby-revenue-mtd').textContent = '$' + (metrics.burnaby_revenue_mtd || 0).toLocaleString();
+            document.getElementById('kentucky-revenue-mtd').textContent = '$' + (metrics.kentucky_revenue_mtd || 0).toLocaleString();
+            document.getElementById('avg-revenue-per-unit').textContent = '$' + (metrics.avg_revenue_per_unit_mtd || 0).toFixed(2);
+            document.getElementById('revenue-prev-month').textContent = '$' + (metrics.revenue_prev_month || 0).toLocaleString();
+            document.getElementById('revenue-ytd').textContent = '$' + (metrics.revenue_ytd || 0).toLocaleString();
         }
 
         // Update alerts section

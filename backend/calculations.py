@@ -1539,10 +1539,16 @@ class TransferCalculator:
                 'confirmed_by': sku_data.get('confirmed_by'),
                 'confirmed_at': sku_data.get('confirmed_at'),
                 'confirmation_notes': sku_data.get('confirmation_notes'),
+                'ca_order_qty': sku_data.get('ca_order_qty'),
+                'ky_order_qty': sku_data.get('ky_order_qty'),
                 'variance_percent': sku_data.get('variance_percent', 0),
                 'is_confirmed': bool(sku_data.get('confirmed_qty') is not None),
                 'has_significant_variance': abs(sku_data.get('variance_percent', 0)) > 20,
-                'has_major_variance': abs(sku_data.get('variance_percent', 0)) > 50
+                'has_major_variance': abs(sku_data.get('variance_percent', 0)) > 50,
+
+                # Stockout status data
+                'kentucky_stockout': bool(sku_data.get('kentucky_stockout', 0)),
+                'burnaby_stockout': bool(sku_data.get('burnaby_stockout', 0))
             }
 
         except Exception as e:
@@ -1590,10 +1596,16 @@ class TransferCalculator:
                 'confirmed_by': sku_data.get('confirmed_by'),
                 'confirmed_at': sku_data.get('confirmed_at'),
                 'confirmation_notes': sku_data.get('confirmation_notes'),
+                'ca_order_qty': sku_data.get('ca_order_qty'),
+                'ky_order_qty': sku_data.get('ky_order_qty'),
                 'variance_percent': sku_data.get('variance_percent', 0),
                 'is_confirmed': bool(sku_data.get('confirmed_qty') is not None),
                 'has_significant_variance': abs(sku_data.get('variance_percent', 0)) > 20,
-                'has_major_variance': abs(sku_data.get('variance_percent', 0)) > 50
+                'has_major_variance': abs(sku_data.get('variance_percent', 0)) > 50,
+
+                # Stockout status data (fallback values)
+                'kentucky_stockout': bool(sku_data.get('kentucky_stockout', 0)),
+                'burnaby_stockout': bool(sku_data.get('burnaby_stockout', 0))
             }
 
     def calculate_enhanced_transfer_with_pending(self, sku_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -2364,11 +2376,15 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
             tc.confirmed_by,
             tc.confirmed_at,
             tc.notes as confirmation_notes,
+            tc.ca_order_qty,
+            tc.ky_order_qty,
             CASE
                 WHEN tc.original_suggested_qty > 0 THEN
                     ROUND(((tc.confirmed_qty - tc.original_suggested_qty) / tc.original_suggested_qty) * 100, 2)
                 ELSE 0
-            END as variance_percent
+            END as variance_percent,
+            CASE WHEN sd_ky.sku_id IS NOT NULL THEN TRUE ELSE FALSE END as kentucky_stockout,
+            CASE WHEN sd_ca.sku_id IS NOT NULL THEN TRUE ELSE FALSE END as burnaby_stockout
         FROM skus s
         LEFT JOIN inventory_current ic ON s.sku_id = ic.sku_id
         LEFT JOIN monthly_sales ms ON s.sku_id = ms.sku_id AND ms.`year_month` = (
@@ -2378,6 +2394,12 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
             AND (ms2.kentucky_sales > 0 OR ms2.burnaby_sales > 0)
         )
         LEFT JOIN transfer_confirmations tc ON s.sku_id = tc.sku_id
+        LEFT JOIN stockout_dates sd_ky ON s.sku_id = sd_ky.sku_id
+            AND sd_ky.warehouse = 'kentucky'
+            AND sd_ky.is_resolved = FALSE
+        LEFT JOIN stockout_dates sd_ca ON s.sku_id = sd_ca.sku_id
+            AND sd_ca.warehouse = 'burnaby'
+            AND sd_ca.is_resolved = FALSE
         ORDER BY s.sku_id
         """
         
@@ -2483,10 +2505,16 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
                     'confirmed_by': sku_data.get('confirmed_by'),
                     'confirmed_at': sku_data.get('confirmed_at'),
                     'confirmation_notes': sku_data.get('confirmation_notes'),
+                    'ca_order_qty': sku_data.get('ca_order_qty'),
+                    'ky_order_qty': sku_data.get('ky_order_qty'),
                     'variance_percent': sku_data.get('variance_percent', 0),
                     'is_confirmed': bool(sku_data.get('confirmed_qty') is not None),
                     'has_significant_variance': abs(sku_data.get('variance_percent', 0)) > 20,
-                    'has_major_variance': abs(sku_data.get('variance_percent', 0)) > 50
+                    'has_major_variance': abs(sku_data.get('variance_percent', 0)) > 50,
+
+                    # Stockout status data
+                    'kentucky_stockout': bool(sku_data.get('kentucky_stockout', 0)),
+                    'burnaby_stockout': bool(sku_data.get('burnaby_stockout', 0))
                 }
                 recommendations.append(minimal_rec)
         

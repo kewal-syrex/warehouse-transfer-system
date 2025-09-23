@@ -51,7 +51,7 @@ class ImportExportManager:
     # EXCEL IMPORT FUNCTIONALITY
     # =============================================================================
     
-    def import_excel_file(self, file_content: bytes, filename: str) -> Dict[str, Any]:
+    def import_excel_file(self, file_content: bytes, filename: str, import_mode: str = "append") -> Dict[str, Any]:
         """
         Import Excel file with comprehensive validation and error handling
         
@@ -83,7 +83,7 @@ class ImportExportManager:
             
             # Process each sheet
             for sheet_name, df in excel_data.items():
-                sheet_result = self._process_excel_sheet(sheet_name, df)
+                sheet_result = self._process_excel_sheet(sheet_name, df, import_mode)
                 results["sheets_processed"] += 1
                 results["records_imported"] += sheet_result.get("records", 0)
                 
@@ -107,7 +107,7 @@ class ImportExportManager:
                 "import_timestamp": datetime.now().isoformat()
             }
     
-    def _process_excel_sheet(self, sheet_name: str, df: pd.DataFrame) -> Dict[str, Any]:
+    def _process_excel_sheet(self, sheet_name: str, df: pd.DataFrame, import_mode: str = "append") -> Dict[str, Any]:
         """Process individual Excel sheet based on its content type"""
         
         sheet_name_lower = sheet_name.lower()
@@ -115,14 +115,14 @@ class ImportExportManager:
         if 'inventory' in sheet_name_lower or 'stock' in sheet_name_lower:
             return self._import_inventory_data(df, sheet_name)
         elif 'sales' in sheet_name_lower or 'history' in sheet_name_lower:
-            return self._import_sales_data(df, sheet_name)
+            return self._import_sales_data(df, sheet_name, import_mode)
         elif 'sku' in sheet_name_lower or 'product' in sheet_name_lower:
             return self._import_sku_data(df, sheet_name)
         elif 'stockout' in sheet_name_lower:
             return self._import_stockout_data(df, sheet_name)
         else:
             # Try to auto-detect content type
-            return self._auto_detect_and_import(df, sheet_name)
+            return self._auto_detect_and_import(df, sheet_name, import_mode)
     
     def _import_inventory_data(self, df: pd.DataFrame, sheet_name: str) -> Dict[str, Any]:
         """
@@ -366,7 +366,7 @@ class ImportExportManager:
 
         return result
     
-    def _import_sales_data(self, df: pd.DataFrame, sheet_name: str) -> Dict[str, Any]:
+    def _import_sales_data(self, df: pd.DataFrame, sheet_name: str, import_mode: str = "append") -> Dict[str, Any]:
         """
         Import sales history data with comprehensive error logging and SKU validation
 
@@ -382,7 +382,7 @@ class ImportExportManager:
             Dict containing detailed import results with line-by-line tracking
         """
 
-        expected_columns = ['sku_id', 'year_month', 'burnaby_sales', 'kentucky_sales', 'kentucky_stockout_days']
+        expected_columns = ['sku_id', 'year_month', 'burnaby_sales', 'kentucky_sales', 'burnaby_revenue', 'kentucky_revenue', 'kentucky_stockout_days']
         result = {
             "type": "sales",
             "records": 0,
@@ -397,32 +397,39 @@ class ImportExportManager:
         }
 
 
-        # Validate columns (allow some flexibility)
+        # Validate columns (require revenue columns)
         available_cols = df.columns.tolist()
         missing_critical = []
 
-        for col in ['sku_id', 'year_month']:
+        # Required columns now include revenue
+        required_cols = ['sku_id', 'year_month', 'burnaby_sales', 'kentucky_sales', 'burnaby_revenue', 'kentucky_revenue']
+        for col in required_cols:
             if col not in available_cols:
                 missing_critical.append(col)
 
         if missing_critical:
-            error_msg = f"Missing critical columns in {sheet_name}: {', '.join(missing_critical)}"
+            error_msg = f"Missing required columns in {sheet_name}: {', '.join(missing_critical)}. Revenue data is now required."
             self.validation_errors.append(error_msg)
             return result
 
         # Handle optional columns
         df_clean = df.copy()
-        for col in ['burnaby_sales', 'kentucky_sales', 'kentucky_stockout_days', 'burnaby_stockout_days']:
+        for col in ['kentucky_stockout_days', 'burnaby_stockout_days']:
             if col not in df_clean.columns:
                 df_clean[col] = 0
 
         # Clean and validate data
         df_clean = df_clean.dropna(subset=['sku_id', 'year_month'])
 
-        # Convert numeric columns
-        numeric_cols = ['burnaby_sales', 'kentucky_sales', 'kentucky_stockout_days', 'burnaby_stockout_days']
-        for col in numeric_cols:
+        # Convert numeric columns - integers for quantities, floats for revenue
+        quantity_cols = ['burnaby_sales', 'kentucky_sales', 'kentucky_stockout_days', 'burnaby_stockout_days']
+        revenue_cols = ['burnaby_revenue', 'kentucky_revenue']
+
+        for col in quantity_cols:
             df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce').fillna(0).astype(int)
+
+        for col in revenue_cols:
+            df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce').fillna(0.0)
 
         # Validate stockout days (0-31)
         invalid_stockout = df_clean[
@@ -439,6 +446,20 @@ class ImportExportManager:
             # Correct invalid values
             df_clean['kentucky_stockout_days'] = df_clean['kentucky_stockout_days'].clip(0, 31)
             df_clean['burnaby_stockout_days'] = df_clean['burnaby_stockout_days'].clip(0, 31)
+
+        # Validate revenue values (must be non-negative)
+        invalid_revenue = df_clean[
+            (df_clean['burnaby_revenue'] < 0) |
+            (df_clean['kentucky_revenue'] < 0)
+        ]
+
+        if not invalid_revenue.empty:
+            self.validation_warnings.append(
+                f"Negative revenue values found in {sheet_name} - corrected to 0"
+            )
+            # Correct negative values
+            df_clean['burnaby_revenue'] = df_clean['burnaby_revenue'].clip(lower=0)
+            df_clean['kentucky_revenue'] = df_clean['kentucky_revenue'].clip(lower=0)
 
         # Track original row numbers (adding 2 to account for header row and 0-based indexing)
         df_clean['original_row'] = df_clean.index + 2
@@ -480,6 +501,8 @@ class ImportExportManager:
                 "year_month": year_month,
                 "burnaby_sales": row['burnaby_sales'],
                 "kentucky_sales": row['kentucky_sales'],
+                "burnaby_revenue": row['burnaby_revenue'],
+                "kentucky_revenue": row['kentucky_revenue'],
                 "burnaby_stockout_days": row['burnaby_stockout_days'],
                 "kentucky_stockout_days": row['kentucky_stockout_days'],
                 "status": "pending",
@@ -515,6 +538,14 @@ class ImportExportManager:
                     result["import_details"].append(detail_entry)
                     continue
 
+                if row['burnaby_revenue'] < 0 or row['kentucky_revenue'] < 0:
+                    detail_entry["status"] = "failed"
+                    detail_entry["error_category"] = "INVALID_DATA"
+                    detail_entry["error_message"] = f"Negative revenue values not allowed (Burnaby: ${row['burnaby_revenue']}, Kentucky: ${row['kentucky_revenue']})"
+                    result["import_summary"]["failed"] += 1
+                    result["import_details"].append(detail_entry)
+                    continue
+
                 # Calculate stockout-corrected demand
                 burnaby_corrected = self._calculate_stockout_corrected_demand(
                     row['burnaby_sales'], row['burnaby_stockout_days']
@@ -523,29 +554,66 @@ class ImportExportManager:
                     row['kentucky_sales'], row['kentucky_stockout_days']
                 )
 
-                # Insert/update sales data with corrected demand
-                query = """
-                INSERT INTO monthly_sales
-                (`sku_id`, `year_month`, `burnaby_sales`, `kentucky_sales`,
-                 `burnaby_stockout_days`, `kentucky_stockout_days`,
-                 `corrected_demand_burnaby`, `corrected_demand_kentucky`)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                    `burnaby_sales` = VALUES(`burnaby_sales`),
-                    `kentucky_sales` = VALUES(`kentucky_sales`),
-                    `burnaby_stockout_days` = VALUES(`burnaby_stockout_days`),
-                    `kentucky_stockout_days` = VALUES(`kentucky_stockout_days`),
-                    `corrected_demand_burnaby` = VALUES(`corrected_demand_burnaby`),
-                    `corrected_demand_kentucky` = VALUES(`corrected_demand_kentucky`)
-                """
-                cursor.execute(query, (
-                    sku_id, year_month, row['burnaby_sales'],
-                    row['kentucky_sales'], row['burnaby_stockout_days'],
-                    row['kentucky_stockout_days'], burnaby_corrected, kentucky_corrected
-                ))
+                # Insert/update sales data with corrected demand and revenue
+                if import_mode == "overwrite":
+                    # For overwrite mode, always update existing records
+                    query = """
+                    INSERT INTO monthly_sales
+                    (`sku_id`, `year_month`, `burnaby_sales`, `kentucky_sales`,
+                     `burnaby_revenue`, `kentucky_revenue`,
+                     `burnaby_stockout_days`, `kentucky_stockout_days`,
+                     `corrected_demand_burnaby`, `corrected_demand_kentucky`)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        `burnaby_sales` = VALUES(`burnaby_sales`),
+                        `kentucky_sales` = VALUES(`kentucky_sales`),
+                        `burnaby_revenue` = VALUES(`burnaby_revenue`),
+                        `kentucky_revenue` = VALUES(`kentucky_revenue`),
+                        `burnaby_stockout_days` = VALUES(`burnaby_stockout_days`),
+                        `kentucky_stockout_days` = VALUES(`kentucky_stockout_days`),
+                        `corrected_demand_burnaby` = VALUES(`corrected_demand_burnaby`),
+                        `corrected_demand_kentucky` = VALUES(`corrected_demand_kentucky`)
+                    """
+                    cursor.execute(query, (
+                        sku_id, year_month, row['burnaby_sales'], row['kentucky_sales'],
+                        row['burnaby_revenue'], row['kentucky_revenue'],
+                        row['burnaby_stockout_days'], row['kentucky_stockout_days'],
+                        burnaby_corrected, kentucky_corrected
+                    ))
+                    detail_entry["error_message"] = "Sales data imported/updated successfully"
+                else:
+                    # For append mode, only insert new records (skip duplicates)
+                    # First check if record exists
+                    check_query = "SELECT 1 FROM monthly_sales WHERE sku_id = %s AND `year_month` = %s"
+                    cursor.execute(check_query, (sku_id, year_month))
+                    exists = cursor.fetchone()
+
+                    if exists:
+                        detail_entry["status"] = "skipped"
+                        detail_entry["error_category"] = "DUPLICATE_RECORD"
+                        detail_entry["error_message"] = f"Record for {sku_id} {year_month} already exists (append mode)"
+                        result["import_summary"]["skipped"] += 1
+                        result["import_details"].append(detail_entry)
+                        continue
+                    else:
+                        # Insert new record
+                        query = """
+                        INSERT INTO monthly_sales
+                        (`sku_id`, `year_month`, `burnaby_sales`, `kentucky_sales`,
+                         `burnaby_revenue`, `kentucky_revenue`,
+                         `burnaby_stockout_days`, `kentucky_stockout_days`,
+                         `corrected_demand_burnaby`, `corrected_demand_kentucky`)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """
+                        cursor.execute(query, (
+                            sku_id, year_month, row['burnaby_sales'], row['kentucky_sales'],
+                            row['burnaby_revenue'], row['kentucky_revenue'],
+                            row['burnaby_stockout_days'], row['kentucky_stockout_days'],
+                            burnaby_corrected, kentucky_corrected
+                        ))
+                        detail_entry["error_message"] = "New sales data imported successfully"
 
                 detail_entry["status"] = "success"
-                detail_entry["error_message"] = "Sales data imported successfully"
                 imported_count += 1
                 result["import_summary"]["successful"] += 1
 
@@ -800,7 +868,7 @@ class ImportExportManager:
 
         return result
     
-    def _auto_detect_and_import(self, df: pd.DataFrame, sheet_name: str) -> Dict[str, Any]:
+    def _auto_detect_and_import(self, df: pd.DataFrame, sheet_name: str, import_mode: str = "append") -> Dict[str, Any]:
         """Auto-detect sheet content type and import appropriately"""
 
         columns = [col.lower() for col in df.columns]
@@ -816,7 +884,7 @@ class ImportExportManager:
             return self._import_inventory_data(df, sheet_name)
         elif 'year_month' in columns and any('sales' in col for col in columns):
             logger.info(f"AUTO-DETECT: Detected sales data for {sheet_name}")
-            return self._import_sales_data(df, sheet_name)
+            return self._import_sales_data(df, sheet_name, import_mode)
         elif 'description' in columns and 'cost_per_unit' in columns:
             logger.info(f"AUTO-DETECT: Detected SKU data for {sheet_name}")
             return self._import_sku_data(df, sheet_name)
@@ -915,7 +983,7 @@ class ImportExportManager:
             "SKU", "Description", "Status", "Priority", "Current KY Qty", "Available CA Qty",
             "Pending CA", "Pending KY", "CA Coverage After", "KY Coverage After",
             "Monthly Demand", "Coverage (Months)", "Recommended Transfer",
-            "ABC/XYZ Class", "Stockout Override", "Reason", "Transfer Multiple"
+            "CA to Order", "KY to Order", "ABC/XYZ Class", "Stockout Override", "Reason", "Transfer Multiple"
         ]
 
         # Write headers
@@ -971,17 +1039,22 @@ class ImportExportManager:
             ws.cell(row=row, column=11, value=round(monthly_demand))
             ws.cell(row=row, column=12, value=round(rec['coverage_months'], 1))
             ws.cell(row=row, column=13, value=transfer_qty)
-            ws.cell(row=row, column=14, value=f"{rec['abc_class']}{rec['xyz_class']}")
+
+            # CA to Order and KY to Order columns
+            ws.cell(row=row, column=14, value=rec.get('ca_order_qty') or '')
+            ws.cell(row=row, column=15, value=rec.get('ky_order_qty') or '')
+
+            ws.cell(row=row, column=16, value=f"{rec['abc_class']}{rec['xyz_class']}")
 
             # Stockout override indicator
             stockout_override = "YES" if rec.get('stockout_override_applied', False) else "NO"
-            override_cell = ws.cell(row=row, column=15, value=stockout_override)
+            override_cell = ws.cell(row=row, column=17, value=stockout_override)
             if stockout_override == "YES":
                 override_cell.fill = PatternFill(start_color="FFE6CC", end_color="FFE6CC", fill_type="solid")
                 override_cell.font = Font(bold=True)
 
-            ws.cell(row=row, column=16, value=rec['reason'])
-            ws.cell(row=row, column=17, value=rec['transfer_multiple'])
+            ws.cell(row=row, column=18, value=rec['reason'])
+            ws.cell(row=row, column=19, value=rec['transfer_multiple'])
 
         # Auto-adjust column widths
         for column in ws.columns:
@@ -1242,7 +1315,7 @@ class ImportExportManager:
         
         return output.getvalue().encode('utf-8')
     
-    def import_csv_file(self, file_content: bytes, filename: str) -> Dict[str, Any]:
+    def import_csv_file(self, file_content: bytes, filename: str, import_mode: str = "append") -> Dict[str, Any]:
         """Import CSV file with comprehensive validation and detailed reporting"""
 
         try:
@@ -1266,7 +1339,7 @@ class ImportExportManager:
             }
 
             # Process the CSV (treat as single sheet)
-            sheet_result = self._auto_detect_and_import(df, filename)
+            sheet_result = self._auto_detect_and_import(df, filename, import_mode)
             results["records_imported"] = sheet_result.get("records", 0)
             results["results"].append(sheet_result)  # Add detailed results
 

@@ -1,0 +1,4 @@
+sku_id,year_month,burnaby_sales,kentucky_sales,burnaby_revenue,kentucky_revenue,burnaby_stockout_days,kentucky_stockout_days
+UB-YTX14-BS,2025-09,100,200,2500.00,5000.00,0,0
+UB-YTX12-BS,2025-09,50,150,1250.00,3750.00,2,0
+TEST-SKU,2025-09,25,75,625.00,1875.00,0,5

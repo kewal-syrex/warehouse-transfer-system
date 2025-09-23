@@ -486,7 +486,7 @@ async def get_dashboard_metrics():
         burnaby_revenue_mtd = float(result['burnaby_revenue']) if result['burnaby_revenue'] else 0
 
         # Calculate average revenue per unit for current month
-        avg_revenue_per_unit = round(revenue_mtd / current_sales, 2) if current_sales > 0 else 0
+        avg_revenue_per_unit = round(float(revenue_mtd) / float(current_sales), 2) if current_sales > 0 else 0
 
         # Previous month revenue for comparison
         import datetime as dt
@@ -4764,6 +4764,175 @@ async def export_confirmed_transfers():
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Export generation failed: {str(e)}")
+
+# ===================================================================
+# CA/KY Order Quantity Endpoints
+# ===================================================================
+
+@app.post("/api/order-quantities/{sku_id}",
+          summary="Update CA/KY Order Quantities",
+          description="Update manual order quantities for CA and KY warehouses",
+          tags=["Order Management"],
+          responses={
+              200: {"description": "Order quantities updated successfully"},
+              400: {"description": "Invalid input data"},
+              500: {"description": "Database operation failed"}
+          })
+async def update_order_quantities(sku_id: str, order_data: dict):
+    """
+    Update CA and/or KY order quantities for a specific SKU
+
+    Args:
+        sku_id: SKU identifier
+        order_data: Dict containing ca_order_qty and/or ky_order_qty
+
+    Example request body:
+        {
+            "ca_order_qty": 100,
+            "ky_order_qty": 50
+        }
+    """
+    try:
+        ca_order_qty = order_data.get('ca_order_qty')
+        ky_order_qty = order_data.get('ky_order_qty')
+
+        # Validate input
+        if ca_order_qty is not None and (not isinstance(ca_order_qty, int) or ca_order_qty < 0):
+            raise HTTPException(status_code=400, detail="ca_order_qty must be a non-negative integer")
+        if ky_order_qty is not None and (not isinstance(ky_order_qty, int) or ky_order_qty < 0):
+            raise HTTPException(status_code=400, detail="ky_order_qty must be a non-negative integer")
+
+        if ca_order_qty is None and ky_order_qty is None:
+            raise HTTPException(status_code=400, detail="At least one of ca_order_qty or ky_order_qty must be provided")
+
+        db = database.get_database_connection()
+        cursor = db.cursor()
+
+        # Check if record exists
+        cursor.execute("SELECT sku_id FROM transfer_confirmations WHERE sku_id = %s", (sku_id,))
+        exists = cursor.fetchone()
+
+        if exists:
+            # Update existing record
+            update_fields = []
+            update_values = []
+
+            if ca_order_qty is not None:
+                update_fields.append("ca_order_qty = %s")
+                update_values.append(ca_order_qty)
+            if ky_order_qty is not None:
+                update_fields.append("ky_order_qty = %s")
+                update_values.append(ky_order_qty)
+
+            update_values.append(sku_id)
+
+            update_query = f"""
+                UPDATE transfer_confirmations
+                SET {', '.join(update_fields)}
+                WHERE sku_id = %s
+            """
+            cursor.execute(update_query, update_values)
+        else:
+            # Create new record with default values
+            cursor.execute("""
+                INSERT INTO transfer_confirmations
+                (sku_id, confirmed_qty, ca_order_qty, ky_order_qty)
+                VALUES (%s, 0, %s, %s)
+            """, (sku_id, ca_order_qty, ky_order_qty))
+
+        db.commit()
+        db.close()
+
+        return {
+            "message": "Order quantities updated successfully",
+            "sku_id": sku_id,
+            "ca_order_qty": ca_order_qty,
+            "ky_order_qty": ky_order_qty
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database operation failed: {str(e)}")
+
+@app.get("/api/order-quantities/{sku_id}",
+         summary="Get CA/KY Order Quantities",
+         description="Retrieve manual order quantities for a specific SKU",
+         tags=["Order Management"],
+         responses={
+             200: {"description": "Order quantities retrieved successfully"},
+             404: {"description": "SKU not found"},
+             500: {"description": "Database query failed"}
+         })
+async def get_order_quantities(sku_id: str):
+    """
+    Get CA and KY order quantities for a specific SKU
+
+    Args:
+        sku_id: SKU identifier
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+
+        cursor.execute("""
+            SELECT sku_id, ca_order_qty, ky_order_qty
+            FROM transfer_confirmations
+            WHERE sku_id = %s
+        """, (sku_id,))
+
+        result = cursor.fetchone()
+        db.close()
+
+        if not result:
+            return {
+                "sku_id": sku_id,
+                "ca_order_qty": None,
+                "ky_order_qty": None
+            }
+
+        return result
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database query failed: {str(e)}")
+
+@app.delete("/api/order-quantities/{sku_id}",
+            summary="Clear CA/KY Order Quantities",
+            description="Clear manual order quantities for a specific SKU",
+            tags=["Order Management"],
+            responses={
+                200: {"description": "Order quantities cleared successfully"},
+                500: {"description": "Database operation failed"}
+            })
+async def clear_order_quantities(sku_id: str):
+    """
+    Clear CA and KY order quantities for a specific SKU
+
+    Args:
+        sku_id: SKU identifier
+    """
+    try:
+        db = database.get_database_connection()
+        cursor = db.cursor()
+
+        cursor.execute("""
+            UPDATE transfer_confirmations
+            SET ca_order_qty = NULL, ky_order_qty = NULL
+            WHERE sku_id = %s
+        """, (sku_id,))
+
+        rows_affected = cursor.rowcount
+        db.commit()
+        db.close()
+
+        return {
+            "message": "Order quantities cleared successfully",
+            "sku_id": sku_id,
+            "rows_affected": rows_affected
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database operation failed: {str(e)}")
 
 # Serve the main dashboard
 @app.get("/dashboard")

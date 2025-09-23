@@ -223,7 +223,43 @@
                             </p>
                             <input type="file" id="file-input" class="d-none" accept=".xlsx,.xls,.csv" multiple>
                         </div>
-                        
+
+                        <!-- Import Mode Selection -->
+                        <div class="import-mode-section mt-3" style="display: none;" id="import-mode-section">
+                            <h6><i class="fas fa-cog me-2"></i>Import Mode</h6>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="importMode" id="append-mode" value="append" checked>
+                                        <label class="form-check-label" for="append-mode">
+                                            <strong>Append Mode (Recommended)</strong>
+                                            <div class="form-text">
+                                                <i class="fas fa-plus-circle text-success me-1"></i>
+                                                <small>Add new records only. Skip existing records without overwriting.</small>
+                                            </div>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="importMode" id="overwrite-mode" value="overwrite">
+                                        <label class="form-check-label" for="overwrite-mode">
+                                            <strong>Overwrite Mode</strong>
+                                            <div class="form-text">
+                                                <i class="fas fa-exclamation-triangle text-warning me-1"></i>
+                                                <small>Update existing records with new data. Use for data corrections.</small>
+                                            </div>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mt-3">
+                                <button type="button" class="btn btn-primary" id="upload-button" onclick="uploadFiles()">
+                                    <i class="fas fa-upload me-2"></i>Start Import
+                                </button>
+                            </div>
+                        </div>
+
                         <!-- Upload Progress -->
                         <div id="upload-progress" class="upload-progress">
                             <div class="progress mb-2">
@@ -286,15 +322,16 @@
                                     </h2>
                                     <div id="sales-format" class="accordion-collapse collapse" data-bs-parent="#import-instructions">
                                         <div class="accordion-body">
-                                            <strong>Required columns:</strong> sku_id, year_month, burnaby_sales, kentucky_sales<br>
+                                            <strong>Required columns:</strong> sku_id, year_month, burnaby_sales, kentucky_sales, burnaby_revenue, kentucky_revenue<br>
                                             <strong>Optional columns:</strong> burnaby_stockout_days, kentucky_stockout_days<br>
+                                            <strong>Important:</strong> Revenue data is now required for all sales imports. This provides actual dollar amounts for analysis.<br>
                                             <strong>Note:</strong> Stockout days should be 0-31 representing days out of stock during the month<br>
                                             <strong>Example:</strong><br>
                                             <code>
-                                            sku_id | year_month | burnaby_sales | kentucky_sales | burnaby_stockout_days | kentucky_stockout_days<br>
-                                            CHG-001 | 2024-03 | 50 | 100 | 0 | 25<br>
-                                            CAB-002 | 2024-03 | 30 | 45 | 5 | 0<br>
-                                            DIS-003 | 2024-03 | 0 | 0 | 15 | 30
+                                            sku_id | year_month | burnaby_sales | kentucky_sales | burnaby_revenue | kentucky_revenue | burnaby_stockout_days | kentucky_stockout_days<br>
+                                            CHG-001 | 2024-03 | 50 | 100 | 1275.00 | 2550.00 | 0 | 25<br>
+                                            CAB-002 | 2024-03 | 30 | 45 | 262.50 | 393.75 | 5 | 0<br>
+                                            DIS-003 | 2024-03 | 0 | 0 | 0.00 | 0.00 | 15 | 30
                                             </code>
                                         </div>
                                     </div>
@@ -742,11 +779,9 @@
             selectedFiles = Array.from(files);
             displayFileInfo();
 
-            // Automatically start upload if files are selected
+            // Show import mode selection when files are selected
             if (selectedFiles.length > 0) {
-                setTimeout(() => {
-                    uploadFiles();
-                }, 500);
+                document.getElementById('import-mode-section').style.display = 'block';
             }
         }
 
@@ -790,6 +825,10 @@
         async function uploadSingleFile(file, current, total) {
             const formData = new FormData();
             formData.append('file', file);
+
+            // Get selected import mode
+            const importMode = document.querySelector('input[name="importMode"]:checked').value;
+            formData.append('import_mode', importMode);
 
             const isExcel = file.name.toLowerCase().endsWith('.xlsx') || file.name.toLowerCase().endsWith('.xls');
             const endpoint = isExcel ? '/api/import/excel' : '/api/import/csv';

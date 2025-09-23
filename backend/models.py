@@ -81,7 +81,7 @@ class InventoryCurrent(Base):
 
 class MonthlySales(Base):
     __tablename__ = 'monthly_sales'
-    
+
     year_month = Column(String(7), primary_key=True)  # Format: '2024-01'
     sku_id = Column(String(50), ForeignKey('skus.sku_id', ondelete='CASCADE'), primary_key=True)
     burnaby_sales = Column(Integer, default=0)
@@ -90,6 +90,9 @@ class MonthlySales(Base):
     kentucky_stockout_days = Column(Integer, default=0)
     corrected_demand_burnaby = Column(DECIMAL(10, 2), default=0)
     corrected_demand_kentucky = Column(DECIMAL(10, 2), default=0)
+    # Revenue tracking fields
+    burnaby_revenue = Column(DECIMAL(12, 2), default=0)
+    kentucky_revenue = Column(DECIMAL(12, 2), default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -97,8 +100,35 @@ class MonthlySales(Base):
     
     @property
     def total_sales(self):
-        """Total sales across both warehouses"""
+        """Total sales quantity across both warehouses"""
         return (self.burnaby_sales or 0) + (self.kentucky_sales or 0)
+
+    @property
+    def total_revenue(self):
+        """Total revenue across both warehouses"""
+        return (self.burnaby_revenue or 0) + (self.kentucky_revenue or 0)
+
+    @property
+    def burnaby_avg_revenue(self):
+        """Average revenue per unit for Burnaby sales"""
+        if self.burnaby_sales and self.burnaby_sales > 0:
+            return round(float(self.burnaby_revenue or 0) / self.burnaby_sales, 2)
+        return 0.0
+
+    @property
+    def kentucky_avg_revenue(self):
+        """Average revenue per unit for Kentucky sales"""
+        if self.kentucky_sales and self.kentucky_sales > 0:
+            return round(float(self.kentucky_revenue or 0) / self.kentucky_sales, 2)
+        return 0.0
+
+    @property
+    def overall_avg_revenue(self):
+        """Overall average revenue per unit across both warehouses"""
+        total_units = self.total_sales
+        if total_units and total_units > 0:
+            return round(float(self.total_revenue) / total_units, 2)
+        return 0.0
     
     @property
     def kentucky_availability_rate(self):
@@ -243,6 +273,8 @@ class TransferConfirmation(Base):
     confirmed_by = Column(String(100))
     confirmed_at = Column(DateTime, default=datetime.utcnow)
     notes = Column(Text)
+    ca_order_qty = Column(Integer, nullable=True, comment="Manual order quantity for CA warehouse")
+    ky_order_qty = Column(Integer, nullable=True, comment="Manual order quantity for KY warehouse")
 
     # Relationships
     sku = relationship("SKU", back_populates="transfer_confirmation")
@@ -358,6 +390,13 @@ class MonthlySalesResponse(BaseModel):
     kentucky_stockout_days: int = 0
     corrected_demand_kentucky: float = 0
     total_sales: int = 0
+    # Revenue fields
+    burnaby_revenue: float = 0.0
+    kentucky_revenue: float = 0.0
+    total_revenue: float = 0.0
+    burnaby_avg_revenue: float = 0.0
+    kentucky_avg_revenue: float = 0.0
+    overall_avg_revenue: float = 0.0
 
 class TransferRecommendation(BaseModel):
     sku_id: str
@@ -379,6 +418,13 @@ class DashboardMetrics(BaseModel):
     total_inventory_value: float
     current_month_sales: int
     stockout_affected_skus: int
+    # Revenue metrics
+    revenue_mtd: float = 0.0
+    burnaby_revenue_mtd: float = 0.0
+    kentucky_revenue_mtd: float = 0.0
+    avg_revenue_per_unit_mtd: float = 0.0
+    revenue_prev_month: float = 0.0
+    revenue_ytd: float = 0.0
 
 class DashboardResponse(BaseModel):
     metrics: DashboardMetrics
@@ -504,6 +550,8 @@ class TransferConfirmationBase(BaseModel):
     original_suggested_qty: Optional[int] = Field(None, ge=0, description="Original suggested quantity")
     confirmed_by: Optional[str] = Field(None, max_length=100, description="User who confirmed the quantity")
     notes: Optional[str] = Field(None, max_length=1000, description="Notes about the confirmation")
+    ca_order_qty: Optional[int] = Field(None, ge=0, description="Manual order quantity for CA warehouse")
+    ky_order_qty: Optional[int] = Field(None, ge=0, description="Manual order quantity for KY warehouse")
 
     @validator('confirmed_qty')
     def validate_confirmed_qty(cls, v):
@@ -524,6 +572,8 @@ class TransferConfirmationUpdate(BaseModel):
     """
     confirmed_qty: Optional[int] = Field(None, ge=0, description="Confirmed transfer quantity")
     notes: Optional[str] = Field(None, max_length=1000, description="Notes about the confirmation")
+    ca_order_qty: Optional[int] = Field(None, ge=0, description="Manual order quantity for CA warehouse")
+    ky_order_qty: Optional[int] = Field(None, ge=0, description="Manual order quantity for KY warehouse")
 
 class TransferConfirmationResponse(TransferConfirmationBase):
     """
