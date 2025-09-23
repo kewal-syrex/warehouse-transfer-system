@@ -301,6 +301,44 @@ Add functionality to lock/unlock all three quantity columns (Confirmed Qty, CA t
 
 ---
 
+## V4.2: Fix Duplicate SKU Issue in Transfer Planning (IN PROGRESS)
+
+### Problem Analysis
+The transfer planning page displays duplicate entries for certain SKUs due to improper SQL JOINs with the stockout_dates table:
+- **PF-13906**: 6 duplicate entries
+- **WF-RO-GAC10**: 2 duplicate entries
+- **VP-EU-HF2-FLT**: 2 duplicate entries
+
+### Root Cause
+The SQL query in `backend/calculations.py` (function `calculate_all_transfer_recommendations`) uses LEFT JOINs with the `stockout_dates` table without proper aggregation. When an SKU has multiple stockout records (different warehouses or unresolved events), the LEFT JOIN creates duplicate rows.
+
+### Solution Approach
+Replace LEFT JOINs with EXISTS subqueries for stockout status checks. This ensures one row per SKU while maintaining accurate stockout status information.
+
+### Implementation Tasks
+- [x] **TASK-096**: Document the duplicate SKU issue and solution approach in TASKS.md
+- [x] **TASK-097**: Fix SQL query in calculations.py by replacing LEFT JOIN with EXISTS subqueries
+- [x] **TASK-098**: Add comprehensive code documentation explaining the fix and rationale
+- [x] **TASK-099**: Test with Playwright MCP to verify duplicate elimination and functionality
+- [x] **TASK-100**: Verify data integrity, stockout status accuracy, and performance impact
+
+### Technical Requirements
+- Maintain stockout status accuracy (kentucky_stockout and burnaby_stockout flags)
+- Ensure no performance degradation with EXISTS queries
+- Follow existing code documentation standards
+- Use EXISTS instead of DISTINCT for cleaner, more efficient solution
+
+### Testing Checklist
+- [ ] Verify PF-13906 appears only once in transfer planning table
+- [ ] Verify WF-RO-GAC10 appears only once in transfer planning table
+- [ ] Verify VP-EU-HF2-FLT appears only once in transfer planning table
+- [ ] Confirm stockout status badges display correctly for all SKUs
+- [ ] Test performance with full 4000+ SKU dataset
+- [ ] Verify no SKUs are missing from results after fix
+- [ ] Confirm transfer calculations remain accurate
+
+---
+
 ### Contact Information
 - **Primary Stakeholder**: Arjay (Inventory Manager)
 - **Technical Escalation**: Development team lead

@@ -1,133 +1,94 @@
-# docs/stockout_investigation.md
+# JavaScript Form Input Issue: Playwright vs Manual Input Handling
 
-### Status
-Accepted (2025-09-20)
+The discrepancy between Playwright automation successfully filling input fields while manual user input reads as empty or incorrect values points to several common technical issues related to **event handling**, **JavaScript execution timing**, and **form validation** differences between automated and manual interactions.
 
-### Context
-- Reported issues:
-  - Stockout days show for UB645 but not for other SKUs in the SKU Details modal on Transfer Planning.
-  - Examples:
-    - UB-YTX14AH-BS: Burnaby stockout Aug 21–Sep 2, 2025 not shown.
-    - BT-183342: Kentucky stockout May 29–Jun 12 not shown.
-  - Request: Show a stockout-days column for Burnaby and one for Kentucky, and ensure both are factored into demand.
+## Key Differences Between Playwright and Manual Input
 
-### Findings
+### Event Triggering Mechanisms
 
-- Data model supports both warehouses:
-  - `database/schema.sql` has `monthly_sales` with `burnaby_stockout_days` and `kentucky_stockout_days`.
-  - `stockout_dates` table exists with views and triggers to track periods and update monthly aggregates.
+**Playwright's `fill()` method** operates differently from manual user typing in how it triggers JavaScript events. When Playwright fills an input field, it:[1][2]
 
-- Backend returns both stockout columns to the modal:
-  - `/api/sku/{sku_id}` selects:
-    - `year_month, burnaby_sales, kentucky_sales, burnaby_stockout_days, kentucky_stockout_days, corrected_demand_*`.
+- Focuses the element automatically
+- **Triggers only an `input` event** with the complete text value
+- Sets the value property directly without individual keystroke simulation
+- Bypasses intermediate events like `keydown`, `keypress`, and `keyup`
 
-- Demand calculations factor stockouts for BOTH warehouses:
-  - Enhanced transfer path uses weighted demand with stockout correction per warehouse:
-    - Kentucky: passes `kentucky_stockout_days` into `get_enhanced_demand_calculation(... warehouse='kentucky')`.
-    - Burnaby: passes `burnaby_stockout_days` into `get_enhanced_demand_calculation(... warehouse='burnaby')`.
-  - Cache population also reads both stockout fields and computes per-warehouse enhanced demand.
+In contrast, **manual user typing** generates a comprehensive sequence of events:[3][4]
+- `keydown` event for each key press
+- `keypress` or `input` event for each character
+- `keyup` event when each key is released
+- Multiple `input` events as the value changes incrementally
 
-- Root cause in UI:
-  - The SKU Details modal table and chart only use `kentucky_stockout_days`. `burnaby_stockout_days` is ignored.
-  - Result: SKUs with Burnaby-only stockouts (e.g., UB-YTX14AH-BS) show no stockout indication; UB645 likely had Kentucky stockout, so it appears.
+### Common Root Causes
 
-### Evidence
+**Event Listener Dependencies**
+Your JavaScript form validation may be relying on specific events that Playwright doesn't trigger. If your code listens for `keyup`, `keydown`, or `keypress` events instead of the `input` event, manual typing will work but Playwright automation won't properly update your JavaScript state.[5][6]
 
-- Backend `/api/sku/{sku_id}` returns both stockout fields:
-```588:635:backend/main.py
-@app.get("/api/sku/{sku_id}")
-async def get_sku_details(sku_id: str):
-    ...
-    cursor.execute("""
-        SELECT `year_month`, burnaby_sales, kentucky_sales,
-               burnaby_stockout_days, kentucky_stockout_days,
-               corrected_demand_kentucky, corrected_demand_burnaby
-        FROM monthly_sales
-        WHERE sku_id = %s
-        ORDER BY `year_month` DESC
-    """, (sku_id,))
-    sales_history = cursor.fetchall()
-    ...
+**Timing and Execution Order**
+Manual typing allows time for JavaScript event handlers to process each character, while Playwright's rapid execution might cause race conditions. Event listeners that depend on sequential processing or debouncing may not function correctly with Playwright's instantaneous value setting.[7][5]
+
+**Form Validation State Management**
+JavaScript form validation often maintains internal state that updates through event handlers. If these handlers aren't triggered by Playwright's `fill()` method, the validation state remains outdated even though the input field visually appears filled.[8][5]
+
+## Diagnostic Solutions
+
+### Switch to `pressSequentially()` Method
+
+Replace Playwright's `fill()` with `pressSequentially()` to simulate actual user typing:[9][3]
+
+```javascript
+// Instead of: await inputField.fill('test value');
+await inputField.pressSequentially('test value');
 ```
 
-- Modal table only displays Kentucky stockouts:
-```1516:1523:frontend/transfer-planning.html
-<tbody>
-    ${salesWithTotals.map(s => `
-        <tr ${s.kentucky_stockout_days > 0 ? 'class="table-warning"' : ''}>
-            <td><small>${s.year_month}</small></td>
-            <td>${s.burnaby_sales}</td>
-            <td>${s.kentucky_sales}</td>
-            <td><strong>${s.total_sales}</strong></td>
-            <td>${s.kentucky_stockout_days > 0 ? '<span class="badge bg-warning">' + s.kentucky_stockout_days + '</span>' : '-'}</td>
-        </tr>
-    `).join('')}
-```
+The `pressSequentially()` method triggers the complete event sequence (`keydown`, `input`, `keyup`) for each character, more closely mimicking manual user input.[3]
 
-- Modal chart annotations and tooltips only consider Kentucky stockouts:
-```1586:1603:frontend/transfer-planning.html
-const stockoutDays = salesData.map(s => s.kentucky_stockout_days || 0).reverse();
-...
-salesData.forEach((s, originalIndex) => {
-    if (s.kentucky_stockout_days > 0) {
-        const reversedIndex = salesData.length - 1 - originalIndex;
-        stockoutAnnotations[`stockout-${reversedIndex}`] = { ... };
-    }
+### Verify Event Listener Configuration
+
+Check your JavaScript code for event listeners that may not be compatible with Playwright's automation:[6][7]
+
+```javascript
+// Problematic - only listens for keyup
+input.addEventListener('keyup', function(e) {
+    validateInput(e.target.value);
+});
+
+// Better - listens for input event (triggered by both manual and Playwright)
+input.addEventListener('input', function(e) {  
+    validateInput(e.target.value);
 });
 ```
 
-- Calculations use both warehouses’ stockouts:
-```1266:1331:backend/calculations.py
-kentucky_enhanced_result = self.weighted_demand_calculator.get_enhanced_demand_calculation(
-    sku_id, abc_class, xyz_class, kentucky_sales, stockout_days, warehouse='kentucky'
-)
-...
-burnaby_enhanced_result = self.weighted_demand_calculator.get_enhanced_demand_calculation(
-    sku_id, abc_class, xyz_class, burnaby_sales, burnaby_stockout_days, warehouse='burnaby'
-)
+### Add Manual Event Triggering
+
+Force trigger the necessary events after Playwright fills the field:[2][8]
+
+```javascript
+await inputField.fill('test value');
+await inputField.dispatchEvent('input');
+await inputField.dispatchEvent('change');
 ```
 
-### Recommendations
+### Check for Timing Issues
 
-- Frontend (SKU Details modal):
-  - Add separate columns for Burnaby and Kentucky stockout days.
-  - Highlight the row if either warehouse has stockouts.
-  - Update the chart to visualize both warehouses’ stockout days (distinct annotation colors and tooltip lines).
+Add explicit waits to ensure JavaScript processing completes:[5][6]
 
-- Transfer table (optional improvement):
-  - Replace single `SO:Xd` badge with two badges `CA:Xd` and `US:Xd` when present.
-
-- Backend/data sanity:
-  - Verify `monthly_sales` contains correct `burnaby_stockout_days` and `kentucky_stockout_days` for the example SKUs and months.
-  - Ensure stockout aggregation job/trigger populates monthly rows for the relevant months; if triggers are not deployed in prod, run a one-time backfill.
-
-### Proposed UI edits (minimal)
-
-- Table header: change from one “Stockout Days” to two columns.
-- Table row: render both `burnaby_stockout_days` and `kentucky_stockout_days`, and warn if either > 0.
-```1508:1514:frontend/transfer-planning.html
-<thead class="table-light sticky-top">
-    <tr>
-        <th>Month</th>
-        <th>CA Sales</th>
-        <th>US Sales</th>
-        <th>Total</th>
-        <th>CA Stockout</th>
-        <th>US Stockout</th>
-    </tr>
-</thead>
+```javascript
+await inputField.fill('test value');
+await page.waitForTimeout(100); // Allow time for event processing
+await page.waitForFunction(() => {
+    return document.querySelector('#inputField').value !== '';
+});
 ```
 
-```1516:1523:frontend/transfer-planning.html
-<tbody>
-    ${salesWithTotals.map(s => `
-        <tr ${(s.kentucky_stockout_days > 0 || s.burnaby_stockout_days > 0) ? 'class="table-warning"' : ''}>
-            <td><small>${s.year_month}</small></td>
-            <td>${s.burnaby_sales}</td>
-            <td>${s.kentucky_sales}</td>
-            <td><strong>${s.total_sales}</strong></td>
-            <td>${s.burnaby_stockout_days > 0 ? '<span class="badge bg-warning">' + s.burnaby_stockout_days + '</span>' : '-'}</td>
-            <td>${s.kentucky_stockout_days > 0 ? '<span class="badge bg-warning">' + s.kentucky_stockout_days + '</span>' : '-'}</td>
-        </tr>
-    `).join('')}
-</tbody>
+## Validation and Debugging Steps
+
+**Inspect Event Handlers**: Use browser developer tools to identify which events your form validation JavaScript actually listens for.[10][8]
+
+**Test Event Sequence**: Add console logging to your event handlers to compare the event sequence between manual typing and Playwright automation.[6][5]
+
+**Verify Element State**: Check if the input field's `value` property versus its visual display state differs between automation and manual input.[11][10]
+
+**Form Validation State**: Examine whether your JavaScript form validation maintains separate state that isn't updated by Playwright's direct value setting.[8][5]
+
+The core issue typically stems from **event listener incompatibility** where your JavaScript depends on events that Playwright's `fill()` method doesn't trigger. Using `pressSequentially()` or manually triggering the required events usually resolves these discrepancies by ensuring both automated and manual interactions follow the same event-driven workflow.[1][9][5][3]

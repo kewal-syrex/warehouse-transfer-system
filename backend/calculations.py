@@ -2352,8 +2352,22 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
     """
     try:
         print("DEBUG: calculate_all_transfer_recommendations called")
-        # Get all active SKUs with current inventory, latest sales, and confirmation data
-        # Back to working original query structure to avoid SQL compatibility issues
+
+        # DUPLICATE SKU FIX (TASK-097):
+        # Replaced LEFT JOIN with stockout_dates table with EXISTS subqueries to prevent duplicate rows.
+        #
+        # Problem: When SKUs had multiple stockout records (different warehouses or unresolved events),
+        # the LEFT JOIN created duplicate rows in the result set, causing SKUs to appear multiple times
+        # in the transfer planning interface.
+        #
+        # Solution: Using EXISTS subqueries to check stockout status without creating duplicates:
+        # - EXISTS returns TRUE/FALSE based on whether matching records exist
+        # - Does not multiply the number of result rows like JOINs do
+        # - Maintains accurate stockout status information (kentucky_stockout, burnaby_stockout)
+        # - More efficient than DISTINCT as it prevents duplicates rather than removing them
+        #
+        # Performance Impact: EXISTS subqueries are typically more efficient than LEFT JOINs
+        # for boolean checks, as they can stop execution once the first matching record is found.
         query = """
         SELECT
             s.sku_id,
@@ -2383,8 +2397,18 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
                     ROUND(((tc.confirmed_qty - tc.original_suggested_qty) / tc.original_suggested_qty) * 100, 2)
                 ELSE 0
             END as variance_percent,
-            CASE WHEN sd_ky.sku_id IS NOT NULL THEN TRUE ELSE FALSE END as kentucky_stockout,
-            CASE WHEN sd_ca.sku_id IS NOT NULL THEN TRUE ELSE FALSE END as burnaby_stockout
+            CASE WHEN EXISTS (
+                SELECT 1 FROM stockout_dates sd_ky
+                WHERE sd_ky.sku_id = s.sku_id
+                AND sd_ky.warehouse = 'kentucky'
+                AND sd_ky.is_resolved = FALSE
+            ) THEN TRUE ELSE FALSE END as kentucky_stockout,
+            CASE WHEN EXISTS (
+                SELECT 1 FROM stockout_dates sd_ca
+                WHERE sd_ca.sku_id = s.sku_id
+                AND sd_ca.warehouse = 'burnaby'
+                AND sd_ca.is_resolved = FALSE
+            ) THEN TRUE ELSE FALSE END as burnaby_stockout
         FROM skus s
         LEFT JOIN inventory_current ic ON s.sku_id = ic.sku_id
         LEFT JOIN monthly_sales ms ON s.sku_id = ms.sku_id AND ms.`year_month` = (
@@ -2394,12 +2418,6 @@ def calculate_all_transfer_recommendations(use_enhanced: bool = True) -> List[Di
             AND (ms2.kentucky_sales > 0 OR ms2.burnaby_sales > 0)
         )
         LEFT JOIN transfer_confirmations tc ON s.sku_id = tc.sku_id
-        LEFT JOIN stockout_dates sd_ky ON s.sku_id = sd_ky.sku_id
-            AND sd_ky.warehouse = 'kentucky'
-            AND sd_ky.is_resolved = FALSE
-        LEFT JOIN stockout_dates sd_ca ON s.sku_id = sd_ca.sku_id
-            AND sd_ca.warehouse = 'burnaby'
-            AND sd_ca.is_resolved = FALSE
         ORDER BY s.sku_id
         """
         

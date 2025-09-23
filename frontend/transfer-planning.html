@@ -1571,19 +1571,25 @@ SK-GHI789 SK-JKL012"></textarea>
          *
          * @function lockCAOrder
          * @param {string} skuId - SKU identifier
+         * @param {number} [quantity] - Optional quantity to lock (if not provided, reads from input)
          * @returns {Promise<void>}
          */
-        async function lockCAOrder(skuId) {
-            const input = document.getElementById(`ca-order-${skuId}`);
-            if (!input) {
-                alert('Input field not found');
-                return;
-            }
+        async function lockCAOrder(skuId, quantity = null) {
+            let qty = quantity;
 
-            const qty = parseInt(input.value);
-            if (isNaN(qty) || qty < 0) {
-                alert('Please enter a valid quantity (0 or greater)');
-                return;
+            // If quantity not provided, read from input field
+            if (qty === null) {
+                const input = document.getElementById(`ca-order-${skuId}`);
+                if (!input) {
+                    alert('Input field not found');
+                    return;
+                }
+
+                qty = parseInt(input.value);
+                if (isNaN(qty) || qty < 0) {
+                    alert('Please enter a valid quantity (0 or greater)');
+                    return;
+                }
             }
 
             try {
@@ -1660,22 +1666,28 @@ SK-GHI789 SK-JKL012"></textarea>
          *
          * @function lockKYOrder
          * @param {string} skuId - SKU identifier
+         * @param {number} [quantity] - Optional quantity to lock (if not provided, reads from input)
          * @returns {Promise<void>}
          */
-        async function lockKYOrder(skuId) {
-            const input = document.getElementById(`ky-order-${skuId}`);
-            if (!input) {
-                alert('Input field not found');
-                return;
-            }
+        async function lockKYOrder(skuId, quantity = null) {
+            let qty = quantity;
 
-            console.log('KY Input element:', input);
-            console.log('KY Input value before parsing:', input.value);
-            const qty = parseInt(input.value);
-            console.log('KY Parsed quantity:', qty);
-            if (isNaN(qty) || qty < 0) {
-                alert('Please enter a valid quantity (0 or greater)');
-                return;
+            // If quantity not provided, read from input field
+            if (qty === null) {
+                const input = document.getElementById(`ky-order-${skuId}`);
+                if (!input) {
+                    alert('Input field not found');
+                    return;
+                }
+
+                console.log('KY Input element:', input);
+                console.log('KY Input value before parsing:', input.value);
+                qty = parseInt(input.value);
+                console.log('KY Parsed quantity:', qty);
+                if (isNaN(qty) || qty < 0) {
+                    alert('Please enter a valid quantity (0 or greater)');
+                    return;
+                }
             }
 
             try {
@@ -1853,8 +1865,21 @@ SK-GHI789 SK-JKL012"></textarea>
                     console.log(`Using existing CA quantity: ${caQty}`);
                 } else {
                     const caInput = document.getElementById(`ca-order-${skuId}`);
-                    caQty = parseInt(caInput?.value) || 0;
-                    console.log(`Using input CA quantity: ${caQty}`);
+                    console.log(`CA input element found:`, caInput);
+                    console.log(`CA input element value:`, caInput?.value);
+                    console.log(`CA input element value type:`, typeof caInput?.value);
+                    if (caInput && caInput.value !== '' && caInput.value !== null && caInput.value !== undefined) {
+                        caQty = parseInt(caInput.value);
+                        console.log(`CA parsed value: ${caQty}`);
+                        if (isNaN(caQty)) {
+                            console.log(`CA parsing failed, defaulting to 0`);
+                            caQty = 0;
+                        }
+                    } else {
+                        console.log(`CA input not found or empty, defaulting to 0`);
+                        caQty = 0;
+                    }
+                    console.log(`Final CA quantity: ${caQty}`);
                 }
 
                 if (isKYLocked) {
@@ -1862,8 +1887,21 @@ SK-GHI789 SK-JKL012"></textarea>
                     console.log(`Using existing KY quantity: ${kyQty}`);
                 } else {
                     const kyInput = document.getElementById(`ky-order-${skuId}`);
-                    kyQty = parseInt(kyInput?.value) || 0;
-                    console.log(`Using input KY quantity: ${kyQty}`);
+                    console.log(`KY input element found:`, kyInput);
+                    console.log(`KY input element value:`, kyInput?.value);
+                    console.log(`KY input element value type:`, typeof kyInput?.value);
+                    if (kyInput && kyInput.value !== '' && kyInput.value !== null && kyInput.value !== undefined) {
+                        kyQty = parseInt(kyInput.value);
+                        console.log(`KY parsed value: ${kyQty}`);
+                        if (isNaN(kyQty)) {
+                            console.log(`KY parsing failed, defaulting to 0`);
+                            kyQty = 0;
+                        }
+                    } else {
+                        console.log(`KY input not found or empty, defaulting to 0`);
+                        kyQty = 0;
+                    }
+                    console.log(`Final KY quantity: ${kyQty}`);
                 }
 
                 console.log(`Final values - Confirmed: ${confirmedQty}, CA: ${caQty}, KY: ${kyQty}`);
@@ -1878,20 +1916,66 @@ SK-GHI789 SK-JKL012"></textarea>
 
                 if (!isCALocked) {
                     console.log(`Locking CA order quantity: ${caQty}`);
-                    // Set value in input before locking to ensure lockCAOrder can read it
+                    // Simulate manual typing behavior like pressSequentially()
                     const caInput = document.getElementById(`ca-order-${skuId}`);
-                    if (caInput) caInput.value = caQty;
-                    await lockCAOrder(skuId);
+                    if (caInput) {
+                        // Clear field first
+                        caInput.value = '';
+                        caInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+                        // Simulate typing each character with proper events
+                        const value = caQty.toString();
+                        for (let i = 0; i < value.length; i++) {
+                            // Add character
+                            caInput.value = value.substring(0, i + 1);
+
+                            // Trigger full event sequence like manual typing
+                            caInput.dispatchEvent(new KeyboardEvent('keydown', { key: value[i], bubbles: true }));
+                            caInput.dispatchEvent(new Event('input', { bubbles: true }));
+                            caInput.dispatchEvent(new KeyboardEvent('keyup', { key: value[i], bubbles: true }));
+
+                            // Small delay between characters to match human typing
+                            await new Promise(resolve => setTimeout(resolve, 10));
+                        }
+
+                        // Trigger change and blur events that happen when user finishes typing
+                        caInput.dispatchEvent(new Event('change', { bubbles: true }));
+                        caInput.dispatchEvent(new Event('blur', { bubbles: true }));
+                    }
+                    await lockCAOrder(skuId, caQty);
                 } else {
                     console.log(`CA order quantity already locked, skipping`);
                 }
 
                 if (!isKYLocked) {
                     console.log(`Locking KY order quantity: ${kyQty}`);
-                    // Set value in input before locking to ensure lockKYOrder can read it
+                    // Simulate manual typing behavior like pressSequentially()
                     const kyInput = document.getElementById(`ky-order-${skuId}`);
-                    if (kyInput) kyInput.value = kyQty;
-                    await lockKYOrder(skuId);
+                    if (kyInput) {
+                        // Clear field first
+                        kyInput.value = '';
+                        kyInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+                        // Simulate typing each character with proper events
+                        const value = kyQty.toString();
+                        for (let i = 0; i < value.length; i++) {
+                            // Add character
+                            kyInput.value = value.substring(0, i + 1);
+
+                            // Trigger full event sequence like manual typing
+                            kyInput.dispatchEvent(new KeyboardEvent('keydown', { key: value[i], bubbles: true }));
+                            kyInput.dispatchEvent(new Event('input', { bubbles: true }));
+                            kyInput.dispatchEvent(new KeyboardEvent('keyup', { key: value[i], bubbles: true }));
+
+                            // Small delay between characters to match human typing
+                            await new Promise(resolve => setTimeout(resolve, 10));
+                        }
+
+                        // Trigger change and blur events that happen when user finishes typing
+                        kyInput.dispatchEvent(new Event('change', { bubbles: true }));
+                        kyInput.dispatchEvent(new Event('blur', { bubbles: true }));
+                    }
+                    await lockKYOrder(skuId, kyQty);
                 } else {
                     console.log(`KY order quantity already locked, skipping`);
                 }
