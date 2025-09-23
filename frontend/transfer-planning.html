@@ -632,6 +632,7 @@
                                 <th>Confirmed Qty</th>
                                 <th>CA to Order</th>
                                 <th>KY to Order</th>
+                                <th>Lock All</th>
                                 <th>CA Coverage After</th>
                                 <th>KY Coverage After</th>
                                 <th>ABC/XYZ</th>
@@ -1227,6 +1228,9 @@ SK-GHI789 SK-JKL012"></textarea>
                         ${createKYOrderColumn(rec)}
                     </td>
                     <td>
+                        ${createLockAllColumn(rec)}
+                    </td>
+                    <td>
                         <span class="text-success">${(rec.burnaby_coverage_after_transfer || 0).toFixed(1)}m</span>
                         ${rec.burnaby_retention_warning ? '<i class="fas fa-exclamation-triangle text-warning ms-1" title="Below minimum retention"></i>' : ''}
                     </td>
@@ -1740,6 +1744,207 @@ SK-GHI789 SK-JKL012"></textarea>
             } catch (error) {
                 console.error('Failed to unlock KY order quantity:', error);
                 alert(`Failed to clear KY order quantity: ${error.message}`);
+            }
+        }
+
+        /**
+         * Create Lock All column with combined lock/unlock functionality
+         *
+         * Generates HTML for the Lock All button that intelligently switches between
+         * lock and unlock states based on the current status of all three quantity columns.
+         *
+         * Button Logic:
+         * - Shows unlock icon when ALL three columns are locked
+         * - Shows lock icon when ANY column is unlocked
+         * - Handles mixed states (some columns locked, some unlocked)
+         *
+         * @function createLockAllColumn
+         * @param {Object} rec - Transfer recommendation data object containing:
+         *   - is_confirmed: boolean indicating if confirmed qty is locked
+         *   - confirmed_qty: number or null for confirmed transfer quantity
+         *   - ca_order_qty: number, null, or undefined for CA order quantity
+         *   - ky_order_qty: number, null, or undefined for KY order quantity
+         *   - sku_id: string identifier for the SKU
+         * @returns {string} HTML string containing the Lock All button with appropriate state
+         *
+         * @example
+         * // For unlocked columns
+         * createLockAllColumn({sku_id: 'ABC123', is_confirmed: false, ca_order_qty: null, ky_order_qty: null})
+         * // Returns: HTML with lock icon and lockAllQuantities onclick
+         *
+         * @example
+         * // For fully locked columns
+         * createLockAllColumn({sku_id: 'ABC123', is_confirmed: true, confirmed_qty: 100, ca_order_qty: 50, ky_order_qty: 25})
+         * // Returns: HTML with unlock icon and unlockAllQuantities onclick
+         */
+        function createLockAllColumn(rec) {
+            // Check if all three columns are locked
+            const isConfirmedLocked = rec.is_confirmed && rec.confirmed_qty !== null;
+            const isCALocked = rec.ca_order_qty !== null && rec.ca_order_qty !== undefined;
+            const isKYLocked = rec.ky_order_qty !== null && rec.ky_order_qty !== undefined;
+
+            const allLocked = isConfirmedLocked && isCALocked && isKYLocked;
+
+            if (allLocked) {
+                // All columns are locked - show unlock all button
+                return `
+                    <div style="text-align: center;">
+                        <button class="lock-btn locked" onclick="unlockAllQuantities('${rec.sku_id}')" title="Unlock all three columns">
+                            <i class="fas fa-unlock"></i>
+                        </button>
+                    </div>
+                `;
+            } else {
+                // Not all columns are locked - show lock all button
+                return `
+                    <div style="text-align: center;">
+                        <button class="lock-btn" onclick="lockAllQuantities('${rec.sku_id}')" title="Lock all three columns">
+                            <i class="fas fa-lock"></i>
+                        </button>
+                    </div>
+                `;
+            }
+        }
+
+        /**
+         * Lock all three quantity columns for a single SKU
+         *
+         * Intelligently handles partially locked states by:
+         * - Checking which columns are already locked
+         * - Using existing values from locked columns
+         * - Reading input values only from unlocked columns
+         * - Only calling lock functions for unlocked columns
+         *
+         * @function lockAllQuantities
+         * @param {string} skuId - SKU identifier
+         * @returns {Promise<void>}
+         */
+        async function lockAllQuantities(skuId) {
+            try {
+                console.log(`Starting lockAllQuantities for ${skuId}`);
+
+                // Get current record from recommendationsData
+                const rec = recommendationsData.find(r => r.sku_id === skuId);
+                if (!rec) {
+                    throw new Error(`SKU ${skuId} not found in recommendations data`);
+                }
+
+                // Check which columns are already locked
+                const isConfirmedLocked = rec.is_confirmed && rec.confirmed_qty !== null;
+                const isCALocked = rec.ca_order_qty !== null && rec.ca_order_qty !== undefined;
+                const isKYLocked = rec.ky_order_qty !== null && rec.ky_order_qty !== undefined;
+
+                console.log(`Lock states - Confirmed: ${isConfirmedLocked}, CA: ${isCALocked}, KY: ${isKYLocked}`);
+
+                // Get values - from existing data if locked, from inputs if unlocked
+                let confirmedQty, caQty, kyQty;
+
+                if (isConfirmedLocked) {
+                    confirmedQty = rec.confirmed_qty;
+                    console.log(`Using existing confirmed quantity: ${confirmedQty}`);
+                } else {
+                    const confirmedInput = document.getElementById(`confirm-qty-${skuId}`);
+                    confirmedQty = parseInt(confirmedInput?.value) || rec.recommended_transfer_qty || 0;
+                    console.log(`Using input confirmed quantity: ${confirmedQty}`);
+                }
+
+                if (isCALocked) {
+                    caQty = rec.ca_order_qty;
+                    console.log(`Using existing CA quantity: ${caQty}`);
+                } else {
+                    const caInput = document.getElementById(`ca-order-${skuId}`);
+                    caQty = parseInt(caInput?.value) || 0;
+                    console.log(`Using input CA quantity: ${caQty}`);
+                }
+
+                if (isKYLocked) {
+                    kyQty = rec.ky_order_qty;
+                    console.log(`Using existing KY quantity: ${kyQty}`);
+                } else {
+                    const kyInput = document.getElementById(`ky-order-${skuId}`);
+                    kyQty = parseInt(kyInput?.value) || 0;
+                    console.log(`Using input KY quantity: ${kyQty}`);
+                }
+
+                console.log(`Final values - Confirmed: ${confirmedQty}, CA: ${caQty}, KY: ${kyQty}`);
+
+                // Lock each column only if not already locked
+                if (!isConfirmedLocked) {
+                    console.log(`Locking confirmed quantity: ${confirmedQty}`);
+                    await confirmTransferQty(skuId, confirmedQty);
+                } else {
+                    console.log(`Confirmed quantity already locked, skipping`);
+                }
+
+                if (!isCALocked) {
+                    console.log(`Locking CA order quantity: ${caQty}`);
+                    // Set value in input before locking to ensure lockCAOrder can read it
+                    const caInput = document.getElementById(`ca-order-${skuId}`);
+                    if (caInput) caInput.value = caQty;
+                    await lockCAOrder(skuId);
+                } else {
+                    console.log(`CA order quantity already locked, skipping`);
+                }
+
+                if (!isKYLocked) {
+                    console.log(`Locking KY order quantity: ${kyQty}`);
+                    // Set value in input before locking to ensure lockKYOrder can read it
+                    const kyInput = document.getElementById(`ky-order-${skuId}`);
+                    if (kyInput) kyInput.value = kyQty;
+                    await lockKYOrder(skuId);
+                } else {
+                    console.log(`KY order quantity already locked, skipping`);
+                }
+
+                // Update UI - single refresh after all locks
+                const updatedRec = recommendationsData.find(r => r.sku_id === skuId);
+                if (updatedRec) {
+                    updateSingleRow(updatedRec);
+                }
+
+                console.log(`Successfully processed lock all quantities for ${skuId}`);
+
+            } catch (error) {
+                console.error('Failed to lock all quantities:', error);
+                alert(`Failed to lock all quantities: ${error.message}`);
+            }
+        }
+
+        /**
+         * Unlock all three quantity columns for a single SKU
+         *
+         * Clears all locked quantities and returns columns to editable state.
+         * This function calls the individual unlock functions for each column
+         * and provides immediate visual feedback.
+         *
+         * @function unlockAllQuantities
+         * @param {string} skuId - SKU identifier to unlock all columns for
+         * @returns {Promise<void>}
+         *
+         * @throws {Error} If any unlock operation fails
+         * @throws {Error} If SKU is not found in recommendations data
+         */
+        async function unlockAllQuantities(skuId) {
+            try {
+                console.log(`Starting unlockAllQuantities for ${skuId}`);
+
+                // Call existing unlock functions for all three columns
+                // These functions handle database updates and local data changes
+                await unlockTransferQty(skuId);
+                await unlockCAOrder(skuId);
+                await unlockKYOrder(skuId);
+
+                // Update UI - single refresh after all unlocks to show unlocked state
+                const rec = recommendationsData.find(r => r.sku_id === skuId);
+                if (rec) {
+                    updateSingleRow(rec);
+                }
+
+                console.log(`Successfully unlocked all quantities for ${skuId}`);
+
+            } catch (error) {
+                console.error('Failed to unlock all quantities:', error);
+                alert(`Failed to unlock all quantities: ${error.message}`);
             }
         }
 

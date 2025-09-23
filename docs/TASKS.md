@@ -262,6 +262,45 @@ A task is complete when:
 2. **Business Logic**: Clarify with stakeholder → Document → Implement
 3. **Scope Changes**: Impact assessment → Stakeholder approval → Update timeline
 
+---
+
+## V4.1: Lock All Columns Feature (IN PROGRESS)
+
+### Feature Overview
+Add functionality to lock/unlock all three quantity columns (Confirmed Qty, CA to Order, KY to Order) simultaneously for improved user efficiency.
+
+### Implementation Tasks
+- [x] **TASK-086**: Add lockAllQuantities() JavaScript function to handle locking all three columns at once
+- [x] **TASK-087**: Add unlockAllQuantities() JavaScript function to handle unlocking all three columns
+- [x] **TASK-088**: Create createLockAllColumn() function to generate Lock All button HTML
+- [x] **TASK-089**: Add "Lock All" column header to transfer planning table
+- [x] **TASK-090**: Integrate Lock All button into table row rendering
+- [ ] **TASK-091**: Fix lockAllQuantities to properly handle partially locked states
+- [ ] **TASK-092**: Add comprehensive documentation to all Lock All functions
+- [ ] **TASK-093**: Test Lock All functionality with all lock state combinations
+- [ ] **TASK-094**: Verify data persistence of CA/KY orders on page reload
+- [ ] **TASK-095**: Update code documentation and add JSDoc comments
+
+### Technical Implementation Details
+- **Problem**: Current implementation tries to access input fields that don't exist when columns are locked
+- **Solution**: Check lock state first, get values from recommendationsData for locked columns
+- **Database**: CA/KY order quantities properly saved to transfer_confirmations table
+- **UI**: Lock All button shows lock icon when any column unlocked, unlock icon when all locked
+
+### Testing Checklist
+- [ ] Test with all columns unlocked - should lock all three
+- [ ] Test with confirmed qty already locked - should lock only CA and KY
+- [ ] Test with CA already locked - should lock only confirmed and KY
+- [ ] Test with KY already locked - should lock only confirmed and CA
+- [ ] Test with two columns locked - should lock the remaining one
+- [ ] Test unlock all when all columns are locked
+- [ ] Test data persistence after page reload
+- [ ] Test with empty values (should default to 0)
+- [ ] Test with existing values in inputs
+- [ ] Test immediate visual feedback without page refresh
+
+---
+
 ### Contact Information
 - **Primary Stakeholder**: Arjay (Inventory Manager)
 - **Technical Escalation**: Development team lead
