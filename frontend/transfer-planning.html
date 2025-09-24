@@ -1530,7 +1530,7 @@ SK-GHI789 SK-JKL012"></textarea>
                 return;
             }
 
-            if (!confirm(`Are you sure you want to clear all ${confirmedCount} confirmed quantities? This action cannot be undone.`)) {
+            if (!confirm(`Are you sure you want to clear all ${confirmedCount} confirmed quantities and all locked CA/KY orders? This action cannot be undone.`)) {
                 return;
             }
 
@@ -1553,12 +1553,16 @@ SK-GHI789 SK-JKL012"></textarea>
                     rec.variance_percent = 0;
                     rec.has_significant_variance = false;
                     rec.has_major_variance = false;
+
+                    // Also clear locked CA and KY order quantities
+                    rec.ca_order_qty = null;
+                    rec.ky_order_qty = null;
                 });
 
                 // Refresh the table
                 populateTable();
 
-                alert(`Cleared ${confirmedCount} confirmed quantities.`);
+                alert(`Cleared ${confirmedCount} confirmed quantities and all locked CA/KY orders.`);
 
             } catch (error) {
                 console.error('Failed to clear confirmations:', error);
