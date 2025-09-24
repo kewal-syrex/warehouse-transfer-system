@@ -4934,6 +4934,511 @@ async def clear_order_quantities(sku_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database operation failed: {str(e)}")
 
+# =============================================================================
+# SUPPLIER ANALYTICS API ENDPOINTS
+# =============================================================================
+# Purpose: Standalone supplier lead time analytics system
+# Features: Historical shipment import, performance metrics, reliability scoring
+# Business Logic: Statistical analysis, P95 calculations, performance alerts
+
+# Import supplier analytics modules
+try:
+    from . import supplier_analytics
+    from . import supplier_import
+except ImportError:
+    import supplier_analytics
+    import supplier_import
+
+@app.post("/api/supplier/shipments/import",
+         summary="Import Supplier Shipment History",
+         description="Upload CSV file with historical supplier shipment data",
+         tags=["Supplier Analytics"],
+         responses={
+             200: {"description": "Import completed with results"},
+             400: {"description": "Invalid CSV format or validation errors"},
+             500: {"description": "Import processing failed"}
+         })
+async def import_supplier_shipments(
+    file: UploadFile = File(..., description="CSV file with shipment history"),
+    uploaded_by: str = Form("system", description="Username of uploader")
+):
+    """
+    Import historical supplier shipment data from CSV file
+
+    Expected CSV Format:
+    - po_number: Unique purchase order number
+    - supplier: Supplier name (will be normalized)
+    - order_date: Date order was placed (YYYY-MM-DD format)
+    - received_date: Date order was received (YYYY-MM-DD format)
+    - destination: 'burnaby' or 'kentucky'
+    - was_partial: Optional boolean (true/false)
+    - notes: Optional text notes
+
+    Business Logic:
+    - Validates all data before importing
+    - Normalizes supplier names for consistency
+    - Calculates lead times automatically
+    - Handles duplicate PO numbers with updates
+    - Provides detailed error reporting
+
+    Args:
+        file: CSV file upload
+        uploaded_by: Username for audit trail
+
+    Returns:
+        Dict with import results, statistics, and any errors
+
+    Raises:
+        HTTPException: 400 for validation errors, 500 for processing errors
+    """
+    try:
+        # Validate file type
+        if not file.filename.lower().endswith('.csv'):
+            raise HTTPException(status_code=400, detail="File must be a CSV file")
+
+        # Read file content
+        content = await file.read()
+        csv_content = content.decode('utf-8-sig')  # Handle BOM if present
+
+        # Import using supplier importer
+        importer = supplier_import.get_supplier_importer()
+        result = importer.import_csv_data(csv_content, uploaded_by)
+
+        logger.info(f"Supplier shipment import completed: {result['imported_records']} records imported")
+        return result
+
+    except supplier_import.SupplierImportError as e:
+        logger.error(f"Supplier import validation error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Supplier import processing error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Import processing failed: {str(e)}")
+
+@app.post("/api/supplier/metrics/calculate",
+         summary="Calculate Supplier Performance Metrics",
+         description="Calculate or recalculate performance metrics for all suppliers",
+         tags=["Supplier Analytics"],
+         responses={
+             200: {"description": "Metrics calculated successfully"},
+             500: {"description": "Calculation failed"}
+         })
+async def calculate_supplier_metrics(
+    period_months: int = Form(12, description="Analysis period in months (6, 12, 24, or 0 for all time)"),
+    supplier: Optional[str] = Form(None, description="Specific supplier name (leave empty for all)")
+):
+    """
+    Calculate comprehensive performance metrics for suppliers
+
+    Calculates statistical lead time metrics including:
+    - Average, median, and P95 lead times
+    - Min/max delivery times
+    - Standard deviation and coefficient of variation
+    - Reliability scores (0-100)
+    - Destination-specific breakdowns
+
+    Business Logic:
+    - Uses P95 as primary planning metric
+    - Applies confidence factors based on sample size
+    - Updates cache table for dashboard performance
+    - Generates planning recommendations
+
+    Args:
+        period_months: Analysis time period (6, 12, 24, or 0 for all)
+        supplier: Optional specific supplier (None for all)
+
+    Returns:
+        Dict with calculation results and statistics
+
+    Raises:
+        HTTPException: 500 if calculation fails
+    """
+    try:
+        analytics = supplier_analytics.get_supplier_analytics()
+        result = analytics.update_supplier_metrics_cache(supplier, period_months)
+
+        logger.info(f"Supplier metrics calculated: {result['updated_count']} suppliers updated")
+        return {
+            "success": True,
+            "message": f"Metrics calculated for {result['updated_count']} suppliers",
+            "stats": result
+        }
+
+    except Exception as e:
+        logger.error(f"Supplier metrics calculation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Calculation failed: {str(e)}")
+
+@app.get("/api/supplier/metrics",
+         summary="Get All Supplier Metrics",
+         description="Retrieve performance metrics for all suppliers",
+         tags=["Supplier Analytics"],
+         responses={
+             200: {"description": "List of supplier metrics"},
+             500: {"description": "Database query failed"}
+         })
+async def get_all_supplier_metrics(
+    period_months: int = 12,
+    min_shipments: int = 1
+):
+    """
+    Retrieve performance metrics for all suppliers
+
+    Returns comprehensive metrics including reliability scores,
+    lead time statistics, and planning recommendations.
+
+    Args:
+        period_months: Analysis period (6, 12, 24, or 0)
+        min_shipments: Minimum shipments required to include supplier
+
+    Returns:
+        Dict with supplier metrics list and summary statistics
+
+    Raises:
+        HTTPException: 500 if database query fails
+    """
+    try:
+        analytics = supplier_analytics.get_supplier_analytics()
+        metrics_list = analytics.calculate_all_supplier_metrics(period_months)
+
+        # Filter by minimum shipments
+        filtered_metrics = [m for m in metrics_list if m.get('shipment_count', 0) >= min_shipments]
+
+        # Calculate summary statistics
+        if filtered_metrics:
+            avg_reliability = sum(m.get('reliability_score', 0) for m in filtered_metrics) / len(filtered_metrics)
+            avg_lead_time = sum(m.get('avg_lead_time', 0) for m in filtered_metrics) / len(filtered_metrics)
+        else:
+            avg_reliability = 0
+            avg_lead_time = 0
+
+        return {
+            "suppliers": filtered_metrics,
+            "count": len(filtered_metrics),
+            "summary": {
+                "avg_reliability_score": round(avg_reliability, 1),
+                "avg_lead_time": round(avg_lead_time, 1),
+                "analysis_period": f"{period_months}_months" if period_months > 0 else "all_time"
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Error retrieving supplier metrics: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Database query failed: {str(e)}")
+
+@app.get("/api/supplier/metrics/{supplier}",
+         summary="Get Detailed Supplier Metrics",
+         description="Retrieve comprehensive analytics for a specific supplier",
+         tags=["Supplier Analytics"],
+         responses={
+             200: {"description": "Detailed supplier metrics"},
+             404: {"description": "Supplier not found"},
+             500: {"description": "Database query failed"}
+         })
+async def get_supplier_detailed_metrics(
+    supplier: str,
+    period_months: int = 12
+):
+    """
+    Retrieve detailed performance analytics for a specific supplier
+
+    Provides comprehensive analysis including:
+    - Statistical metrics and reliability scoring
+    - Destination-specific performance breakdown
+    - Performance trends and recommendations
+    - Recent shipment history
+
+    Args:
+        supplier: Supplier name
+        period_months: Analysis period
+
+    Returns:
+        Dict with detailed supplier analytics
+
+    Raises:
+        HTTPException: 404 if supplier not found, 500 for database errors
+    """
+    try:
+        analytics = supplier_analytics.get_supplier_analytics()
+        metrics = analytics.calculate_supplier_metrics(supplier, period_months)
+
+        if metrics.get('error'):
+            raise HTTPException(status_code=404, detail=f"No shipment data found for supplier: {supplier}")
+
+        # Get recent shipments for context
+        connection = database.get_database_connection()
+        with connection.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute("""
+                SELECT po_number, order_date, received_date, actual_lead_time, destination
+                FROM supplier_shipments
+                WHERE UPPER(TRIM(supplier)) = %s
+                ORDER BY received_date DESC
+                LIMIT 10
+            """, (supplier.strip().upper(),))
+            recent_shipments = cursor.fetchall()
+
+        metrics['recent_shipments'] = recent_shipments
+        return metrics
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving detailed metrics for {supplier}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Database query failed: {str(e)}")
+
+@app.get("/api/supplier/metrics/export",
+         summary="Export Supplier Metrics",
+         description="Export supplier performance metrics in CSV or JSON format",
+         tags=["Supplier Analytics"],
+         responses={
+             200: {"description": "Exported metrics file"},
+             500: {"description": "Export failed"}
+         })
+async def export_supplier_metrics(
+    format: str = "csv",
+    period_months: int = 12
+):
+    """
+    Export supplier performance metrics for external use
+
+    Supports CSV and JSON formats for integration with other systems
+    or for supplier performance reviews.
+
+    Args:
+        format: Export format ('csv' or 'json')
+        period_months: Analysis period
+
+    Returns:
+        File download with supplier metrics
+
+    Raises:
+        HTTPException: 400 for invalid format, 500 for export errors
+    """
+    try:
+        if format not in ['csv', 'json']:
+            raise HTTPException(status_code=400, detail="Format must be 'csv' or 'json'")
+
+        analytics = supplier_analytics.get_supplier_analytics()
+        metrics_list = analytics.calculate_all_supplier_metrics(period_months)
+
+        if format == 'csv':
+            # Generate CSV content
+            output = io.StringIO()
+            writer = csv.writer(output)
+
+            # Write header
+            writer.writerow([
+                'Supplier', 'Avg Lead Time', 'P95 Lead Time', 'Reliability Score',
+                'Shipment Count', 'Min Lead Time', 'Max Lead Time', 'Std Deviation',
+                'Coefficient Variation', 'Recommendation'
+            ])
+
+            # Write data rows
+            for metrics in metrics_list:
+                writer.writerow([
+                    metrics.get('supplier', ''),
+                    metrics.get('avg_lead_time', ''),
+                    metrics.get('p95_lead_time', ''),
+                    metrics.get('reliability_score', ''),
+                    metrics.get('shipment_count', ''),
+                    metrics.get('min_lead_time', ''),
+                    metrics.get('max_lead_time', ''),
+                    metrics.get('std_dev_lead_time', ''),
+                    metrics.get('coefficient_variation', ''),
+                    metrics.get('recommendation', '')
+                ])
+
+            csv_content = output.getvalue()
+            output.close()
+
+            return StreamingResponse(
+                io.BytesIO(csv_content.encode('utf-8')),
+                media_type="text/csv",
+                headers={"Content-Disposition": f"attachment; filename=supplier_metrics_{period_months}m.csv"}
+            )
+
+        else:  # JSON format
+            import json
+            json_content = json.dumps({
+                'suppliers': metrics_list,
+                'analysis_period': f"{period_months}_months" if period_months > 0 else "all_time",
+                'generated_at': datetime.now().isoformat()
+            }, indent=2, default=str)
+
+            return StreamingResponse(
+                io.BytesIO(json_content.encode('utf-8')),
+                media_type="application/json",
+                headers={"Content-Disposition": f"attachment; filename=supplier_metrics_{period_months}m.json"}
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error exporting supplier metrics: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
+@app.get("/api/supplier/alerts",
+         summary="Get Supplier Performance Alerts",
+         description="Retrieve performance degradation and reliability alerts",
+         tags=["Supplier Analytics"],
+         responses={
+             200: {"description": "List of performance alerts"},
+             500: {"description": "Alert detection failed"}
+         })
+async def get_supplier_alerts(
+    supplier: Optional[str] = None,
+    severity: Optional[str] = None
+):
+    """
+    Detect and retrieve supplier performance alerts
+
+    Identifies issues such as:
+    - Performance degradation (>15% increase in lead time)
+    - High variability warnings (CV > 25%)
+    - Insufficient data warnings (<5 shipments)
+    - Outlier detection (shipments >2x normal)
+
+    Args:
+        supplier: Optional specific supplier filter
+        severity: Optional severity filter ('HIGH', 'MEDIUM', 'LOW')
+
+    Returns:
+        Dict with alerts list and summary statistics
+
+    Raises:
+        HTTPException: 500 if alert detection fails
+    """
+    try:
+        analytics = supplier_analytics.get_supplier_analytics()
+        alerts = analytics.detect_performance_alerts(supplier)
+
+        # Filter by severity if specified
+        if severity:
+            severity_upper = severity.upper()
+            if severity_upper in ['HIGH', 'MEDIUM', 'LOW']:
+                alerts = [alert for alert in alerts if alert.get('severity') == severity_upper]
+
+        # Summary statistics
+        alert_counts = {'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
+        for alert in alerts:
+            severity_level = alert.get('severity', 'LOW')
+            if severity_level in alert_counts:
+                alert_counts[severity_level] += 1
+
+        return {
+            "alerts": alerts,
+            "count": len(alerts),
+            "summary": alert_counts
+        }
+
+    except Exception as e:
+        logger.error(f"Error detecting supplier alerts: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Alert detection failed: {str(e)}")
+
+@app.get("/api/supplier/{supplier}/seasonal-analysis",
+         summary="Get Supplier Seasonal Pattern Analysis",
+         description="Analyze seasonal patterns in supplier lead time performance",
+         tags=["Supplier Analytics"],
+         responses={
+             200: {"description": "Seasonal pattern analysis results"},
+             404: {"description": "Supplier not found"},
+             500: {"description": "Analysis failed"}
+         })
+async def get_supplier_seasonal_analysis(supplier: str):
+    """
+    Analyze seasonal patterns in supplier lead time performance
+
+    Provides comprehensive seasonal analysis including:
+    - Monthly average lead times
+    - Peak and best performing months
+    - Seasonality strength scoring
+    - Business insights and recommendations
+
+    Args:
+        supplier: Supplier name to analyze
+
+    Returns:
+        Dict with seasonal pattern analysis and recommendations
+
+    Raises:
+        HTTPException: 404 if supplier not found, 500 if analysis fails
+    """
+    try:
+        analytics = supplier_analytics.get_supplier_analytics()
+        seasonal_data = analytics.detect_seasonal_patterns(supplier)
+
+        if not seasonal_data.get('sufficient_data'):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Insufficient data for seasonal analysis of supplier: {supplier}"
+            )
+
+        return {
+            "supplier": supplier,
+            "seasonal_analysis": seasonal_data,
+            "generated_at": datetime.now().isoformat()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error analyzing seasonal patterns for {supplier}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Seasonal analysis failed: {str(e)}")
+
+@app.get("/api/supplier/{supplier}/performance-trends",
+         summary="Get Supplier Performance Trend Analysis",
+         description="Analyze supplier performance trends over time",
+         tags=["Supplier Analytics"],
+         responses={
+             200: {"description": "Performance trend analysis results"},
+             404: {"description": "Supplier not found"},
+             500: {"description": "Analysis failed"}
+         })
+async def get_supplier_performance_trends(
+    supplier: str,
+    periods: int = 6
+):
+    """
+    Analyze supplier performance trends over multiple time periods
+
+    Provides trend analysis including:
+    - Performance direction (improving/declining/stable)
+    - Trend strength and statistical significance
+    - Quarterly performance data
+    - Performance forecasting
+    - Actionable business recommendations
+
+    Args:
+        supplier: Supplier name to analyze
+        periods: Number of quarters to analyze (default: 6)
+
+    Returns:
+        Dict with trend analysis and performance forecast
+
+    Raises:
+        HTTPException: 404 if supplier not found, 500 if analysis fails
+    """
+    try:
+        analytics = supplier_analytics.get_supplier_analytics()
+        trend_data = analytics.calculate_performance_trends(supplier, periods)
+
+        if not trend_data.get('sufficient_data'):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Insufficient data for trend analysis of supplier: {supplier}"
+            )
+
+        return {
+            "supplier": supplier,
+            "trend_analysis": trend_data,
+            "analysis_periods": periods,
+            "generated_at": datetime.now().isoformat()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error analyzing performance trends for {supplier}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Trend analysis failed: {str(e)}")
+
 # Serve the main dashboard
 @app.get("/dashboard")
 async def dashboard_redirect():

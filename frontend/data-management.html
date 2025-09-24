@@ -565,6 +565,141 @@
                 </div>
             </div>
 
+            <!-- Supplier Shipment Import Section -->
+            <div class="col-lg-6">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-truck me-2"></i>Supplier Shipments
+                            <small class="text-muted">Import historical shipment data</small>
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <!-- Supplier Upload Area -->
+                        <div id="supplier-upload-area" class="upload-area" onclick="document.getElementById('supplier-file-input').click()">
+                            <i class="fas fa-shipping-fast upload-icon"></i>
+                            <h5>Drop CSV file here or click to browse</h5>
+                            <p class="text-muted mb-0">
+                                Historical supplier shipment data<br>
+                                <small>CSV format only, Maximum file size: 50MB</small>
+                            </p>
+                            <input type="file" id="supplier-file-input" class="d-none" accept=".csv" single>
+                        </div>
+
+                        <!-- File Information -->
+                        <div id="supplier-file-info" class="file-info">
+                            <h6>Selected File:</h6>
+                            <div id="supplier-file-details"></div>
+
+                            <!-- Username Input -->
+                            <div class="mt-3">
+                                <label for="uploaded-by" class="form-label">Uploaded By:</label>
+                                <input type="text" class="form-control" id="uploaded-by" placeholder="Enter your username" value="admin">
+                            </div>
+
+                            <div class="mt-3">
+                                <button type="button" class="btn btn-primary" onclick="uploadSupplierFile()">
+                                    <i class="fas fa-upload me-2"></i>Import Shipment Data
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary ms-2" onclick="validateSupplierFile()">
+                                    <i class="fas fa-check-circle me-2"></i>Validate Only
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Upload Progress -->
+                        <div id="supplier-upload-progress" class="upload-progress">
+                            <div class="progress mb-2">
+                                <div id="supplier-progress-bar" class="progress-bar" role="progressbar" style="width: 0%">0%</div>
+                            </div>
+                            <div id="supplier-upload-status" class="text-muted">Processing supplier data...</div>
+                        </div>
+
+                        <!-- Import Results -->
+                        <div id="supplier-import-results" class="import-results">
+                            <h6>Import Results:</h6>
+                            <div id="supplier-import-summary"></div>
+                            <div id="supplier-import-messages"></div>
+                        </div>
+
+                        <!-- Import Instructions -->
+                        <div class="mt-3">
+                            <h6>CSV Format Requirements:</h6>
+                            <div class="accordion" id="supplier-instructions">
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#supplier-format">
+                                            Required CSV Format
+                                        </button>
+                                    </h2>
+                                    <div id="supplier-format" class="accordion-collapse collapse" data-bs-parent="#supplier-instructions">
+                                        <div class="accordion-body">
+                                            <strong>Required columns:</strong><br>
+                                            <ul class="mb-2">
+                                                <li><strong>po_number:</strong> Unique purchase order number</li>
+                                                <li><strong>supplier:</strong> Supplier name (will be normalized)</li>
+                                                <li><strong>order_date:</strong> Date order was placed (YYYY-MM-DD)</li>
+                                                <li><strong>received_date:</strong> Date order was received (YYYY-MM-DD)</li>
+                                                <li><strong>destination:</strong> 'burnaby' or 'kentucky'</li>
+                                            </ul>
+
+                                            <strong>Optional columns:</strong><br>
+                                            <ul class="mb-3">
+                                                <li><strong>was_partial:</strong> true/false for partial shipments</li>
+                                                <li><strong>notes:</strong> Additional notes about the shipment</li>
+                                            </ul>
+
+                                            <strong>Example CSV:</strong><br>
+                                            <code class="d-block bg-light p-2 rounded">
+po_number,supplier,order_date,received_date,destination,was_partial,notes<br>
+PO-2024-001,Yuasa Battery,2024-01-15,2024-05-20,burnaby,false,On time delivery<br>
+PO-2024-002,Power Systems,2024-01-20,2024-04-28,kentucky,true,Partial shipment<br>
+PO-2024-003,Yuasa Battery,2024-02-01,2024-05-25,kentucky,false,
+                                            </code>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#supplier-notes">
+                                            Import Notes
+                                        </button>
+                                    </h2>
+                                    <div id="supplier-notes" class="accordion-collapse collapse" data-bs-parent="#supplier-instructions">
+                                        <div class="accordion-body">
+                                            <ul class="mb-0">
+                                                <li>Lead times are calculated automatically</li>
+                                                <li>Supplier names are normalized for consistency</li>
+                                                <li>Duplicate PO numbers will update existing records</li>
+                                                <li>Comprehensive validation with detailed error reporting</li>
+                                                <li>Supports various date formats (YYYY-MM-DD recommended)</li>
+                                                <li>Use the metrics dashboard to view calculated performance</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Quick Actions -->
+                        <div class="mt-4 pt-3 border-top">
+                            <h6>Quick Actions:</h6>
+                            <div class="d-flex gap-2 flex-wrap">
+                                <button class="btn btn-outline-info btn-sm" onclick="window.open('/static/supplier-metrics.html', '_blank')">
+                                    <i class="fas fa-chart-line me-1"></i>View Metrics Dashboard
+                                </button>
+                                <button class="btn btn-outline-secondary btn-sm" onclick="calculateSupplierMetrics()">
+                                    <i class="fas fa-calculator me-1"></i>Recalculate Metrics
+                                </button>
+                                <a href="/api/supplier/metrics/export?format=csv" class="btn btn-outline-success btn-sm" target="_blank">
+                                    <i class="fas fa-download me-1"></i>Export Metrics CSV
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Export Section -->
             <div class="col-lg-6">
                 <div class="card mb-4">
@@ -2311,6 +2446,403 @@
                 document.body.removeChild(link);
             }
         }
+
+        // =============================================================================
+        // SUPPLIER SHIPMENT IMPORT FUNCTIONS
+        // =============================================================================
+
+        /**
+         * Set up supplier file upload functionality
+         * Handles drag-and-drop, file selection, and validation
+         */
+        function setupSupplierFileUpload() {
+            const fileInput = document.getElementById('supplier-file-input');
+            const uploadArea = document.getElementById('supplier-upload-area');
+            const fileInfo = document.getElementById('supplier-file-info');
+
+            // File input change handler
+            fileInput.addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    handleSupplierFile(file);
+                }
+            });
+
+            // Drag and drop handlers
+            uploadArea.addEventListener('dragover', function(e) {
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
+
+            uploadArea.addEventListener('dragleave', function(e) {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+            });
+
+            uploadArea.addEventListener('drop', function(e) {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    const file = files[0];
+                    if (file.type === 'text/csv' || file.name.toLowerCase().endsWith('.csv')) {
+                        fileInput.files = files;
+                        handleSupplierFile(file);
+                    } else {
+                        alert('Please select a CSV file only.');
+                    }
+                }
+            });
+        }
+
+        /**
+         * Handle selected supplier file
+         * Display file information and show upload options
+         */
+        function handleSupplierFile(file) {
+            const fileInfo = document.getElementById('supplier-file-info');
+            const fileDetails = document.getElementById('supplier-file-details');
+
+            if (file.size > 50 * 1024 * 1024) { // 50MB limit
+                alert('File size exceeds 50MB limit. Please select a smaller file.');
+                return;
+            }
+
+            // Display file information
+            const sizeText = (file.size / 1024 / 1024).toFixed(2) + ' MB';
+            fileDetails.innerHTML = `
+                <div class="d-flex align-items-center">
+                    <i class="fas fa-file-csv text-success me-2"></i>
+                    <div>
+                        <strong>${file.name}</strong><br>
+                        <small class="text-muted">${sizeText} - Modified: ${new Date(file.lastModified).toLocaleString()}</small>
+                    </div>
+                </div>
+            `;
+
+            fileInfo.style.display = 'block';
+        }
+
+        /**
+         * Upload and import supplier file
+         * Sends file to backend API for processing
+         */
+        async function uploadSupplierFile() {
+            const fileInput = document.getElementById('supplier-file-input');
+            const uploadedBy = document.getElementById('uploaded-by').value.trim();
+
+            if (!fileInput.files || fileInput.files.length === 0) {
+                alert('Please select a CSV file first.');
+                return;
+            }
+
+            if (!uploadedBy) {
+                alert('Please enter your username.');
+                return;
+            }
+
+            const file = fileInput.files[0];
+
+            // Show progress
+            showSupplierUploadProgress(true);
+            updateSupplierProgress(0, 'Uploading file...');
+
+            try {
+                // Create form data
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('uploaded_by', uploadedBy);
+
+                // Upload to API
+                const response = await fetch('/api/supplier/shipments/import', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'Import failed');
+                }
+
+                updateSupplierProgress(50, 'Processing data...');
+
+                const result = await response.json();
+                updateSupplierProgress(100, 'Import completed!');
+
+                // Hide progress and show results
+                setTimeout(() => {
+                    showSupplierUploadProgress(false);
+                    displaySupplierImportResults(result);
+                }, 1000);
+
+            } catch (error) {
+                console.error('Upload error:', error);
+                showSupplierUploadProgress(false);
+                displaySupplierImportResults({
+                    success: false,
+                    errors: [error.message],
+                    warnings: [],
+                    stats: { total_rows: 0, successful_imports: 0, error_rows: 1 }
+                });
+            }
+        }
+
+        /**
+         * Validate supplier file without importing
+         * Checks format and data validity
+         */
+        async function validateSupplierFile() {
+            const fileInput = document.getElementById('supplier-file-input');
+
+            if (!fileInput.files || fileInput.files.length === 0) {
+                alert('Please select a CSV file first.');
+                return;
+            }
+
+            const file = fileInput.files[0];
+
+            showSupplierUploadProgress(true);
+            updateSupplierProgress(0, 'Validating file...');
+
+            try {
+                // Read file content for validation
+                const fileContent = await file.text();
+
+                // Create form data for validation
+                const formData = new FormData();
+                formData.append('file', file);
+
+                // Send for format validation only
+                const response = await fetch('/api/supplier/shipments/import', {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        'X-Validation-Only': 'true'  // Custom header for validation
+                    }
+                });
+
+                updateSupplierProgress(100, 'Validation completed!');
+
+                // Parse response
+                const result = await response.json();
+
+                setTimeout(() => {
+                    showSupplierUploadProgress(false);
+                    displaySupplierImportResults({
+                        success: result.success,
+                        errors: result.errors || [],
+                        warnings: result.warnings || [],
+                        stats: result.stats || { total_rows: 0 },
+                        validation_only: true
+                    });
+                }, 500);
+
+            } catch (error) {
+                console.error('Validation error:', error);
+                showSupplierUploadProgress(false);
+                displaySupplierImportResults({
+                    success: false,
+                    errors: [error.message],
+                    warnings: [],
+                    stats: { total_rows: 0 },
+                    validation_only: true
+                });
+            }
+        }
+
+        /**
+         * Show/hide supplier upload progress indicator
+         */
+        function showSupplierUploadProgress(show) {
+            const progressDiv = document.getElementById('supplier-upload-progress');
+            progressDiv.style.display = show ? 'block' : 'none';
+        }
+
+        /**
+         * Update supplier upload progress bar and status
+         */
+        function updateSupplierProgress(percent, status) {
+            const progressBar = document.getElementById('supplier-progress-bar');
+            const statusDiv = document.getElementById('supplier-upload-status');
+
+            progressBar.style.width = percent + '%';
+            progressBar.textContent = percent + '%';
+            statusDiv.textContent = status;
+        }
+
+        /**
+         * Display supplier import results
+         * Shows statistics, errors, warnings, and success messages
+         */
+        function displaySupplierImportResults(result) {
+            const resultsDiv = document.getElementById('supplier-import-results');
+            const summaryDiv = document.getElementById('supplier-import-summary');
+            const messagesDiv = document.getElementById('supplier-import-messages');
+
+            resultsDiv.style.display = 'block';
+
+            // Display summary statistics
+            let summaryHtml = '';
+            if (result.stats) {
+                const stats = result.stats;
+                if (result.validation_only) {
+                    summaryHtml = `
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="summary-stat bg-info text-white">
+                                    <span class="stat-number">${stats.total_rows || 0}</span>
+                                    <span class="stat-label">Rows Validated</span>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="summary-stat ${result.success ? 'bg-success' : 'bg-danger'} text-white">
+                                    <span class="stat-number">${result.success ? 'VALID' : 'INVALID'}</span>
+                                    <span class="stat-label">Format Status</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    summaryHtml = `
+                        <div class="row">
+                            <div class="col-md-3">
+                                <div class="summary-stat bg-primary text-white">
+                                    <span class="stat-number">${stats.total_rows || 0}</span>
+                                    <span class="stat-label">Total Rows</span>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="summary-stat bg-success text-white">
+                                    <span class="stat-number">${stats.successful_imports || 0}</span>
+                                    <span class="stat-label">Imported</span>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="summary-stat bg-warning text-white">
+                                    <span class="stat-number">${stats.duplicate_updates || 0}</span>
+                                    <span class="stat-label">Updated</span>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="summary-stat bg-danger text-white">
+                                    <span class="stat-number">${stats.error_rows || 0}</span>
+                                    <span class="stat-label">Errors</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+            summaryDiv.innerHTML = summaryHtml;
+
+            // Display messages
+            let messagesHtml = '';
+
+            // Success message
+            if (result.success && !result.validation_only) {
+                messagesHtml += `
+                    <div class="validation-success">
+                        <i class="fas fa-check-circle me-2"></i>
+                        <strong>Import completed successfully!</strong><br>
+                        ${result.imported_records || 0} shipment records imported.
+                    </div>
+                `;
+            } else if (result.success && result.validation_only) {
+                messagesHtml += `
+                    <div class="validation-success">
+                        <i class="fas fa-check-circle me-2"></i>
+                        <strong>Validation passed!</strong><br>
+                        File format is correct and ready for import.
+                    </div>
+                `;
+            }
+
+            // Display warnings
+            if (result.warnings && result.warnings.length > 0) {
+                messagesHtml += '<h6>Warnings:</h6>';
+                result.warnings.forEach(warning => {
+                    messagesHtml += `<div class="validation-warning">${warning}</div>`;
+                });
+            }
+
+            // Display errors
+            if (result.errors && result.errors.length > 0) {
+                messagesHtml += '<h6>Errors:</h6>';
+                result.errors.slice(0, 10).forEach(error => { // Show first 10 errors
+                    messagesHtml += `<div class="validation-error">${error}</div>`;
+                });
+
+                if (result.errors.length > 10) {
+                    messagesHtml += `<div class="text-muted"><small>... and ${result.errors.length - 10} more errors</small></div>`;
+                }
+            }
+
+            messagesDiv.innerHTML = messagesHtml;
+
+            // Auto-hide after 10 seconds if successful
+            if (result.success) {
+                setTimeout(() => {
+                    resultsDiv.style.display = 'none';
+                }, 10000);
+            }
+        }
+
+        /**
+         * Calculate/recalculate supplier metrics
+         * Triggers backend recalculation of all metrics
+         */
+        async function calculateSupplierMetrics() {
+            if (!confirm('This will recalculate metrics for all suppliers. Continue?')) {
+                return;
+            }
+
+            try {
+                showSupplierUploadProgress(true);
+                updateSupplierProgress(0, 'Calculating supplier metrics...');
+
+                const formData = new FormData();
+                formData.append('period_months', '12');
+
+                const response = await fetch('/api/supplier/metrics/calculate', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'Calculation failed');
+                }
+
+                const result = await response.json();
+                updateSupplierProgress(100, 'Metrics calculated!');
+
+                setTimeout(() => {
+                    showSupplierUploadProgress(false);
+                    displaySupplierImportResults({
+                        success: true,
+                        errors: [],
+                        warnings: [],
+                        stats: {
+                            total_rows: result.stats?.updated_count || 0,
+                            successful_imports: result.stats?.updated_count || 0,
+                            error_rows: result.stats?.error_count || 0
+                        },
+                        imported_records: result.stats?.updated_count || 0
+                    });
+                }, 1000);
+
+            } catch (error) {
+                console.error('Calculation error:', error);
+                showSupplierUploadProgress(false);
+                alert('Failed to calculate metrics: ' + error.message);
+            }
+        }
+
+        // Initialize supplier upload functionality when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            setupSupplierFileUpload();
+        });
 
     </script>
 </body>

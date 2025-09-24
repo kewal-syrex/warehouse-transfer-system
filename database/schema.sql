@@ -340,13 +340,91 @@ END //
 DELIMITER ;
 
 -- ===================================================================
+-- Supplier Analytics Tables (V5.0)
+-- ===================================================================
+
+-- Supplier shipments table for historical PO data
+DROP TABLE IF EXISTS supplier_shipments;
+CREATE TABLE supplier_shipments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    po_number VARCHAR(50) UNIQUE NOT NULL,
+    supplier VARCHAR(100) NOT NULL,
+    order_date DATE NOT NULL,
+    received_date DATE NOT NULL,
+    destination ENUM('burnaby', 'kentucky') NOT NULL,
+    actual_lead_time INT GENERATED ALWAYS AS (DATEDIFF(received_date, order_date)) STORED,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_supplier (supplier),
+    INDEX idx_order_date (order_date),
+    INDEX idx_received_date (received_date),
+    INDEX idx_destination (destination),
+    INDEX idx_lead_time (actual_lead_time),
+    INDEX idx_supplier_date (supplier, order_date)
+);
+
+-- Update supplier_lead_times table with analytics columns
+DROP TABLE IF EXISTS supplier_lead_times;
+CREATE TABLE supplier_lead_times (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    supplier VARCHAR(100) NOT NULL,
+    destination ENUM('burnaby', 'kentucky') NOT NULL,
+    avg_lead_time DECIMAL(10, 2) DEFAULT 0,
+    median_lead_time DECIMAL(10, 2) DEFAULT 0,
+    p95_lead_time DECIMAL(10, 2) DEFAULT 0,
+    min_lead_time INT DEFAULT 0,
+    max_lead_time INT DEFAULT 0,
+    std_deviation DECIMAL(10, 2) DEFAULT 0,
+    coefficient_variation DECIMAL(10, 4) DEFAULT 0,
+    reliability_score INT DEFAULT 0,
+    shipment_count INT DEFAULT 0,
+    time_period VARCHAR(20) DEFAULT 'all_time',
+    last_calculated TIMESTAMP NULL DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_supplier_dest_period (supplier, destination, time_period),
+    INDEX idx_supplier (supplier),
+    INDEX idx_destination (destination),
+    INDEX idx_reliability_score (reliability_score),
+    INDEX idx_p95_lead_time (p95_lead_time),
+    INDEX idx_time_period (time_period),
+    INDEX idx_last_calculated (last_calculated)
+);
+
+-- ===================================================================
 -- Indexes for Performance
 -- ===================================================================
 
--- Additional performance indexes
+-- Core system performance indexes
 CREATE INDEX idx_monthly_sales_composite ON monthly_sales(sku_id, year_month DESC);
 CREATE INDEX idx_inventory_zero_stock ON inventory_current(kentucky_qty) WHERE kentucky_qty = 0;
 CREATE INDEX idx_skus_active ON skus(status) WHERE status = 'Active';
+
+-- Supplier analytics performance indexes
+CREATE INDEX idx_shipments_supplier_period ON supplier_shipments(supplier, order_date DESC);
+CREATE INDEX idx_shipments_analysis ON supplier_shipments(supplier, destination, order_date);
+CREATE INDEX idx_lead_times_performance ON supplier_lead_times(supplier, reliability_score DESC, p95_lead_time);
+
+-- Materialized view for supplier metrics aggregation
+CREATE VIEW v_supplier_performance AS
+SELECT
+    ss.supplier,
+    ss.destination,
+    COUNT(*) as shipment_count,
+    AVG(ss.actual_lead_time) as avg_lead_time,
+    MIN(ss.actual_lead_time) as min_lead_time,
+    MAX(ss.actual_lead_time) as max_lead_time,
+    STDDEV(ss.actual_lead_time) as std_deviation,
+    CASE
+        WHEN AVG(ss.actual_lead_time) > 0 THEN
+            STDDEV(ss.actual_lead_time) / AVG(ss.actual_lead_time)
+        ELSE 0
+    END as coefficient_variation,
+    MAX(ss.order_date) as latest_order,
+    MIN(ss.order_date) as earliest_order
+FROM supplier_shipments ss
+WHERE ss.order_date >= DATE_SUB(CURDATE(), INTERVAL 24 MONTH)
+GROUP BY ss.supplier, ss.destination;
 
 -- ===================================================================
 -- Database User and Permissions (Optional)

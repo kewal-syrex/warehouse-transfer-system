@@ -1,0 +1,1052 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Supplier Performance Metrics - Warehouse Transfer Tool</title>
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <!-- DataTables CSS -->
+    <link href="https://cdn.datatables.net/1.13.4/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+    <!-- Chart.js CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.css" rel="stylesheet">
+
+    <style>
+        /* Custom dashboard styling */
+        .navbar-custom {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .metric-card {
+            transition: transform 0.2s ease;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .metric-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        }
+
+        .metric-value {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin-bottom: 0;
+        }
+
+        .metric-label {
+            font-size: 0.9rem;
+            opacity: 0.8;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Reliability score badges */
+        .reliability-badge {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: bold;
+            text-align: center;
+            min-width: 60px;
+            display: inline-block;
+        }
+
+        .reliability-excellent { background: #28a745; color: white; }
+        .reliability-good { background: #17a2b8; color: white; }
+        .reliability-fair { background: #ffc107; color: #212529; }
+        .reliability-poor { background: #dc3545; color: white; }
+
+        /* Lead time styling */
+        .lead-time-cell {
+            font-weight: 500;
+        }
+
+        .lead-time-fast { color: #28a745; }
+        .lead-time-normal { color: #6c757d; }
+        .lead-time-slow { color: #dc3545; }
+
+        /* Dashboard layout */
+        .dashboard-section {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .section-header {
+            border-bottom: 2px solid #f8f9fa;
+            padding-bottom: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        /* Modal styling */
+        .modal-xl {
+            max-width: 90%;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 300px;
+        }
+
+        /* Loading states */
+        .loading-spinner {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 200px;
+        }
+
+        /* Filter controls */
+        .filter-controls {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        /* Responsive table */
+        .table-responsive {
+            border-radius: 8px;
+            box-shadow: 0 1px 5px rgba(0,0,0,0.1);
+        }
+
+        /* Alert styling */
+        .alert-custom {
+            border-left: 4px solid;
+            border-radius: 0 6px 6px 0;
+        }
+
+        .alert-high { border-left-color: #dc3545; }
+        .alert-medium { border-left-color: #ffc107; }
+        .alert-low { border-left-color: #17a2b8; }
+    </style>
+</head>
+<body class="bg-light">
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-custom">
+        <div class="container-fluid">
+            <div class="d-flex align-items-center">
+                <a href="data-management.html" class="btn btn-outline-light me-3">
+                    <i class="fas fa-arrow-left"></i> Data Management
+                </a>
+                <span class="navbar-brand mb-0 h1 text-white">
+                    <i class="fas fa-chart-line me-2"></i>Supplier Performance Metrics
+                </span>
+            </div>
+            <div class="d-flex align-items-center">
+                <div class="dropdown">
+                    <button class="btn btn-outline-light btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                        <i class="fas fa-bars"></i> Navigate
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="index.html">
+                            <i class="fas fa-home text-primary"></i> Dashboard
+                        </a></li>
+                        <li><a class="dropdown-item" href="transfer-planning.html">
+                            <i class="fas fa-truck text-primary"></i> Transfer Planning
+                        </a></li>
+                        <li><a class="dropdown-item" href="sku-listing.html">
+                            <i class="fas fa-list text-success"></i> SKU Listing
+                        </a></li>
+                        <li><a class="dropdown-item" href="data-management.html">
+                            <i class="fas fa-database text-info"></i> Data Management
+                        </a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="container-fluid mt-4">
+        <!-- Summary Metrics -->
+        <div class="dashboard-section">
+            <div class="section-header">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h4 class="mb-0">
+                        <i class="fas fa-tachometer-alt me-2 text-primary"></i>Performance Overview
+                    </h4>
+                    <div class="d-flex gap-2">
+                        <select id="period-filter" class="form-select form-select-sm" style="width: auto;">
+                            <option value="6">Last 6 Months</option>
+                            <option value="12" selected>Last 12 Months</option>
+                            <option value="24">Last 24 Months</option>
+                            <option value="0">All Time</option>
+                        </select>
+                        <button class="btn btn-outline-primary btn-sm" onclick="refreshMetrics()">
+                            <i class="fas fa-sync-alt me-1"></i>Refresh
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row" id="summary-metrics">
+                <div class="col-md-3">
+                    <div class="metric-card card text-center border-0 bg-primary text-white"
+                         data-bs-toggle="tooltip" data-bs-placement="top"
+                         title="Total number of suppliers with shipment history in the selected time period">
+                        <div class="card-body">
+                            <div class="metric-value" id="total-suppliers">-</div>
+                            <div class="metric-label">Total Suppliers</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="metric-card card text-center border-0 bg-success text-white"
+                         data-bs-toggle="tooltip" data-bs-placement="top"
+                         title="Average reliability score across all suppliers. Score 0-100 based on lead time consistency. Higher scores mean more predictable deliveries.">
+                        <div class="card-body">
+                            <div class="metric-value" id="avg-reliability">-</div>
+                            <div class="metric-label">Avg Reliability</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="metric-card card text-center border-0 bg-info text-white"
+                         data-bs-toggle="tooltip" data-bs-placement="top"
+                         title="Average lead time across all suppliers. Lead time is the number of days between placing an order and receiving it.">
+                        <div class="card-body">
+                            <div class="metric-value" id="avg-lead-time">-</div>
+                            <div class="metric-label">Avg Lead Time (days)</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="metric-card card text-center border-0 bg-warning text-dark"
+                         data-bs-toggle="tooltip" data-bs-placement="top"
+                         title="Number of suppliers requiring immediate attention due to performance degradation or high variability">
+                        <div class="card-body">
+                            <div class="metric-value" id="high-alerts">-</div>
+                            <div class="metric-label">High Priority Alerts</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Guide -->
+            <div class="row mt-4">
+                <div class="col-12">
+                    <div class="alert alert-info" role="alert">
+                        <h6 class="alert-heading">
+                            <i class="fas fa-lightbulb me-2"></i>Understanding Your Supplier Metrics
+                        </h6>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <p class="mb-2"><strong>🎯 Key Goal:</strong> Predict when orders will arrive so you never run out of stock</p>
+                                <p class="mb-2"><strong>📊 Reliability Score:</strong> How predictable is this supplier? Higher = better for planning</p>
+                                <p class="mb-0"><strong>⚠️ P95 Lead Time:</strong> Plan for this many days in worst-case scenarios</p>
+                            </div>
+                            <div class="col-md-6">
+                                <p class="mb-2"><strong>💡 Quick Tips:</strong></p>
+                                <ul class="mb-0 small">
+                                    <li>Hover over any column header for detailed explanations</li>
+                                    <li>Use P95 lead time for safety stock calculations</li>
+                                    <li>Focus on suppliers with reliability scores below 70</li>
+                                    <li>Red alerts need immediate attention</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Alerts Section -->
+        <div class="dashboard-section" id="alerts-section">
+            <div class="section-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-exclamation-triangle me-2 text-warning"></i>Performance Alerts
+                </h5>
+            </div>
+            <div id="alerts-container">
+                <div class="loading-spinner">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading alerts...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Supplier Metrics Table -->
+        <div class="dashboard-section">
+            <div class="section-header">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="fas fa-table me-2 text-success"></i>Supplier Performance Table
+                    </h5>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-outline-success btn-sm" onclick="exportMetrics('csv')">
+                            <i class="fas fa-file-csv me-1"></i>Export CSV
+                        </button>
+                        <button class="btn btn-outline-info btn-sm" onclick="exportMetrics('json')">
+                            <i class="fas fa-file-code me-1"></i>Export JSON
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Filter Controls -->
+            <div class="filter-controls">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label for="reliability-filter" class="form-label">Min Reliability Score:</label>
+                        <input type="range" class="form-range" id="reliability-filter" min="0" max="100" value="0" onchange="updateReliabilityLabel()">
+                        <small class="text-muted">Score: <span id="reliability-label">0</span>+</small>
+                    </div>
+                    <div class="col-md-4">
+                        <label for="shipments-filter" class="form-label">Min Shipments:</label>
+                        <select id="shipments-filter" class="form-select form-select-sm">
+                            <option value="1">1+ shipments</option>
+                            <option value="5">5+ shipments</option>
+                            <option value="10">10+ shipments</option>
+                            <option value="20">20+ shipments</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4 d-flex align-items-end">
+                        <button class="btn btn-primary btn-sm" onclick="applyFilters()">
+                            <i class="fas fa-filter me-1"></i>Apply Filters
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm ms-2" onclick="clearFilters()">
+                            <i class="fas fa-times me-1"></i>Clear
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- DataTable -->
+            <div class="table-responsive">
+                <table id="supplier-metrics-table" class="table table-striped table-hover">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Supplier</th>
+                            <th data-bs-toggle="tooltip" data-bs-placement="top"
+                                title="📊 RELIABILITY SCORE (0-100): Measures how consistent this supplier's lead times are. 95+ = Excellent, 85+ = Very Good, 70+ = Good, 50+ = Fair, Below 50 = Poor. Higher scores mean you can predict delivery dates more accurately for inventory planning.">
+                                Reliability Score
+                                <i class="fas fa-info-circle ms-1" style="font-size: 0.8em; opacity: 0.7;"></i>
+                            </th>
+                            <th data-bs-toggle="tooltip" data-bs-placement="top"
+                                title="📈 AVERAGE LEAD TIME: The typical number of days from order to delivery. Use this for standard inventory planning. Example: If avg is 14 days, plan to reorder 14 days before you run out of stock.">
+                                Avg Lead Time
+                                <i class="fas fa-info-circle ms-1" style="font-size: 0.8em; opacity: 0.7;"></i>
+                            </th>
+                            <th data-bs-toggle="tooltip" data-bs-placement="top"
+                                title="⚠️ P95 LEAD TIME: The worst-case scenario - 95% of deliveries arrive within this many days. Use this for safety stock calculations. Example: If P95 is 21 days, plan for up to 21 days to be safe and avoid stockouts.">
+                                P95 Lead Time
+                                <i class="fas fa-info-circle ms-1" style="font-size: 0.8em; opacity: 0.7;"></i>
+                            </th>
+                            <th data-bs-toggle="tooltip" data-bs-placement="top"
+                                title="📦 SHIPMENT COUNT: Number of orders received from this supplier in the time period. More shipments = more reliable data. Need 5+ for basic analysis, 20+ for strong confidence in metrics.">
+                                Shipments
+                                <i class="fas fa-info-circle ms-1" style="font-size: 0.8em; opacity: 0.7;"></i>
+                            </th>
+                            <th data-bs-toggle="tooltip" data-bs-placement="top"
+                                title="⏱️ MIN/MAX RANGE: The fastest and slowest deliveries ever received. Large gaps indicate unpredictable performance. Example: 5/45 days means sometimes super fast, sometimes very slow - hard to plan inventory.">
+                                Min/Max Days
+                                <i class="fas fa-info-circle ms-1" style="font-size: 0.8em; opacity: 0.7;"></i>
+                            </th>
+                            <th data-bs-toggle="tooltip" data-bs-placement="top"
+                                title="📏 STANDARD DEVIATION: How much lead times vary around the average. Lower = more consistent. Example: If avg is 14 days and std dev is 2, most deliveries are between 12-16 days. High std dev means unpredictable timing.">
+                                Std Deviation
+                                <i class="fas fa-info-circle ms-1" style="font-size: 0.8em; opacity: 0.7;"></i>
+                            </th>
+                            <th data-bs-toggle="tooltip" data-bs-placement="top"
+                                title="🎯 COEFFICIENT OF VARIATION: Std deviation ÷ average, shows relative consistency. Lower = better. Under 0.25 = Excellent consistency, 0.25-0.5 = Good, Over 0.5 = Inconsistent. Helps compare suppliers with different avg lead times.">
+                                CV
+                                <i class="fas fa-info-circle ms-1" style="font-size: 0.8em; opacity: 0.7;"></i>
+                            </th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Data will be populated by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Supplier Detail Modal -->
+    <div class="modal fade" id="supplier-detail-modal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="supplier-modal-title">
+                        <i class="fas fa-building me-2"></i>Supplier Analytics
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="supplier-modal-body">
+                    <div class="loading-spinner">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading supplier details...</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-primary" onclick="exportSupplierData()">
+                        <i class="fas fa-download me-1"></i>Export Data
+                    </button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- jQuery -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <!-- DataTables JS -->
+    <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.4/js/dataTables.bootstrap5.min.js"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <script>
+        /**
+         * Supplier Performance Metrics Dashboard
+         *
+         * This dashboard provides comprehensive supplier analytics including:
+         * - Performance overview with key metrics
+         * - Real-time alerts for performance issues
+         * - Detailed supplier performance table
+         * - Interactive charts and visualizations
+         */
+
+        // Global variables
+        let supplierTable;
+        let currentPeriod = 12;
+        let currentSupplierData = null;
+        let performanceChart = null;
+
+        /**
+         * Initialize dashboard when page loads
+         */
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeDashboard();
+        });
+
+        /**
+         * Initialize all dashboard components
+         */
+        async function initializeDashboard() {
+            try {
+                // Initialize Bootstrap tooltips
+                initializeTooltips();
+
+                // Initialize DataTable
+                initializeDataTable();
+
+                // Load initial data
+                await Promise.all([
+                    loadSummaryMetrics(),
+                    loadSupplierMetrics(),
+                    loadPerformanceAlerts()
+                ]);
+
+                // Set up event listeners
+                setupEventListeners();
+
+                console.log('Dashboard initialized successfully');
+            } catch (error) {
+                console.error('Failed to initialize dashboard:', error);
+                showError('Failed to initialize dashboard: ' + error.message);
+            }
+        }
+
+        /**
+         * Initialize Bootstrap tooltips for all elements with data-bs-toggle="tooltip"
+         */
+        function initializeTooltips() {
+            // Initialize all tooltips
+            var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+            var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+                return new bootstrap.Tooltip(tooltipTriggerEl, {
+                    html: true,
+                    delay: { "show": 200, "hide": 100 }
+                });
+            });
+
+            console.log('Initialized', tooltipList.length, 'tooltips');
+        }
+
+        /**
+         * Initialize DataTable with configuration
+         */
+        function initializeDataTable() {
+            supplierTable = $('#supplier-metrics-table').DataTable({
+                pageLength: 25,
+                order: [[1, 'desc']], // Sort by reliability score descending
+                columnDefs: [
+                    {
+                        targets: 1, // Reliability Score column
+                        render: function(data, type, row) {
+                            if (type === 'display') {
+                                return formatReliabilityBadge(data);
+                            }
+                            return data;
+                        }
+                    },
+                    {
+                        targets: [2, 3], // Lead time columns
+                        render: function(data, type, row) {
+                            if (type === 'display') {
+                                return formatLeadTime(data);
+                            }
+                            return data;
+                        }
+                    },
+                    {
+                        targets: 5, // Min/Max column
+                        render: function(data, type, row) {
+                            if (type === 'display') {
+                                return `${row.min_lead_time}/${row.max_lead_time}`;
+                            }
+                            return data;
+                        }
+                    },
+                    {
+                        targets: 7, // CV column
+                        render: function(data, type, row) {
+                            if (type === 'display') {
+                                return (data * 100).toFixed(1) + '%';
+                            }
+                            return data;
+                        }
+                    },
+                    {
+                        targets: 8, // Actions column
+                        orderable: false,
+                        render: function(data, type, row) {
+                            return `
+                                <button class="btn btn-outline-primary btn-sm" onclick="showSupplierDetail('${row.supplier}')">
+                                    <i class="fas fa-chart-line me-1"></i>Details
+                                </button>
+                            `;
+                        }
+                    }
+                ]
+            });
+        }
+
+        /**
+         * Set up event listeners
+         */
+        function setupEventListeners() {
+            // Period filter change
+            document.getElementById('period-filter').addEventListener('change', function() {
+                currentPeriod = parseInt(this.value);
+                refreshMetrics();
+            });
+        }
+
+        /**
+         * Load summary metrics for overview cards
+         */
+        async function loadSummaryMetrics() {
+            try {
+                const response = await fetch(`/api/supplier/metrics?period_months=${currentPeriod}`);
+                if (!response.ok) throw new Error('Failed to fetch metrics');
+
+                const data = await response.json();
+
+                // Update summary cards
+                document.getElementById('total-suppliers').textContent = data.count;
+                document.getElementById('avg-reliability').textContent = data.summary.avg_reliability_score + '%';
+                document.getElementById('avg-lead-time').textContent = Math.round(data.summary.avg_lead_time);
+
+                // Load alerts count
+                const alertsResponse = await fetch('/api/supplier/alerts?severity=HIGH');
+                if (alertsResponse.ok) {
+                    const alertsData = await alertsResponse.json();
+                    document.getElementById('high-alerts').textContent = alertsData.summary.HIGH || 0;
+                } else {
+                    document.getElementById('high-alerts').textContent = '0';
+                }
+
+            } catch (error) {
+                console.error('Error loading summary metrics:', error);
+                showError('Failed to load summary metrics');
+            }
+        }
+
+        /**
+         * Load supplier metrics data into table
+         */
+        async function loadSupplierMetrics() {
+            try {
+                const response = await fetch(`/api/supplier/metrics?period_months=${currentPeriod}&min_shipments=1`);
+                if (!response.ok) throw new Error('Failed to fetch supplier metrics');
+
+                const data = await response.json();
+
+                // Clear and populate table
+                supplierTable.clear();
+
+                data.suppliers.forEach(supplier => {
+                    supplierTable.row.add([
+                        supplier.supplier,
+                        supplier.reliability_score,
+                        supplier.avg_lead_time,
+                        supplier.p95_lead_time,
+                        supplier.shipment_count,
+                        `${supplier.min_lead_time}/${supplier.max_lead_time}`,
+                        supplier.std_dev_lead_time.toFixed(1),
+                        supplier.coefficient_variation,
+                        '' // Actions column (rendered by columnDefs)
+                    ]);
+                });
+
+                supplierTable.draw();
+
+            } catch (error) {
+                console.error('Error loading supplier metrics:', error);
+                showError('Failed to load supplier metrics');
+            }
+        }
+
+        /**
+         * Load performance alerts
+         */
+        async function loadPerformanceAlerts() {
+            try {
+                const response = await fetch('/api/supplier/alerts');
+                if (!response.ok) throw new Error('Failed to fetch alerts');
+
+                const data = await response.json();
+                const container = document.getElementById('alerts-container');
+
+                if (data.alerts.length === 0) {
+                    container.innerHTML = `
+                        <div class="text-center py-4 text-muted">
+                            <i class="fas fa-check-circle fa-2x mb-2"></i>
+                            <p>No performance alerts at this time. All suppliers are performing well!</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                let alertsHtml = '';
+                data.alerts.slice(0, 5).forEach(alert => { // Show top 5 alerts
+                    const alertClass = alert.severity.toLowerCase();
+                    const iconClass = alert.severity === 'HIGH' ? 'fas fa-exclamation-triangle' :
+                                     alert.severity === 'MEDIUM' ? 'fas fa-exclamation-circle' :
+                                     'fas fa-info-circle';
+
+                    alertsHtml += `
+                        <div class="alert alert-custom alert-${alertClass} mb-2">
+                            <div class="d-flex align-items-center">
+                                <i class="${iconClass} me-3 fa-lg"></i>
+                                <div class="flex-grow-1">
+                                    <strong>${alert.supplier}</strong>
+                                    <p class="mb-1">${alert.message}</p>
+                                    <small class="text-muted">
+                                        <i class="fas fa-lightbulb me-1"></i>${alert.action}
+                                    </small>
+                                </div>
+                                <span class="badge bg-${alertClass === 'high' ? 'danger' : alertClass === 'medium' ? 'warning' : 'info'} ms-3">
+                                    ${alert.severity}
+                                </span>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                if (data.alerts.length > 5) {
+                    alertsHtml += `
+                        <div class="text-center mt-3">
+                            <button class="btn btn-outline-primary btn-sm" onclick="showAllAlerts()">
+                                <i class="fas fa-eye me-1"></i>View All ${data.alerts.length} Alerts
+                            </button>
+                        </div>
+                    `;
+                }
+
+                container.innerHTML = alertsHtml;
+
+            } catch (error) {
+                console.error('Error loading alerts:', error);
+                const container = document.getElementById('alerts-container');
+                container.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        Failed to load performance alerts
+                    </div>
+                `;
+            }
+        }
+
+        /**
+         * Show detailed supplier analytics modal
+         */
+        async function showSupplierDetail(supplier) {
+            const modal = new bootstrap.Modal(document.getElementById('supplier-detail-modal'));
+            const titleElement = document.getElementById('supplier-modal-title');
+            const bodyElement = document.getElementById('supplier-modal-body');
+
+            titleElement.innerHTML = `<i class="fas fa-building me-2"></i>${supplier} - Detailed Analytics`;
+            bodyElement.innerHTML = `
+                <div class="loading-spinner">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading supplier details...</span>
+                    </div>
+                </div>
+            `;
+
+            modal.show();
+
+            try {
+                const response = await fetch(`/api/supplier/metrics/${encodeURIComponent(supplier)}?period_months=${currentPeriod}`);
+                if (!response.ok) throw new Error('Failed to fetch supplier details');
+
+                const data = await response.json();
+                currentSupplierData = data;
+
+                // Generate detailed view
+                const detailsHtml = generateSupplierDetailsHTML(data);
+                bodyElement.innerHTML = detailsHtml;
+
+                // Initialize charts
+                createSupplierCharts(data);
+
+            } catch (error) {
+                console.error('Error loading supplier details:', error);
+                bodyElement.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        Failed to load supplier details: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        /**
+         * Generate HTML for supplier details modal
+         */
+        function generateSupplierDetailsHTML(data) {
+            const reliability = getReliabilityText(data.reliability_score);
+
+            return `
+                <div class="row mb-4">
+                    <div class="col-md-3">
+                        <div class="card text-center border-success">
+                            <div class="card-body">
+                                <h4 class="text-success">${data.p95_lead_time}</h4>
+                                <small class="text-muted">P95 Lead Time (Planning)</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-center border-primary">
+                            <div class="card-body">
+                                <h4 class="text-primary">${data.avg_lead_time.toFixed(1)}</h4>
+                                <small class="text-muted">Average Lead Time</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-center border-info">
+                            <div class="card-body">
+                                <h4 class="text-info">${data.reliability_score}%</h4>
+                                <small class="text-muted">Reliability Score</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-center border-warning">
+                            <div class="card-body">
+                                <h4 class="text-warning">${data.shipment_count}</h4>
+                                <small class="text-muted">Total Shipments</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row mb-4">
+                    <div class="col-md-6">
+                        <h6><i class="fas fa-chart-line me-2"></i>Performance Statistics</h6>
+                        <table class="table table-sm">
+                            <tbody>
+                                <tr><td><strong>Fastest Delivery:</strong></td><td>${data.min_lead_time} days</td></tr>
+                                <tr><td><strong>Slowest Delivery:</strong></td><td>${data.max_lead_time} days</td></tr>
+                                <tr><td><strong>Standard Deviation:</strong></td><td>±${data.std_dev_lead_time.toFixed(1)} days</td></tr>
+                                <tr><td><strong>Coefficient of Variation:</strong></td><td>${(data.coefficient_variation * 100).toFixed(1)}%</td></tr>
+                                <tr><td><strong>Reliability Assessment:</strong></td><td><span class="badge bg-${reliability.color}">${reliability.text}</span></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="col-md-6">
+                        <h6><i class="fas fa-map-marker-alt me-2"></i>Destination Breakdown</h6>
+                        <div id="destination-breakdown">
+                            ${generateDestinationBreakdown(data.destination_breakdown)}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row mb-4">
+                    <div class="col-md-12">
+                        <h6><i class="fas fa-chart-bar me-2"></i>Lead Time Distribution</h6>
+                        <div class="chart-container">
+                            <canvas id="lead-time-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row mb-4">
+                    <div class="col-md-12">
+                        <h6><i class="fas fa-clipboard-list me-2"></i>Recent Shipments</h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>PO Number</th>
+                                        <th>Order Date</th>
+                                        <th>Received Date</th>
+                                        <th>Lead Time</th>
+                                        <th>Destination</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${generateRecentShipmentsHTML(data.recent_shipments)}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="alert alert-info">
+                            <i class="fas fa-lightbulb me-2"></i>
+                            <strong>Planning Recommendation:</strong> ${data.recommendation}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        /**
+         * Generate destination breakdown HTML
+         */
+        function generateDestinationBreakdown(breakdown) {
+            if (!breakdown || Object.keys(breakdown).length === 0) {
+                return '<p class="text-muted">No destination-specific data available</p>';
+            }
+
+            let html = '';
+            Object.entries(breakdown).forEach(([destination, metrics]) => {
+                const destName = destination.charAt(0).toUpperCase() + destination.slice(1);
+                html += `
+                    <div class="mb-2">
+                        <strong>${destName}:</strong> ${metrics.avg_lead_time.toFixed(1)} days avg
+                        (${metrics.shipment_count} shipments)
+                    </div>
+                `;
+            });
+
+            return html;
+        }
+
+        /**
+         * Generate recent shipments table HTML
+         */
+        function generateRecentShipmentsHTML(shipments) {
+            if (!shipments || shipments.length === 0) {
+                return '<tr><td colspan="5" class="text-center text-muted">No recent shipments available</td></tr>';
+            }
+
+            return shipments.map(shipment => `
+                <tr>
+                    <td><code>${shipment.po_number}</code></td>
+                    <td>${new Date(shipment.order_date).toLocaleDateString()}</td>
+                    <td>${new Date(shipment.received_date).toLocaleDateString()}</td>
+                    <td><span class="lead-time-cell ${getLeadTimeClass(shipment.actual_lead_time)}">${shipment.actual_lead_time} days</span></td>
+                    <td><span class="badge bg-secondary">${shipment.destination}</span></td>
+                </tr>
+            `).join('');
+        }
+
+        /**
+         * Create charts for supplier details
+         */
+        function createSupplierCharts(data) {
+            // Destroy existing chart
+            if (performanceChart) {
+                performanceChart.destroy();
+            }
+
+            // Create lead time distribution chart
+            const ctx = document.getElementById('lead-time-chart');
+            if (ctx) {
+                // Generate histogram data
+                const shipments = data.recent_shipments || [];
+                const leadTimes = shipments.map(s => s.actual_lead_time);
+
+                // Create bins for histogram
+                const min = Math.min(...leadTimes);
+                const max = Math.max(...leadTimes);
+                const binCount = Math.min(10, Math.max(5, Math.ceil(leadTimes.length / 5)));
+                const binSize = Math.ceil((max - min) / binCount);
+
+                const bins = [];
+                const labels = [];
+
+                for (let i = 0; i < binCount; i++) {
+                    const binStart = min + (i * binSize);
+                    const binEnd = binStart + binSize;
+                    const count = leadTimes.filter(lt => lt >= binStart && (i === binCount - 1 ? lt <= binEnd : lt < binEnd)).length;
+
+                    bins.push(count);
+                    labels.push(`${binStart}-${binEnd - 1}`);
+                }
+
+                performanceChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Shipment Count',
+                            data: bins,
+                            backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: 'Lead Time Distribution (Days)'
+                            },
+                            legend: {
+                                display: false
+                            }
+                        },
+                        scales: {
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: 'Lead Time Range (Days)'
+                                }
+                            },
+                            y: {
+                                title: {
+                                    display: true,
+                                    text: 'Number of Shipments'
+                                },
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+            }
+        }
+
+        /**
+         * Utility functions for formatting
+         */
+        function formatReliabilityBadge(score) {
+            const reliability = getReliabilityText(score);
+            return `<span class="reliability-badge reliability-${reliability.class}">${score}%</span>`;
+        }
+
+        function formatLeadTime(days) {
+            const className = getLeadTimeClass(days);
+            return `<span class="lead-time-cell ${className}">${days} days</span>`;
+        }
+
+        function getReliabilityText(score) {
+            if (score >= 80) return { text: 'Excellent', class: 'excellent', color: 'success' };
+            if (score >= 60) return { text: 'Good', class: 'good', color: 'info' };
+            if (score >= 40) return { text: 'Fair', class: 'fair', color: 'warning' };
+            return { text: 'Poor', class: 'poor', color: 'danger' };
+        }
+
+        function getLeadTimeClass(days) {
+            if (days <= 60) return 'lead-time-fast';
+            if (days <= 120) return 'lead-time-normal';
+            return 'lead-time-slow';
+        }
+
+        /**
+         * Event handlers
+         */
+        function refreshMetrics() {
+            loadSummaryMetrics();
+            loadSupplierMetrics();
+            loadPerformanceAlerts();
+        }
+
+        function updateReliabilityLabel() {
+            const value = document.getElementById('reliability-filter').value;
+            document.getElementById('reliability-label').textContent = value;
+        }
+
+        function applyFilters() {
+            const reliabilityMin = parseInt(document.getElementById('reliability-filter').value);
+            const shipmentsMin = parseInt(document.getElementById('shipments-filter').value);
+
+            // Apply DataTable filters
+            supplierTable.columns(1).search(reliabilityMin, true, false); // Reliability column
+            supplierTable.columns(4).search(shipmentsMin, true, false);   // Shipments column
+            supplierTable.draw();
+        }
+
+        function clearFilters() {
+            document.getElementById('reliability-filter').value = 0;
+            document.getElementById('shipments-filter').value = 1;
+            updateReliabilityLabel();
+
+            supplierTable.search('').columns().search('').draw();
+        }
+
+        function exportMetrics(format) {
+            const periodText = currentPeriod === 0 ? 'all_time' : `${currentPeriod}m`;
+            window.open(`/api/supplier/metrics/export?format=${format}&period_months=${currentPeriod}`, '_blank');
+        }
+
+        function exportSupplierData() {
+            if (!currentSupplierData) {
+                alert('No supplier data to export');
+                return;
+            }
+
+            const data = JSON.stringify(currentSupplierData, null, 2);
+            const blob = new Blob([data], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${currentSupplierData.supplier}_metrics.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function showAllAlerts() {
+            // This could open a separate page or modal with all alerts
+            alert('Feature coming soon: View all alerts in detailed format');
+        }
+
+        function showError(message) {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = 'alert alert-danger alert-dismissible fade show';
+            alertDiv.innerHTML = `
+                <i class="fas fa-exclamation-triangle me-2"></i>${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            document.querySelector('.container-fluid').prepend(alertDiv);
+        }
+
+    </script>
+</body>
+</html>
