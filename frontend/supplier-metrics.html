@@ -503,15 +503,6 @@
                         }
                     },
                     {
-                        targets: 5, // Min/Max column
-                        render: function(data, type, row) {
-                            if (type === 'display') {
-                                return `${row.min_lead_time}/${row.max_lead_time}`;
-                            }
-                            return data;
-                        }
-                    },
-                    {
                         targets: 7, // CV column
                         render: function(data, type, row) {
                             if (type === 'display') {
@@ -524,8 +515,10 @@
                         targets: 8, // Actions column
                         orderable: false,
                         render: function(data, type, row) {
+                            // row[0] is the supplier name from our rowData array
+                            const supplierName = row[0];
                             return `
-                                <button class="btn btn-outline-primary btn-sm" onclick="showSupplierDetail('${row.supplier}')">
+                                <button class="btn btn-outline-primary btn-sm" onclick="showSupplierDetail('${supplierName}')">
                                     <i class="fas fa-chart-line me-1"></i>Details
                                 </button>
                             `;
@@ -590,7 +583,8 @@
                 supplierTable.clear();
 
                 data.suppliers.forEach(supplier => {
-                    supplierTable.row.add([
+                    // Store full supplier object as row data for access in column renders
+                    const rowData = [
                         supplier.supplier,
                         supplier.reliability_score,
                         supplier.avg_lead_time,
@@ -600,7 +594,11 @@
                         supplier.std_dev_lead_time.toFixed(1),
                         supplier.coefficient_variation,
                         '' // Actions column (rendered by columnDefs)
-                    ]);
+                    ];
+
+                    // Add the full supplier object as metadata to the row
+                    const row = supplierTable.row.add(rowData);
+                    row.data().supplierData = supplier;
                 });
 
                 supplierTable.draw();

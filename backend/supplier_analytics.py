@@ -25,6 +25,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta
 from collections import defaultdict
 import logging
+import pymysql
 
 try:
     from . import database
