@@ -1,0 +1,1008 @@
+<!DOCTYPE html>
+<!--
+SKU Analysis Page - Warehouse Transfer Planning Tool
+Individual SKU deep-dive analysis with trends, seasonality, and actionable insights.
+Completely separate from transfer planning to maintain system stability.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SKU Analysis - Warehouse Transfer Tool</title>
+
+    <!-- Bootstrap CSS for responsive layout and components -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Chart.js for visualizations -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/date-fns@2.29.3/index.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@2.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Select2 for enhanced search dropdown -->
+    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+    <link href="https://cdn.jsdelivr.net/npm/select2-bootstrap-5-theme@1.3.0/dist/select2-bootstrap-5-theme.min.css" rel="stylesheet" />
+
+    <style>
+        :root {
+            --primary-blue: #2563eb;
+            --success-green: #059669;
+            --warning-orange: #d97706;
+            --danger-red: #dc2626;
+            --light-gray: #f8fafc;
+            --border-gray: #e2e8f0;
+        }
+
+        body {
+            background-color: var(--light-gray);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        .navbar {
+            background: linear-gradient(135deg, var(--primary-blue), #1e40af);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .navbar-brand {
+            font-weight: 600;
+            font-size: 1.25rem;
+        }
+
+        .nav-link {
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.9) !important;
+            transition: color 0.2s;
+        }
+
+        .nav-link:hover {
+            color: white !important;
+        }
+
+        .search-container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .sku-header {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .sku-title {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #1f2937;
+            margin: 0 0 0.5rem 0;
+        }
+
+        .sku-subtitle {
+            color: #6b7280;
+            font-size: 1.125rem;
+            margin: 0;
+        }
+
+        .sku-badges {
+            margin-top: 1rem;
+        }
+
+        .badge {
+            font-size: 0.875rem;
+            font-weight: 500;
+            margin-right: 0.5rem;
+        }
+
+        .abc-badge-A { background-color: var(--success-green); }
+        .abc-badge-B { background-color: var(--warning-orange); }
+        .abc-badge-C { background-color: #6b7280; }
+
+        .xyz-badge-X { background-color: var(--primary-blue); }
+        .xyz-badge-Y { background-color: var(--warning-orange); }
+        .xyz-badge-Z { background-color: var(--danger-red); }
+
+        .status-badge-Active { background-color: var(--success-green); }
+        .status-badge-Death-Row { background-color: var(--danger-red); }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .metric-card {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            text-align: center;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .metric-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+        }
+
+        .metric-label {
+            color: #6b7280;
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+        }
+
+        .metric-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #1f2937;
+            margin: 0;
+        }
+
+        .metric-subtitle {
+            color: #9ca3af;
+            font-size: 0.875rem;
+            margin-top: 0.5rem;
+        }
+
+        .chart-container {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            margin-bottom: 2rem;
+        }
+
+        .chart-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: #1f2937;
+        }
+
+        .insights-container {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .insight-item {
+            display: flex;
+            align-items: flex-start;
+            padding: 1rem;
+            margin-bottom: 0.5rem;
+            border-radius: 8px;
+            border-left: 4px solid;
+        }
+
+        .insight-positive {
+            background-color: #f0fdf4;
+            border-left-color: var(--success-green);
+        }
+
+        .insight-warning {
+            background-color: #fffbeb;
+            border-left-color: var(--warning-orange);
+        }
+
+        .insight-critical {
+            background-color: #fef2f2;
+            border-left-color: var(--danger-red);
+        }
+
+        .insight-info {
+            background-color: #eff6ff;
+            border-left-color: var(--primary-blue);
+        }
+
+        .insight-icon {
+            margin-right: 1rem;
+            font-size: 1.25rem;
+        }
+
+        .icon-positive { color: var(--success-green); }
+        .icon-warning { color: var(--warning-orange); }
+        .icon-critical { color: var(--danger-red); }
+        .icon-info { color: var(--primary-blue); }
+
+        .warehouse-comparison {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .warehouse-card {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .warehouse-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+        }
+
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+        }
+
+        .metric-row-label {
+            color: #6b7280;
+        }
+
+        .metric-row-value {
+            font-weight: 600;
+        }
+
+        .loading-spinner {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 200px;
+        }
+
+        .error-message {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            color: var(--danger-red);
+            padding: 1rem;
+            border-radius: 8px;
+            margin: 1rem 0;
+            display: none;
+        }
+
+        .quick-access {
+            margin-top: 1rem;
+        }
+
+        .quick-access h6 {
+            color: #6b7280;
+            font-size: 0.875rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .quick-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .quick-item {
+            padding: 0.25rem 0.75rem;
+            background: #f3f4f6;
+            border-radius: 20px;
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .quick-item:hover {
+            background: #e5e7eb;
+        }
+
+        @media (max-width: 768px) {
+            .warehouse-comparison {
+                grid-template-columns: 1fr;
+            }
+
+            .metrics-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Navigation Header -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                <i class="fas fa-search me-2"></i>
+                SKU Analysis
+            </a>
+
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/static/sales-dashboard.html">
+                            <i class="fas fa-chart-bar me-1"></i>
+                            Sales Overview
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/static/sku-analysis.html">
+                            <i class="fas fa-search me-1"></i>
+                            SKU Analysis
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/static/transfer-planning.html">
+                            <i class="fas fa-truck me-1"></i>
+                            Transfer Planning
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/static/index.html">
+                            <i class="fas fa-home me-1"></i>
+                            Dashboard
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid py-4">
+        <!-- SKU Search Container -->
+        <div class="search-container" id="search-container">
+            <h2>
+                <i class="fas fa-search me-2 text-primary"></i>
+                Search & Analyze SKUs
+            </h2>
+            <p class="text-muted mb-4">
+                Find and analyze individual SKU performance, trends, and insights
+            </p>
+
+            <div class="row">
+                <div class="col-md-8">
+                    <label for="skuSearch" class="form-label">Search SKU by ID or Description</label>
+                    <select id="skuSearch" class="form-select" data-placeholder="Type to search for SKUs...">
+                        <option></option>
+                    </select>
+                </div>
+                <div class="col-md-4 d-flex align-items-end">
+                    <button id="analyzeBtn" class="btn btn-primary btn-lg w-100" disabled>
+                        <i class="fas fa-chart-line me-2"></i>
+                        Analyze SKU
+                    </button>
+                </div>
+            </div>
+
+            <!-- Quick Access Lists -->
+            <div class="quick-access" id="quick-access">
+                <div class="row">
+                    <div class="col-md-4">
+                        <h6>Top Performers</h6>
+                        <div class="quick-list" id="top-performers"></div>
+                    </div>
+                    <div class="col-md-4">
+                        <h6>High Volatility</h6>
+                        <div class="quick-list" id="high-volatility"></div>
+                    </div>
+                    <div class="col-md-4">
+                        <h6>Recent Stockouts</h6>
+                        <div class="quick-list" id="recent-stockouts"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SKU Analysis Results (Initially Hidden) -->
+        <div id="analysis-results" style="display: none;">
+            <!-- SKU Header Information -->
+            <div class="sku-header">
+                <h1 class="sku-title" id="sku-title">Loading...</h1>
+                <p class="sku-subtitle" id="sku-description">Please wait while we analyze the SKU...</p>
+                <div class="sku-badges" id="sku-badges">
+                    <!-- Badges will be populated dynamically -->
+                </div>
+            </div>
+
+            <!-- Performance Metrics Grid -->
+            <div class="metrics-grid" id="metrics-grid">
+                <!-- Metrics cards will be populated dynamically -->
+            </div>
+
+            <!-- Performance Charts -->
+            <div class="chart-container">
+                <h3 class="chart-title">Sales Performance Over Time</h3>
+                <div class="loading-spinner" id="performance-loading">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+                <canvas id="performanceChart" style="max-height: 400px;"></canvas>
+            </div>
+
+            <!-- Seasonal Patterns -->
+            <div class="chart-container" id="seasonal-container" style="display: none;">
+                <h3 class="chart-title">Seasonal Patterns</h3>
+                <canvas id="seasonalChart" style="max-height: 300px;"></canvas>
+            </div>
+
+            <!-- Warehouse Comparison -->
+            <div class="warehouse-comparison" id="warehouse-comparison">
+                <div class="warehouse-card">
+                    <h3 class="warehouse-title">
+                        <i class="fas fa-warehouse me-2 text-primary"></i>
+                        Burnaby (CA)
+                    </h3>
+                    <div id="burnaby-metrics">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+
+                <div class="warehouse-card">
+                    <h3 class="warehouse-title">
+                        <i class="fas fa-warehouse me-2 text-success"></i>
+                        Kentucky (US)
+                    </h3>
+                    <div id="kentucky-metrics">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Insights and Recommendations -->
+            <div class="insights-container">
+                <h3 class="chart-title">
+                    <i class="fas fa-lightbulb me-2 text-warning"></i>
+                    Automated Insights & Recommendations
+                </h3>
+                <div id="insights-list">
+                    <!-- Insights will be populated dynamically -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Error Messages -->
+        <div id="error-message" class="error-message">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            <span id="error-text">An error occurred loading the SKU data.</span>
+        </div>
+    </div>
+
+    <!-- JavaScript Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
+    <!-- SKU Analysis JavaScript -->
+    <script>
+        class SKUAnalysis {
+            constructor() {
+                this.currentSku = null;
+                this.charts = {};
+                this.quickLists = {};
+
+                this.init();
+            }
+
+            async init() {
+                this.setupSearch();
+                this.setupEventListeners();
+                await this.loadQuickLists();
+                this.checkUrlParameters();
+            }
+
+            setupSearch() {
+                $('#skuSearch').select2({
+                    theme: 'bootstrap-5',
+                    placeholder: 'Type to search for SKUs...',
+                    allowClear: true,
+                    ajax: {
+                        url: '/api/sku/search',
+                        dataType: 'json',
+                        delay: 300,
+                        data: (params) => ({
+                            q: params.term || '',
+                            limit: 20
+                        }),
+                        processResults: (data) => ({
+                            results: data.success ? data.data.map(sku => ({
+                                id: sku.sku_id,
+                                text: `${sku.sku_id} - ${sku.description}`,
+                                sku: sku
+                            })) : []
+                        }),
+                        cache: true
+                    },
+                    minimumInputLength: 2
+                });
+            }
+
+            setupEventListeners() {
+                $('#skuSearch').on('change', (e) => {
+                    const skuId = e.target.value;
+                    $('#analyzeBtn').prop('disabled', !skuId);
+                    if (skuId) {
+                        this.currentSku = skuId;
+                    }
+                });
+
+                $('#analyzeBtn').on('click', () => {
+                    if (this.currentSku) {
+                        this.analyzeSKU(this.currentSku);
+                    }
+                });
+
+                // Quick access item clicks
+                $(document).on('click', '.quick-item', (e) => {
+                    const skuId = $(e.target).data('sku');
+                    if (skuId) {
+                        this.selectAndAnalyzeSKU(skuId);
+                    }
+                });
+            }
+
+            checkUrlParameters() {
+                const urlParams = new URLSearchParams(window.location.search);
+                const skuParam = urlParams.get('sku');
+
+                if (skuParam) {
+                    this.selectAndAnalyzeSKU(skuParam);
+                }
+            }
+
+            async selectAndAnalyzeSKU(skuId) {
+                // Set the select2 value
+                const option = new Option(skuId, skuId, true, true);
+                $('#skuSearch').append(option).trigger('change');
+
+                this.currentSku = skuId;
+                $('#analyzeBtn').prop('disabled', false);
+                await this.analyzeSKU(skuId);
+            }
+
+            async loadQuickLists() {
+                try {
+                    const response = await fetch('/api/sku/quick-lists');
+                    const result = await response.json();
+
+                    if (result.success) {
+                        this.quickLists = result.data;
+                        this.renderQuickLists();
+                    }
+                } catch (error) {
+                    console.error('Error loading quick lists:', error);
+                }
+            }
+
+            renderQuickLists() {
+                // Top performers
+                if (this.quickLists.top_performers) {
+                    const topContainer = $('#top-performers');
+                    this.quickLists.top_performers.forEach(sku => {
+                        const item = $(`<span class="quick-item" data-sku="${sku.sku_id}">${sku.sku_id}</span>`);
+                        topContainer.append(item);
+                    });
+                }
+
+                // High volatility
+                if (this.quickLists.high_volatility) {
+                    const volContainer = $('#high-volatility');
+                    this.quickLists.high_volatility.forEach(sku => {
+                        const item = $(`<span class="quick-item" data-sku="${sku.sku_id}">${sku.sku_id}</span>`);
+                        volContainer.append(item);
+                    });
+                }
+
+                // Recent stockouts
+                if (this.quickLists.recent_stockouts) {
+                    const stockoutContainer = $('#recent-stockouts');
+                    this.quickLists.recent_stockouts.forEach(sku => {
+                        const item = $(`<span class="quick-item" data-sku="${sku.sku_id}">${sku.sku_id}</span>`);
+                        stockoutContainer.append(item);
+                    });
+                }
+            }
+
+            async analyzeSKU(skuId) {
+                try {
+                    this.showLoading();
+                    this.hideError();
+
+                    // Update URL without reload
+                    const newUrl = `${window.location.pathname}?sku=${skuId}`;
+                    window.history.pushState({}, '', newUrl);
+
+                    const response = await fetch(`/api/sku/${skuId}/analysis?months_back=24`);
+                    const result = await response.json();
+
+                    if (!result.success) {
+                        throw new Error(result.detail || 'Failed to load SKU analysis');
+                    }
+
+                    this.renderAnalysis(result.data);
+                    $('#analysis-results').show();
+
+                    // Scroll to results
+                    document.getElementById('analysis-results').scrollIntoView({
+                        behavior: 'smooth'
+                    });
+
+                } catch (error) {
+                    console.error('Error analyzing SKU:', error);
+                    this.showError(error.message || 'Failed to analyze SKU');
+                } finally {
+                    this.hideLoading();
+                }
+            }
+
+            renderAnalysis(data) {
+                const { sku_info, performance_metrics, seasonal_patterns, warehouse_comparison, insights, stockout_analysis } = data;
+
+                // Update header
+                $('#sku-title').text(`${sku_info.sku_id} Analysis`);
+                $('#sku-description').text(sku_info.description || 'No description available');
+
+                // Update badges
+                const badgesHtml = `
+                    <span class="badge status-badge-${sku_info.status?.replace(' ', '-')}">${sku_info.status}</span>
+                    <span class="badge abc-badge-${sku_info.abc_code}">${sku_info.abc_code} Class</span>
+                    <span class="badge xyz-badge-${sku_info.xyz_code}">${sku_info.xyz_code} Volatility</span>
+                    ${sku_info.category ? `<span class="badge bg-secondary">${sku_info.category}</span>` : ''}
+                `;
+                $('#sku-badges').html(badgesHtml);
+
+                // Render metrics
+                this.renderMetrics(performance_metrics, sku_info);
+
+                // Render charts
+                this.renderPerformanceChart(data.sales_history);
+
+                if (seasonal_patterns && seasonal_patterns.has_patterns) {
+                    this.renderSeasonalChart(seasonal_patterns.patterns);
+                    $('#seasonal-container').show();
+                } else {
+                    $('#seasonal-container').hide();
+                }
+
+                // Render warehouse comparison
+                this.renderWarehouseComparison(warehouse_comparison);
+
+                // Render insights
+                this.renderInsights(insights || []);
+            }
+
+            renderMetrics(metrics, skuInfo) {
+                const metricsHtml = `
+                    <div class="metric-card">
+                        <div class="metric-label">Total Revenue</div>
+                        <h2 class="metric-value">${this.formatCurrency(metrics.total_revenue)}</h2>
+                        <div class="metric-subtitle">${metrics.months_analyzed} months analyzed</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-label">Total Units</div>
+                        <h2 class="metric-value">${this.formatNumber(metrics.total_units)}</h2>
+                        <div class="metric-subtitle">Avg: ${metrics.avg_monthly_units}/month</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-label">Growth Rate</div>
+                        <h2 class="metric-value ${metrics.growth_rate_6m >= 0 ? 'text-success' : 'text-danger'}">
+                            ${(metrics.growth_rate_6m || 0) >= 0 ? '+' : ''}${(metrics.growth_rate_6m || 0).toFixed(1)}%
+                        </h2>
+                        <div class="metric-subtitle">6-month trend</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-label">Avg Selling Price</div>
+                        <h2 class="metric-value">${this.formatCurrency(metrics.avg_selling_price)}</h2>
+                        <div class="metric-subtitle">Per unit</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-label">Current Stock</div>
+                        <h2 class="metric-value">${this.formatNumber((skuInfo.burnaby_qty || 0) + (skuInfo.kentucky_qty || 0))}</h2>
+                        <div class="metric-subtitle">Both warehouses</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-label">Sales Consistency</div>
+                        <h2 class="metric-value ${(metrics.sales_consistency || 0) >= 80 ? 'text-success' : (metrics.sales_consistency || 0) >= 50 ? 'text-warning' : 'text-danger'}">
+                            ${(metrics.sales_consistency || 0).toFixed(0)}%
+                        </h2>
+                        <div class="metric-subtitle">Predictability score</div>
+                    </div>
+                `;
+
+                $('#metrics-grid').html(metricsHtml);
+            }
+
+            renderPerformanceChart(salesHistory) {
+                if (!salesHistory || salesHistory.length === 0) return;
+
+                const ctx = document.getElementById('performanceChart');
+
+                if (this.charts.performance) {
+                    this.charts.performance.destroy();
+                }
+
+                const labels = salesHistory.map(row => row.year_month);
+                const revenues = salesHistory.map(row => row.total_revenue);
+                const units = salesHistory.map(row => row.burnaby_sales + row.kentucky_sales);
+
+                this.charts.performance = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Revenue ($)',
+                            data: revenues,
+                            backgroundColor: 'rgba(37, 99, 235, 0.7)',
+                            borderColor: 'rgb(37, 99, 235)',
+                            borderWidth: 1,
+                            yAxisID: 'y'
+                        }, {
+                            label: 'Units Sold',
+                            data: units,
+                            type: 'line',
+                            borderColor: 'rgb(5, 150, 105)',
+                            backgroundColor: 'rgba(5, 150, 105, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.4,
+                            yAxisID: 'y1'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false
+                        },
+                        scales: {
+                            x: {
+                                display: true,
+                                title: {
+                                    display: true,
+                                    text: 'Month'
+                                }
+                            },
+                            y: {
+                                type: 'linear',
+                                display: true,
+                                position: 'left',
+                                title: {
+                                    display: true,
+                                    text: 'Revenue ($)'
+                                },
+                                ticks: {
+                                    callback: value => this.formatCurrency(value)
+                                }
+                            },
+                            y1: {
+                                type: 'linear',
+                                display: true,
+                                position: 'right',
+                                title: {
+                                    display: true,
+                                    text: 'Units'
+                                },
+                                grid: {
+                                    drawOnChartArea: false
+                                }
+                            }
+                        },
+                        plugins: {
+                            tooltip: {
+                                callbacks: {
+                                    label: (context) => {
+                                        if (context.dataset.label === 'Revenue ($)') {
+                                            return `Revenue: ${this.formatCurrency(context.raw)}`;
+                                        } else {
+                                            return `Units: ${this.formatNumber(context.raw)}`;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
+            renderSeasonalChart(patterns) {
+                if (!patterns || patterns.length === 0) return;
+
+                const ctx = document.getElementById('seasonalChart');
+
+                if (this.charts.seasonal) {
+                    this.charts.seasonal.destroy();
+                }
+
+                const labels = patterns.map(p => p.month_name);
+                const indices = patterns.map(p => p.seasonal_index);
+                const colors = indices.map(index => {
+                    if (index > 120) return 'rgba(5, 150, 105, 0.8)'; // Peak - green
+                    if (index < 80) return 'rgba(220, 38, 38, 0.8)';  // Low - red
+                    return 'rgba(37, 99, 235, 0.8)';                   // Normal - blue
+                });
+
+                this.charts.seasonal = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Seasonal Index',
+                            data: indices,
+                            backgroundColor: colors,
+                            borderColor: colors.map(c => c.replace('0.8', '1')),
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Seasonal Index (100 = Average)'
+                                }
+                            },
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: 'Month'
+                                }
+                            }
+                        },
+                        plugins: {
+                            tooltip: {
+                                callbacks: {
+                                    afterLabel: (context) => {
+                                        const value = context.raw;
+                                        if (value > 120) return 'Peak Season';
+                                        if (value < 80) return 'Low Season';
+                                        return 'Normal';
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
+            renderWarehouseComparison(comparison) {
+                if (!comparison) return;
+
+                // Burnaby metrics
+                const burnabyHtml = `
+                    <div class="metric-row">
+                        <span class="metric-row-label">Revenue:</span>
+                        <span class="metric-row-value">${this.formatCurrency(comparison.burnaby.revenue)}</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-row-label">Revenue %:</span>
+                        <span class="metric-row-value">${comparison.burnaby.revenue_percentage}%</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-row-label">Units:</span>
+                        <span class="metric-row-value">${this.formatNumber(comparison.burnaby.units)}</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-row-label">Avg Price:</span>
+                        <span class="metric-row-value">${this.formatCurrency(comparison.burnaby.avg_selling_price)}</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-row-label">Active Months:</span>
+                        <span class="metric-row-value">${comparison.burnaby.active_months}</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-row-label">Growth:</span>
+                        <span class="metric-row-value ${(comparison.burnaby?.growth_rate || 0) >= 0 ? 'text-success' : 'text-danger'}">
+                            ${(comparison.burnaby?.growth_rate || 0) >= 0 ? '+' : ''}${(comparison.burnaby?.growth_rate || 0).toFixed(1)}%
+                        </span>
+                    </div>
+                `;
+
+                // Kentucky metrics
+                const kentuckyHtml = `
+                    <div class="metric-row">
+                        <span class="metric-row-label">Revenue:</span>
+                        <span class="metric-row-value">${this.formatCurrency(comparison.kentucky.revenue)}</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-row-label">Revenue %:</span>
+                        <span class="metric-row-value">${comparison.kentucky.revenue_percentage}%</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-row-label">Units:</span>
+                        <span class="metric-row-value">${this.formatNumber(comparison.kentucky.units)}</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-row-label">Avg Price:</span>
+                        <span class="metric-row-value">${this.formatCurrency(comparison.kentucky.avg_selling_price)}</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-row-label">Active Months:</span>
+                        <span class="metric-row-value">${comparison.kentucky.active_months}</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-row-label">Growth:</span>
+                        <span class="metric-row-value ${(comparison.kentucky?.growth_rate || 0) >= 0 ? 'text-success' : 'text-danger'}">
+                            ${(comparison.kentucky?.growth_rate || 0) >= 0 ? '+' : ''}${(comparison.kentucky?.growth_rate || 0).toFixed(1)}%
+                        </span>
+                    </div>
+                `;
+
+                $('#burnaby-metrics').html(burnabyHtml);
+                $('#kentucky-metrics').html(kentuckyHtml);
+            }
+
+            renderInsights(insights) {
+                if (!insights || insights.length === 0) {
+                    $('#insights-list').html('<p class="text-muted">No specific insights available for this SKU.</p>');
+                    return;
+                }
+
+                const insightsHtml = insights.map(insight => {
+                    const typeClass = `insight-${insight.type}`;
+                    const iconClass = `icon-${insight.type}`;
+
+                    let icon = 'fas fa-info-circle';
+                    if (insight.type === 'positive') icon = 'fas fa-check-circle';
+                    if (insight.type === 'warning') icon = 'fas fa-exclamation-triangle';
+                    if (insight.type === 'critical') icon = 'fas fa-exclamation-circle';
+
+                    return `
+                        <div class="insight-item ${typeClass}">
+                            <i class="${icon} ${iconClass} insight-icon"></i>
+                            <div>
+                                <strong>${(insight.type || insight.category || 'INFO').toUpperCase()}:</strong> ${insight.message}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                $('#insights-list').html(insightsHtml);
+            }
+
+            formatCurrency(value) {
+                if (!value) return '$0';
+                return new Intl.NumberFormat('en-US', {
+                    style: 'currency',
+                    currency: 'USD',
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 0
+                }).format(value);
+            }
+
+            formatNumber(value) {
+                if (!value) return '0';
+                return new Intl.NumberFormat('en-US').format(value);
+            }
+
+            showLoading() {
+                $('.loading-spinner').show();
+            }
+
+            hideLoading() {
+                $('.loading-spinner').hide();
+            }
+
+            showError(message) {
+                $('#error-text').text(message);
+                $('#error-message').show();
+            }
+
+            hideError() {
+                $('#error-message').hide();
+            }
+        }
+
+        // Initialize SKU analysis when page loads
+        $(document).ready(() => {
+            new SKUAnalysis();
+        });
+    </script>
+</body>
+</html>

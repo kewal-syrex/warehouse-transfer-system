@@ -31,6 +31,7 @@ try:
     from . import calculations
     from . import import_export
     from . import settings
+    from . import supplier_matcher
     from .cache_manager import create_cache_manager
     try:
         from .database_pool import get_connection_pool
@@ -48,6 +49,7 @@ except ImportError:
     import calculations
     import import_export
     import settings
+    import supplier_matcher
     from cache_manager import create_cache_manager
     try:
         from database_pool import get_connection_pool
@@ -83,6 +85,16 @@ if is_development:
 frontend_path = Path(__file__).parent.parent / "frontend"
 if frontend_path.exists():
     app.mount("/static", StaticFiles(directory=str(frontend_path)), name="static")
+
+# Setup Sales Analytics API Routes (separate from transfer planning)
+try:
+    from backend.sales_api import setup_sales_routes
+    setup_sales_routes(app)
+    logger.info("Sales analytics routes loaded successfully")
+except ImportError as e:
+    logger.warning(f"Sales analytics module not available: {e}")
+except Exception as e:
+    logger.error(f"Error setting up sales routes: {e}")
 
 # =============================================================================
 # API ENDPOINTS - WAREHOUSE TRANSFER PLANNING TOOL
@@ -314,71 +326,6 @@ async def get_sku_count():
             detail=f"SKU count query failed: {str(e)}"
         )
 
-@app.get("/api/suppliers",
-         summary="Get All Suppliers",
-         description="Retrieve all unique suppliers from the SKU database for filter dropdown",
-         tags=["Reference Data"],
-         responses={
-             200: {
-                 "description": "List of unique suppliers sorted alphabetically",
-                 "content": {
-                     "application/json": {
-                         "example": {
-                             "suppliers": [
-                                 "Allied Eastern",
-                                 "Chengde",
-                                 "Gpaiplus",
-                                 "JINZHEN"
-                             ]
-                         }
-                     }
-                 }
-             },
-             500: {"description": "Database query failed"}
-         })
-async def get_suppliers():
-    """
-    Get all unique suppliers from the SKU database
-
-    Retrieves all distinct supplier names from the skus table,
-    filtering out empty/null values and system entries like "0" or "Discontinued".
-    Results are sorted alphabetically for consistent UI display.
-
-    Returns:
-        dict: List of supplier names for filter dropdown population
-    """
-    try:
-        db = database.get_database_connection()
-        cursor = db.cursor(pymysql.cursors.DictCursor)
-
-        # Get unique suppliers, excluding invalid entries
-        query = """
-        SELECT DISTINCT supplier
-        FROM skus
-        WHERE supplier IS NOT NULL
-          AND supplier != ''
-          AND supplier != '0'
-          AND supplier != 'Discontinued'
-        ORDER BY supplier ASC
-        """
-
-        cursor.execute(query)
-        results = cursor.fetchall()
-        db.close()
-
-        # Extract supplier names from query results
-        suppliers = [row['supplier'] for row in results]
-
-        return {
-            "suppliers": suppliers,
-            "count": len(suppliers)
-        }
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Suppliers query failed: {str(e)}"
-        )
 
 @app.get("/api/dashboard",
          summary="Get Dashboard Metrics",
@@ -5438,6 +5385,371 @@ async def get_supplier_performance_trends(
     except Exception as e:
         logger.error(f"Error analyzing performance trends for {supplier}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Trend analysis failed: {str(e)}")
+
+# ===================================================================
+# Supplier Name Mapping API Endpoints
+# ===================================================================
+
+@app.get("/api/suppliers",
+         summary="List All Suppliers",
+         description="Get all suppliers from the master table for dropdown selection",
+         tags=["Supplier Management"],
+         responses={
+             200: {"description": "List of suppliers retrieved successfully"},
+             500: {"description": "Failed to retrieve suppliers"}
+         })
+async def get_all_suppliers(active_only: bool = True):
+    """
+    Retrieve all suppliers for dropdown selection and mapping interfaces
+
+    Provides a complete list of suppliers from the master table, optionally
+    filtered to show only active suppliers. Used in mapping modals and
+    supplier selection dropdowns.
+
+    Args:
+        active_only: Whether to return only active suppliers (default: True)
+
+    Returns:
+        Dict containing list of suppliers with id, display_name, and status
+
+    Example Response:
+        {
+            "suppliers": [
+                {
+                    "id": 1,
+                    "display_name": "ABC Corporation",
+                    "normalized_name": "abc corporation",
+                    "is_active": true
+                }
+            ],
+            "total_count": 150,
+            "active_count": 148
+        }
+    """
+    try:
+        matcher = supplier_matcher.get_supplier_matcher()
+        suppliers = matcher.get_all_suppliers(active_only=active_only)
+
+        # Get total counts
+        all_suppliers = matcher.get_all_suppliers(active_only=False) if active_only else suppliers
+        active_suppliers = [s for s in all_suppliers if s.get('is_active', True)]
+
+        return {
+            "suppliers": suppliers,
+            "total_count": len(all_suppliers),
+            "active_count": len(active_suppliers),
+            "filtered_count": len(suppliers)
+        }
+
+    except Exception as e:
+        logger.error(f"Error retrieving suppliers: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve suppliers: {str(e)}")
+
+@app.post("/api/suppliers",
+          summary="Create New Supplier",
+          description="Create a new supplier in the master table",
+          tags=["Supplier Management"],
+          responses={
+              201: {"description": "Supplier created successfully"},
+              400: {"description": "Invalid supplier data"},
+              409: {"description": "Supplier already exists"},
+              500: {"description": "Failed to create supplier"}
+          })
+async def create_supplier(supplier_data: dict):
+    """
+    Create a new supplier in the master table
+
+    Creates a new supplier with name normalization and validation.
+    Prevents duplicate suppliers by checking normalized names.
+
+    Args:
+        supplier_data: Dict containing supplier information:
+            - display_name (required): Display name for the supplier
+            - legal_name (optional): Legal business name
+            - supplier_code (optional): Internal supplier code
+            - created_by (optional): Username creating the supplier
+
+    Returns:
+        Dict with new supplier information including assigned ID
+
+    Raises:
+        HTTPException: 400 if data invalid, 409 if duplicate, 500 if creation fails
+    """
+    try:
+        # Validate required fields
+        if not supplier_data.get('display_name'):
+            raise HTTPException(status_code=400, detail="Display name is required")
+
+        matcher = supplier_matcher.get_supplier_matcher()
+
+        supplier_id = matcher.create_supplier(
+            display_name=supplier_data['display_name'],
+            legal_name=supplier_data.get('legal_name'),
+            supplier_code=supplier_data.get('supplier_code'),
+            created_by=supplier_data.get('created_by', 'api_user')
+        )
+
+        # Get the created supplier details
+        suppliers = matcher.get_all_suppliers(active_only=False)
+        created_supplier = next((s for s in suppliers if s['id'] == supplier_id), None)
+
+        return {
+            "success": True,
+            "supplier_id": supplier_id,
+            "supplier": created_supplier,
+            "message": f"Supplier '{supplier_data['display_name']}' created successfully"
+        }
+
+    except supplier_matcher.SupplierMatchError as e:
+        if "already exists" in str(e).lower():
+            raise HTTPException(status_code=409, detail=str(e))
+        else:
+            raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error creating supplier: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to create supplier: {str(e)}")
+
+@app.post("/api/supplier/match",
+          summary="Find Supplier Matches",
+          description="Find potential matches for supplier names using fuzzy matching",
+          tags=["Supplier Management"],
+          responses={
+              200: {"description": "Matches found and returned"},
+              400: {"description": "Invalid supplier name"},
+              500: {"description": "Matching failed"}
+          })
+async def find_supplier_matches(match_request: dict):
+    """
+    Find potential matches for supplier names using intelligent matching
+
+    Uses fuzzy matching algorithms to find existing suppliers that might
+    match the provided name. Returns results sorted by confidence score.
+
+    Args:
+        match_request: Dict containing:
+            - supplier_name (required): Name to find matches for
+            - limit (optional): Maximum matches to return (default: 5)
+            - min_confidence (optional): Minimum confidence threshold
+
+    Returns:
+        Dict containing array of matches with confidence scores and match types
+
+    Example Request:
+        {
+            "supplier_name": "ABC Corp",
+            "limit": 5,
+            "min_confidence": 70
+        }
+
+    Example Response:
+        {
+            "matches": [
+                {
+                    "supplier_id": 123,
+                    "display_name": "ABC Corporation",
+                    "confidence": 95.5,
+                    "match_type": "fuzzy",
+                    "normalized_name": "abc corporation"
+                }
+            ],
+            "original_name": "ABC Corp",
+            "total_matches": 1
+        }
+    """
+    try:
+        supplier_name = match_request.get('supplier_name')
+        if not supplier_name:
+            raise HTTPException(status_code=400, detail="Supplier name is required")
+
+        limit = match_request.get('limit', 5)
+        if limit < 1 or limit > 20:
+            raise HTTPException(status_code=400, detail="Limit must be between 1 and 20")
+
+        matcher = supplier_matcher.get_supplier_matcher()
+
+        # Set minimum confidence if provided
+        if 'min_confidence' in match_request:
+            matcher.min_confidence_threshold = float(match_request['min_confidence'])
+
+        matches = matcher.find_matches(supplier_name, limit=limit)
+
+        return {
+            "matches": matches,
+            "original_name": supplier_name,
+            "normalized_name": matcher.normalize_supplier_name(supplier_name),
+            "total_matches": len(matches)
+        }
+
+    except Exception as e:
+        logger.error(f"Error finding matches for '{match_request.get('supplier_name', 'unknown')}': {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Matching failed: {str(e)}")
+
+@app.post("/api/supplier/aliases",
+          summary="Save Supplier Name Mapping",
+          description="Save a user-confirmed mapping as an alias for future reference",
+          tags=["Supplier Management"],
+          responses={
+              200: {"description": "Alias saved successfully"},
+              400: {"description": "Invalid mapping data"},
+              500: {"description": "Failed to save alias"}
+          })
+async def save_supplier_alias(alias_data: dict):
+    """
+    Save a user-confirmed supplier name mapping as an alias
+
+    When users manually map supplier names during import, this saves the mapping
+    as an alias so the system can auto-match similar names in the future.
+
+    Args:
+        alias_data: Dict containing:
+            - original_name (required): The original name that was mapped
+            - supplier_id (required): The supplier ID it was mapped to
+            - confidence (optional): Confidence score for the mapping
+            - created_by (optional): Username who created the mapping
+
+    Returns:
+        Dict confirming the alias was saved
+
+    Example Request:
+        {
+            "original_name": "ABC Corp",
+            "supplier_id": 123,
+            "confidence": 100.0,
+            "created_by": "john_doe"
+        }
+    """
+    try:
+        # Validate required fields
+        original_name = alias_data.get('original_name')
+        supplier_id = alias_data.get('supplier_id')
+
+        if not original_name:
+            raise HTTPException(status_code=400, detail="Original name is required")
+        if not supplier_id:
+            raise HTTPException(status_code=400, detail="Supplier ID is required")
+
+        matcher = supplier_matcher.get_supplier_matcher()
+
+        success = matcher.save_mapping(
+            original_name=original_name,
+            supplier_id=int(supplier_id),
+            confidence=float(alias_data.get('confidence', 100.0)),
+            created_by=alias_data.get('created_by', 'api_user')
+        )
+
+        return {
+            "success": success,
+            "message": f"Mapping saved: '{original_name}' -> supplier_id {supplier_id}",
+            "original_name": original_name,
+            "supplier_id": supplier_id
+        }
+
+    except Exception as e:
+        logger.error(f"Error saving alias: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to save alias: {str(e)}")
+
+@app.post("/api/supplier/import/preview",
+          summary="Preview Supplier Import with Mapping",
+          description="Analyze CSV supplier names and provide mapping suggestions",
+          tags=["Supplier Management"],
+          responses={
+              200: {"description": "Import preview generated successfully"},
+              400: {"description": "Invalid CSV data"},
+              500: {"description": "Preview generation failed"}
+          })
+async def preview_supplier_import(file: UploadFile = File(...)):
+    """
+    Analyze CSV file and provide supplier name mapping suggestions
+
+    Extracts unique supplier names from CSV, finds potential matches,
+    and returns mapping suggestions for user confirmation before import.
+
+    Args:
+        file: CSV file containing supplier data
+
+    Returns:
+        Dict containing:
+            - unique_suppliers: List of unique supplier names found
+            - mapping_suggestions: Suggested matches for each supplier
+            - total_suppliers: Count of unique suppliers
+            - estimated_new_suppliers: Count needing manual mapping
+
+    Example Response:
+        {
+            "unique_suppliers": ["ABC Corp", "XYZ Ltd"],
+            "mapping_suggestions": {
+                "ABC Corp": [
+                    {
+                        "supplier_id": 123,
+                        "display_name": "ABC Corporation",
+                        "confidence": 95.5,
+                        "match_type": "fuzzy"
+                    }
+                ]
+            },
+            "total_suppliers": 2,
+            "estimated_new_suppliers": 1
+        }
+    """
+    try:
+        # Read CSV content
+        content = await file.read()
+        csv_content = content.decode('utf-8')
+
+        # Extract unique supplier names from CSV
+        import io
+        import csv
+        csv_file = io.StringIO(csv_content)
+        csv_reader = csv.DictReader(csv_file)
+
+        # Find supplier column (case-insensitive)
+        supplier_column = None
+        for fieldname in csv_reader.fieldnames or []:
+            if fieldname.lower().strip() in ['supplier', 'supplier_name', 'vendor', 'vendor_name']:
+                supplier_column = fieldname
+                break
+
+        if not supplier_column:
+            raise HTTPException(
+                status_code=400,
+                detail="CSV must contain a 'supplier' or 'supplier_name' column"
+            )
+
+        # Extract unique supplier names
+        unique_suppliers = set()
+        for row in csv_reader:
+            supplier_name = row.get(supplier_column, '').strip()
+            if supplier_name and supplier_name.lower() not in ['n/a', 'na', 'none', 'null', '']:
+                unique_suppliers.add(supplier_name)
+
+        # Get mapping suggestions for each supplier
+        matcher = supplier_matcher.get_supplier_matcher()
+
+        mapping_suggestions = {}
+        estimated_new_suppliers = 0
+
+        for supplier_name in unique_suppliers:
+            matches = matcher.find_matches(supplier_name, limit=3)
+            mapping_suggestions[supplier_name] = matches
+
+            # Count as new if no high-confidence matches
+            high_confidence_matches = [m for m in matches if m['confidence'] >= 90]
+            if not high_confidence_matches:
+                estimated_new_suppliers += 1
+
+        return {
+            "unique_suppliers": sorted(list(unique_suppliers)),
+            "mapping_suggestions": mapping_suggestions,
+            "total_suppliers": len(unique_suppliers),
+            "estimated_new_suppliers": estimated_new_suppliers,
+            "csv_column_used": supplier_column
+        }
+
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid CSV file encoding. Please use UTF-8.")
+    except Exception as e:
+        logger.error(f"Error previewing supplier import: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Preview failed: {str(e)}")
 
 # Serve the main dashboard
 @app.get("/dashboard")

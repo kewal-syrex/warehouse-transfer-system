@@ -1,0 +1,1170 @@
+<!DOCTYPE html>
+<!--
+Sales Analytics Dashboard - Warehouse Transfer Planning Tool
+Multi-SKU sales overview with revenue trends, performance metrics, and insights.
+Completely separate from transfer planning to maintain system stability.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sales Analytics Dashboard - Warehouse Transfer Tool</title>
+
+    <!-- Bootstrap CSS for responsive layout and components -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- DataTables CSS for advanced table features -->
+    <link href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+    <link href="https://cdn.datatables.net/buttons/2.4.2/css/buttons.bootstrap5.min.css" rel="stylesheet">
+
+    <!-- Chart.js for visualizations -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/date-fns@2.29.3/index.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@2.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        :root {
+            --primary-blue: #2563eb;
+            --success-green: #059669;
+            --warning-orange: #d97706;
+            --danger-red: #dc2626;
+            --light-gray: #f8fafc;
+            --border-gray: #e2e8f0;
+        }
+
+        body {
+            background-color: var(--light-gray);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        .navbar {
+            background: linear-gradient(135deg, var(--primary-blue), #1e40af);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .navbar-brand {
+            font-weight: 600;
+            font-size: 1.25rem;
+        }
+
+        .nav-link {
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.9) !important;
+            transition: color 0.2s;
+        }
+
+        .nav-link:hover {
+            color: white !important;
+        }
+
+        .kpi-card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            border: none;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .kpi-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+        }
+
+        .kpi-value {
+            font-size: 2rem;
+            font-weight: 700;
+            margin: 0;
+        }
+
+        .kpi-label {
+            color: #6b7280;
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+        }
+
+        .kpi-trend {
+            font-size: 0.875rem;
+            font-weight: 600;
+            margin-top: 0.5rem;
+        }
+
+        .trend-positive {
+            color: var(--success-green);
+        }
+
+        .trend-negative {
+            color: var(--danger-red);
+        }
+
+        .chart-container {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            margin-bottom: 2rem;
+        }
+
+        .chart-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: #1f2937;
+        }
+
+        .section-header {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .section-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #1f2937;
+            margin: 0;
+        }
+
+        .section-subtitle {
+            color: #6b7280;
+            margin: 0.5rem 0 0 0;
+        }
+
+        .filter-card {
+            background: white;
+            border-radius: 12px;
+            padding: 1rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            margin-bottom: 1rem;
+        }
+
+        .btn-primary {
+            background: var(--primary-blue);
+            border-color: var(--primary-blue);
+            font-weight: 500;
+        }
+
+        .btn-outline-primary {
+            color: var(--primary-blue);
+            border-color: var(--primary-blue);
+            font-weight: 500;
+        }
+
+        .table-container {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .badge {
+            font-weight: 500;
+        }
+
+        .abc-badge-A { background-color: var(--success-green); }
+        .abc-badge-B { background-color: var(--warning-orange); }
+        .abc-badge-C { background-color: #6b7280; }
+
+        .xyz-badge-X { background-color: var(--primary-blue); }
+        .xyz-badge-Y { background-color: var(--warning-orange); }
+        .xyz-badge-Z { background-color: var(--danger-red); }
+
+        .loading-spinner {
+            display: none;
+            justify-content: center;
+            align-items: center;
+            height: 200px;
+        }
+
+        .error-message {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            color: var(--danger-red);
+            padding: 1rem;
+            border-radius: 8px;
+            margin: 1rem 0;
+            display: none;
+        }
+
+        .warehouse-comparison {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+            margin-top: 1rem;
+        }
+
+        .warehouse-card {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .warehouse-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+        }
+
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+        }
+
+        .metric-label {
+            color: #6b7280;
+        }
+
+        .metric-value {
+            font-weight: 600;
+        }
+
+        @media (max-width: 768px) {
+            .warehouse-comparison {
+                grid-template-columns: 1fr;
+                gap: 1rem;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Navigation Header -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                <i class="fas fa-chart-line me-2"></i>
+                Sales Analytics Dashboard
+            </a>
+
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/static/sales-dashboard.html">
+                            <i class="fas fa-chart-bar me-1"></i>
+                            Sales Overview
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/static/sku-analysis.html">
+                            <i class="fas fa-search me-1"></i>
+                            SKU Analysis
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/static/transfer-planning.html">
+                            <i class="fas fa-truck me-1"></i>
+                            Transfer Planning
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/static/index.html">
+                            <i class="fas fa-home me-1"></i>
+                            Dashboard
+                        </a>
+                    </li>
+                </ul>
+
+                <div class="navbar-text">
+                    <span id="last-updated" class="small">Loading...</span>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid py-4">
+        <!-- Page Header -->
+        <div class="section-header">
+            <h1 class="section-title">Sales Analytics Overview</h1>
+            <p class="section-subtitle">
+                Multi-SKU performance analysis, revenue trends, and warehouse comparison
+            </p>
+        </div>
+
+        <!-- KPI Cards Row -->
+        <div class="row mb-4" id="kpi-container">
+            <div class="col-md-3 mb-3">
+                <div class="kpi-card card h-100 text-center">
+                    <div class="card-body">
+                        <p class="kpi-label">Total Revenue</p>
+                        <h2 class="kpi-value" id="total-revenue">$0</h2>
+                        <div class="kpi-trend" id="revenue-trend">
+                            <i class="fas fa-arrow-up trend-positive"></i> 0%
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-3 mb-3">
+                <div class="kpi-card card h-100 text-center">
+                    <div class="card-body">
+                        <p class="kpi-label">Average Monthly</p>
+                        <h2 class="kpi-value" id="avg-monthly">$0</h2>
+                        <div class="kpi-trend" id="monthly-trend">
+                            <i class="fas fa-minus text-muted"></i> 0%
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-3 mb-3">
+                <div class="kpi-card card h-100 text-center">
+                    <div class="card-body">
+                        <p class="kpi-label">Stockout Impact</p>
+                        <h2 class="kpi-value" id="stockout-loss">$0</h2>
+                        <div class="kpi-trend text-danger">
+                            <i class="fas fa-exclamation-triangle"></i> Estimated Loss
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-3 mb-3">
+                <div class="kpi-card card h-100 text-center">
+                    <div class="card-body">
+                        <p class="kpi-label">Analysis Period</p>
+                        <h2 class="kpi-value" id="period-months">12</h2>
+                        <div class="kpi-trend text-muted">
+                            <i class="fas fa-calendar"></i> Months
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filters Row -->
+        <div class="filter-card">
+            <div class="row align-items-center">
+                <div class="col-md-3">
+                    <label for="monthsBack" class="form-label">Analysis Period</label>
+                    <select id="monthsBack" class="form-select">
+                        <option value="6">Last 6 Months</option>
+                        <option value="12" selected>Last 12 Months</option>
+                        <option value="24">Last 24 Months</option>
+                        <option value="36">Last 36 Months</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label for="warehouseFilter" class="form-label">Warehouse</label>
+                    <select id="warehouseFilter" class="form-select">
+                        <option value="">Both Warehouses</option>
+                        <option value="burnaby">Burnaby Only</option>
+                        <option value="kentucky">Kentucky Only</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label for="performanceMetric" class="form-label">Performance Metric</label>
+                    <select id="performanceMetric" class="form-select">
+                        <option value="revenue">Revenue</option>
+                        <option value="units">Units Sold</option>
+                        <option value="growth">Growth Rate</option>
+                    </select>
+                </div>
+                <div class="col-md-3 d-flex align-items-end">
+                    <button id="refreshBtn" class="btn btn-primary me-2">
+                        <i class="fas fa-sync-alt me-1"></i>
+                        Refresh
+                    </button>
+                    <button id="exportBtn" class="btn btn-outline-primary">
+                        <i class="fas fa-download me-1"></i>
+                        Export
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Revenue Trends Chart -->
+        <div class="chart-container">
+            <h3 class="chart-title">Revenue Trends Over Time</h3>
+            <div class="loading-spinner" id="trends-loading">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+            <canvas id="revenueTrendsChart" style="max-height: 400px;"></canvas>
+        </div>
+
+        <!-- Warehouse Comparison -->
+        <div class="section-header">
+            <h2 class="section-title">Warehouse Performance Comparison</h2>
+            <p class="section-subtitle">Burnaby vs Kentucky sales performance</p>
+        </div>
+
+        <div class="warehouse-comparison" id="warehouse-comparison">
+            <div class="warehouse-card">
+                <h3 class="warehouse-title">
+                    <i class="fas fa-warehouse me-2 text-primary"></i>
+                    Burnaby (CA)
+                </h3>
+                <div id="burnaby-metrics">
+                    <div class="metric-row">
+                        <span class="metric-label">Revenue:</span>
+                        <span class="metric-value" id="burnaby-revenue">$0</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Units Sold:</span>
+                        <span class="metric-value" id="burnaby-units">0</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Avg Selling Price:</span>
+                        <span class="metric-value" id="burnaby-asp">$0</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">SKU Count:</span>
+                        <span class="metric-value" id="burnaby-skus">0</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Exclusive SKUs:</span>
+                        <span class="metric-value" id="burnaby-exclusive">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="warehouse-card">
+                <h3 class="warehouse-title">
+                    <i class="fas fa-warehouse me-2 text-success"></i>
+                    Kentucky (US)
+                </h3>
+                <div id="kentucky-metrics">
+                    <div class="metric-row">
+                        <span class="metric-label">Revenue:</span>
+                        <span class="metric-value" id="kentucky-revenue">$0</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Units Sold:</span>
+                        <span class="metric-value" id="kentucky-units">0</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Avg Selling Price:</span>
+                        <span class="metric-value" id="kentucky-asp">$0</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">SKU Count:</span>
+                        <span class="metric-value" id="kentucky-skus">0</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Exclusive SKUs:</span>
+                        <span class="metric-value" id="kentucky-exclusive">0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Top Performers Table -->
+        <div class="section-header">
+            <h2 class="section-title">Top Performing SKUs</h2>
+            <p class="section-subtitle">Highest revenue generating products</p>
+        </div>
+
+        <div class="table-container">
+            <div class="loading-spinner" id="performers-loading">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+            <table id="performersTable" class="table table-striped table-hover" style="width:100%">
+                <thead class="table-dark">
+                    <tr>
+                        <th>SKU</th>
+                        <th>Description</th>
+                        <th>Category</th>
+                        <th>ABC</th>
+                        <th>XYZ</th>
+                        <th>Total Revenue</th>
+                        <th>Total Units</th>
+                        <th>Avg Price</th>
+                        <th>Active Months</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <!-- ABC-XYZ Matrix -->
+        <div class="section-header">
+            <h2 class="section-title">ABC-XYZ Classification Matrix</h2>
+            <p class="section-subtitle">SKU distribution by revenue importance and demand volatility</p>
+        </div>
+
+        <div class="chart-container">
+            <canvas id="abcXyzChart" style="max-height: 400px;"></canvas>
+        </div>
+
+        <!-- All SKUs Section -->
+        <div class="section-header">
+            <h2 class="section-title">All SKUs Performance</h2>
+            <p class="section-subtitle">Comprehensive listing of all SKUs with performance metrics and filters</p>
+        </div>
+
+        <div class="filter-card mb-3">
+            <div class="row align-items-center">
+                <div class="col-md-2">
+                    <label for="abcFilterAll" class="form-label">ABC Class</label>
+                    <select id="abcFilterAll" class="form-select">
+                        <option value="">All Classes</option>
+                        <option value="A">A - High Revenue</option>
+                        <option value="B">B - Medium Revenue</option>
+                        <option value="C">C - Low Revenue</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label for="xyzFilterAll" class="form-label">XYZ Class</label>
+                    <select id="xyzFilterAll" class="form-select">
+                        <option value="">All Classes</option>
+                        <option value="X">X - Stable Demand</option>
+                        <option value="Y">Y - Variable Demand</option>
+                        <option value="Z">Z - Erratic Demand</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label for="minRevenue" class="form-label">Min Revenue</label>
+                    <input type="number" id="minRevenue" class="form-control" placeholder="$0" min="0" step="100">
+                </div>
+                <div class="col-md-2">
+                    <label for="sortBy" class="form-label">Sort By</label>
+                    <select id="sortBy" class="form-select">
+                        <option value="total_revenue_12m">Total Revenue</option>
+                        <option value="total_units_12m">Total Units</option>
+                        <option value="growth_rate_6m">Growth Rate</option>
+                        <option value="avg_selling_price">Avg Price</option>
+                        <option value="estimated_lost_sales">Lost Sales</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label for="sortOrder" class="form-label">Order</label>
+                    <select id="sortOrder" class="form-select">
+                        <option value="desc">Descending</option>
+                        <option value="asc">Ascending</option>
+                    </select>
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button id="applyFilters" class="btn btn-primary">
+                        <i class="fas fa-filter me-1"></i>
+                        Apply
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="table-container">
+            <div class="loading-spinner" id="all-skus-loading">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+            <table id="allSkusTable" class="table table-striped table-hover" style="width:100%">
+                <thead class="table-dark">
+                    <tr>
+                        <th>SKU</th>
+                        <th>Description</th>
+                        <th>Category</th>
+                        <th>ABC</th>
+                        <th>XYZ</th>
+                        <th>12M Revenue</th>
+                        <th>12M Units</th>
+                        <th>Avg Price</th>
+                        <th>Growth Rate</th>
+                        <th>Lost Sales</th>
+                        <th>Current KY</th>
+                        <th>Current CA</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+
+            <!-- Pagination info -->
+            <div class="d-flex justify-content-between align-items-center mt-3">
+                <div id="pagination-info">
+                    Showing 0 of 0 SKUs
+                </div>
+                <div id="pagination-controls">
+                    <button id="prevPage" class="btn btn-outline-primary btn-sm me-2" disabled>
+                        <i class="fas fa-chevron-left"></i> Previous
+                    </button>
+                    <span id="pageInfo">Page 1 of 1</span>
+                    <button id="nextPage" class="btn btn-outline-primary btn-sm ms-2" disabled>
+                        Next <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Error Messages -->
+        <div id="error-message" class="error-message">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            <span id="error-text">An error occurred loading the data.</span>
+        </div>
+    </div>
+
+    <!-- JavaScript Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.2/js/dataTables.buttons.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.2/js/buttons.bootstrap5.min.js"></script>
+
+    <!-- Sales Dashboard JavaScript -->
+    <script>
+        class SalesDashboard {
+            constructor() {
+                this.charts = {};
+                this.dataTable = null;
+                this.allSkusTable = null;
+                this.allSkusOffset = 0;
+                this.allSkusPagination = null;
+                this.currentFilters = {
+                    monthsBack: 12,
+                    warehouse: null,
+                    metric: 'revenue'
+                };
+
+                this.init();
+            }
+
+            async init() {
+                this.setupEventListeners();
+                await this.loadDashboard();
+            }
+
+            setupEventListeners() {
+                // Filter change handlers
+                $('#monthsBack').on('change', (e) => {
+                    this.currentFilters.monthsBack = parseInt(e.target.value);
+                    this.loadDashboard();
+                });
+
+                $('#warehouseFilter').on('change', (e) => {
+                    this.currentFilters.warehouse = e.target.value || null;
+                    this.loadDashboard();
+                });
+
+                $('#performanceMetric').on('change', (e) => {
+                    this.currentFilters.metric = e.target.value;
+                    this.loadTopPerformers();
+                });
+
+                // Action buttons
+                $('#refreshBtn').on('click', () => this.loadDashboard());
+                $('#exportBtn').on('click', () => this.exportData());
+
+                // All SKUs event handlers
+                this.setupAllSkusEventHandlers();
+
+                // Auto-refresh every 5 minutes
+                setInterval(() => this.loadDashboard(), 5 * 60 * 1000);
+            }
+
+            async loadDashboard() {
+                try {
+                    this.showLoading();
+
+                    // Load all dashboard components
+                    await Promise.all([
+                        this.loadSummary(),
+                        this.loadRevenueTrends(),
+                        this.loadWarehouseComparison(),
+                        this.loadTopPerformers(),
+                        this.loadAbcXyzMatrix(),
+                        this.loadAllSkus()
+                    ]);
+
+                    this.updateLastUpdated();
+                    this.hideError();
+                } catch (error) {
+                    console.error('Error loading dashboard:', error);
+                    this.showError('Failed to load dashboard data');
+                } finally {
+                    this.hideLoading();
+                }
+            }
+
+            async loadSummary() {
+                const response = await fetch(`/api/sales/summary?months_back=${this.currentFilters.monthsBack}`);
+                const result = await response.json();
+
+                if (result.success) {
+                    const data = result.data;
+
+                    // Update KPI cards
+                    $('#total-revenue').text(this.formatCurrency(data.total_revenue));
+                    $('#avg-monthly').text(this.formatCurrency(data.average_monthly_revenue));
+                    $('#stockout-loss').text(this.formatCurrency(data.estimated_stockout_loss));
+                    $('#period-months').text(data.period_analyzed_months);
+
+                    // Update growth indicator
+                    const growth = data.monthly_growth_rate;
+                    const trendElement = $('#revenue-trend');
+                    if (growth > 0) {
+                        trendElement.html(`<i class="fas fa-arrow-up trend-positive"></i> +${growth.toFixed(1)}%`);
+                    } else if (growth < 0) {
+                        trendElement.html(`<i class="fas fa-arrow-down trend-negative"></i> ${growth.toFixed(1)}%`);
+                    } else {
+                        trendElement.html(`<i class="fas fa-minus text-muted"></i> 0%`);
+                    }
+                }
+            }
+
+            async loadRevenueTrends() {
+                const response = await fetch(
+                    `/api/sales/revenue-trends?months_back=${this.currentFilters.monthsBack}${
+                        this.currentFilters.warehouse ? `&warehouse=${this.currentFilters.warehouse}` : ''
+                    }`
+                );
+                const result = await response.json();
+
+                if (result.success && result.data.monthly_trends) {
+                    this.renderRevenueTrendsChart(result.data.monthly_trends);
+                }
+            }
+
+            async loadWarehouseComparison() {
+                const response = await fetch(`/api/sales/warehouse-comparison?months_back=${this.currentFilters.monthsBack}`);
+                const result = await response.json();
+
+                if (result.success) {
+                    const data = result.data;
+
+                    // Update Burnaby metrics
+                    if (data.burnaby) {
+                        $('#burnaby-revenue').text(this.formatCurrency(data.burnaby.revenue));
+                        $('#burnaby-units').text(this.formatNumber(data.burnaby.units));
+                        $('#burnaby-asp').text(this.formatCurrency(data.burnaby.avg_selling_price));
+                        $('#burnaby-skus').text(data.burnaby.sku_count);
+                        $('#burnaby-exclusive').text(data.burnaby.exclusive_skus);
+                    }
+
+                    // Update Kentucky metrics
+                    if (data.kentucky) {
+                        $('#kentucky-revenue').text(this.formatCurrency(data.kentucky.revenue));
+                        $('#kentucky-units').text(this.formatNumber(data.kentucky.units));
+                        $('#kentucky-asp').text(this.formatCurrency(data.kentucky.avg_selling_price));
+                        $('#kentucky-skus').text(data.kentucky.sku_count);
+                        $('#kentucky-exclusive').text(data.kentucky.exclusive_skus);
+                    }
+                }
+            }
+
+            async loadTopPerformers() {
+                const response = await fetch(
+                    `/api/sales/top-performers?limit=50&metric=${this.currentFilters.metric}&period_months=${this.currentFilters.monthsBack}`
+                );
+                const result = await response.json();
+
+                if (result.success) {
+                    this.renderPerformersTable(result.data);
+                }
+            }
+
+            async loadAbcXyzMatrix() {
+                const response = await fetch('/api/sales/abc-xyz-matrix');
+                const result = await response.json();
+
+                if (result.success) {
+                    this.renderAbcXyzChart(result.data);
+                }
+            }
+
+            renderRevenueTrendsChart(data) {
+                const ctx = document.getElementById('revenueTrendsChart');
+
+                if (this.charts.revenue) {
+                    this.charts.revenue.destroy();
+                }
+
+                const labels = data.map(row => row.year_month);
+                const revenues = data.map(row => row.total_revenue);
+                const units = data.map(row => row.total_units);
+
+                this.charts.revenue = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Revenue ($)',
+                            data: revenues,
+                            backgroundColor: 'rgba(37, 99, 235, 0.7)',
+                            borderColor: 'rgb(37, 99, 235)',
+                            borderWidth: 1,
+                            yAxisID: 'y'
+                        }, {
+                            label: 'Units Sold',
+                            data: units,
+                            type: 'line',
+                            borderColor: 'rgb(5, 150, 105)',
+                            backgroundColor: 'rgba(5, 150, 105, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.4,
+                            yAxisID: 'y1'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false
+                        },
+                        scales: {
+                            x: {
+                                display: true,
+                                title: {
+                                    display: true,
+                                    text: 'Month'
+                                }
+                            },
+                            y: {
+                                type: 'linear',
+                                display: true,
+                                position: 'left',
+                                title: {
+                                    display: true,
+                                    text: 'Revenue ($)'
+                                },
+                                ticks: {
+                                    callback: value => this.formatCurrency(value)
+                                }
+                            },
+                            y1: {
+                                type: 'linear',
+                                display: true,
+                                position: 'right',
+                                title: {
+                                    display: true,
+                                    text: 'Units'
+                                },
+                                grid: {
+                                    drawOnChartArea: false
+                                },
+                                ticks: {
+                                    callback: value => this.formatNumber(value)
+                                }
+                            }
+                        },
+                        plugins: {
+                            tooltip: {
+                                callbacks: {
+                                    label: (context) => {
+                                        if (context.dataset.label === 'Revenue ($)') {
+                                            return `Revenue: ${this.formatCurrency(context.raw)}`;
+                                        } else {
+                                            return `Units: ${this.formatNumber(context.raw)}`;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
+            renderPerformersTable(data) {
+                if (this.dataTable) {
+                    this.dataTable.destroy();
+                }
+
+                const tableData = data.map(row => [
+                    row.sku_id,
+                    row.description,
+                    row.category || 'N/A',
+                    `<span class="badge abc-badge-${row.abc_code}">${row.abc_code}</span>`,
+                    `<span class="badge xyz-badge-${row.xyz_code}">${row.xyz_code}</span>`,
+                    this.formatCurrency(row.total_revenue),
+                    this.formatNumber(row.total_units),
+                    this.formatCurrency(row.avg_selling_price),
+                    row.months_with_sales,
+                    `<button class="btn btn-sm btn-outline-primary" onclick="window.open('/static/sku-analysis.html?sku=${row.sku_id}', '_blank')">
+                        <i class="fas fa-search"></i> Analyze
+                    </button>`
+                ]);
+
+                this.dataTable = $('#performersTable').DataTable({
+                    data: tableData,
+                    pageLength: 25,
+                    order: [[5, 'desc']], // Sort by revenue
+                    dom: 'Bfrtip',
+                    buttons: ['copy', 'csv', 'excel'],
+                    columnDefs: [
+                        { className: 'text-center', targets: [3, 4, 8, 9] },
+                        { className: 'text-end', targets: [5, 6, 7] }
+                    ]
+                });
+            }
+
+            renderAbcXyzChart(data) {
+                if (!data || data.length === 0) return;
+
+                const ctx = document.getElementById('abcXyzChart');
+
+                if (this.charts.matrix) {
+                    this.charts.matrix.destroy();
+                }
+
+                // Prepare data for ABC-XYZ matrix visualization
+                const labels = [];
+                const revenues = [];
+                const skuCounts = [];
+                const colors = [];
+
+                const colorMap = {
+                    'A': 'rgba(5, 150, 105, 0.8)', // Green for A
+                    'B': 'rgba(217, 119, 6, 0.8)', // Orange for B
+                    'C': 'rgba(107, 114, 128, 0.8)' // Gray for C
+                };
+
+                // Process flat array of classification data
+                data.forEach(classification => {
+                    labels.push(classification.classification); // Already formatted as 'AX', 'BY', etc.
+                    revenues.push(classification.total_revenue || 0);
+                    skuCounts.push(classification.sku_count || 0);
+                    colors.push(colorMap[classification.abc_code] || 'rgba(107, 114, 128, 0.8)');
+                });
+
+                this.charts.matrix = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Revenue by Classification',
+                            data: revenues,
+                            backgroundColor: colors,
+                            borderColor: colors.map(c => c.replace('0.8', '1')),
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: 'ABC-XYZ Revenue Distribution'
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    afterLabel: (context) => {
+                                        const index = context.dataIndex;
+                                        return `SKUs: ${skuCounts[index]}`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Revenue ($)'
+                                },
+                                ticks: {
+                                    callback: value => this.formatCurrency(value)
+                                }
+                            },
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: 'Classification (ABC = Revenue, XYZ = Volatility)'
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
+            async loadAllSkus() {
+                const filters = {
+                    limit: 100,
+                    offset: this.allSkusOffset || 0,
+                    abc_filter: $('#abcFilterAll').val() || null,
+                    xyz_filter: $('#xyzFilterAll').val() || null,
+                    min_revenue: parseFloat($('#minRevenue').val()) || null,
+                    sort_by: $('#sortBy').val() || 'total_revenue_12m',
+                    sort_order: $('#sortOrder').val() || 'desc'
+                };
+
+                const params = new URLSearchParams();
+                Object.keys(filters).forEach(key => {
+                    if (filters[key] !== null && filters[key] !== undefined) {
+                        params.append(key, filters[key]);
+                    }
+                });
+
+                try {
+                    $('#all-skus-loading').show();
+                    const response = await fetch(`/api/sales/all-skus?${params.toString()}`);
+                    const result = await response.json();
+
+                    if (result.success) {
+                        this.renderAllSkusTable(result.data, result.pagination);
+                    } else {
+                        this.showError('Failed to load SKU data');
+                    }
+                } catch (error) {
+                    console.error('Error loading all SKUs:', error);
+                    this.showError('Failed to load SKU data');
+                } finally {
+                    $('#all-skus-loading').hide();
+                }
+            }
+
+            renderAllSkusTable(data, pagination) {
+                if (this.allSkusTable) {
+                    this.allSkusTable.destroy();
+                }
+
+                const tableData = data.map(row => [
+                    row.sku_id,
+                    row.description || 'N/A',
+                    row.category || 'N/A',
+                    `<span class="badge abc-badge-${row.abc_code || 'N'}">${row.abc_code || 'N/A'}</span>`,
+                    `<span class="badge xyz-badge-${row.xyz_code || 'N'}">${row.xyz_code || 'N/A'}</span>`,
+                    this.formatCurrency(row.total_revenue_12m || 0),
+                    this.formatNumber(row.total_units_12m || 0),
+                    this.formatCurrency(row.avg_selling_price || 0),
+                    this.formatPercentage(row.growth_rate_6m || 0),
+                    this.formatNumber(row.estimated_lost_sales || 0),
+                    this.formatNumber(row.current_ky_qty || 0),
+                    this.formatNumber(row.current_ca_qty || 0),
+                    `<button class="btn btn-sm btn-outline-primary" onclick="window.open('/static/sku-analysis.html?sku=${row.sku_id}', '_blank')">
+                        <i class="fas fa-search"></i> Analyze
+                    </button>`
+                ]);
+
+                this.allSkusTable = $('#allSkusTable').DataTable({
+                    data: tableData,
+                    paging: false, // We handle pagination manually
+                    searching: false, // We handle filtering manually
+                    ordering: false, // We handle sorting manually
+                    info: false, // We show custom pagination info
+                    scrollX: true,
+                    language: {
+                        emptyTable: "No SKUs found matching the current filters"
+                    }
+                });
+
+                // Update pagination info
+                this.updatePaginationInfo(pagination);
+            }
+
+            updatePaginationInfo(pagination) {
+                const start = pagination.offset + 1;
+                const end = Math.min(pagination.offset + pagination.limit, pagination.total);
+                $('#pagination-info').text(`Showing ${start}-${end} of ${pagination.total} SKUs`);
+
+                const currentPage = Math.floor(pagination.offset / pagination.limit) + 1;
+                const totalPages = Math.ceil(pagination.total / pagination.limit);
+                $('#pageInfo').text(`Page ${currentPage} of ${totalPages}`);
+
+                // Enable/disable pagination buttons
+                $('#prevPage').prop('disabled', pagination.offset === 0);
+                $('#nextPage').prop('disabled', !pagination.has_more);
+
+                // Store pagination state
+                this.allSkusPagination = pagination;
+            }
+
+            setupAllSkusEventHandlers() {
+                $('#applyFilters').on('click', () => {
+                    this.allSkusOffset = 0; // Reset to first page when filters change
+                    this.loadAllSkus();
+                });
+
+                $('#prevPage').on('click', () => {
+                    if (this.allSkusOffset > 0) {
+                        this.allSkusOffset = Math.max(0, this.allSkusOffset - 100);
+                        this.loadAllSkus();
+                    }
+                });
+
+                $('#nextPage').on('click', () => {
+                    if (this.allSkusPagination && this.allSkusPagination.has_more) {
+                        this.allSkusOffset = this.allSkusOffset + 100;
+                        this.loadAllSkus();
+                    }
+                });
+            }
+
+            formatPercentage(value) {
+                if (!value) return '0%';
+                const formatted = Math.round(value * 100) / 100;
+                return `${formatted > 0 ? '+' : ''}${formatted.toFixed(1)}%`;
+            }
+
+            async exportData() {
+                try {
+                    const response = await fetch(
+                        `/api/sales/export/summary?months_back=${this.currentFilters.monthsBack}&format=json`
+                    );
+                    const result = await response.json();
+
+                    if (result.success) {
+                        const dataStr = JSON.stringify(result.data, null, 2);
+                        const dataBlob = new Blob([dataStr], {type: 'application/json'});
+
+                        const link = document.createElement('a');
+                        link.href = URL.createObjectURL(dataBlob);
+                        link.download = `sales-analytics-${new Date().toISOString().split('T')[0]}.json`;
+                        link.click();
+                    }
+                } catch (error) {
+                    console.error('Export failed:', error);
+                    this.showError('Failed to export data');
+                }
+            }
+
+            formatCurrency(value) {
+                if (!value) return '$0';
+                return new Intl.NumberFormat('en-US', {
+                    style: 'currency',
+                    currency: 'USD',
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 0
+                }).format(value);
+            }
+
+            formatNumber(value) {
+                if (!value) return '0';
+                return new Intl.NumberFormat('en-US').format(value);
+            }
+
+            updateLastUpdated() {
+                const now = new Date();
+                $('#last-updated').text(`Updated: ${now.toLocaleTimeString()}`);
+            }
+
+            showLoading() {
+                $('.loading-spinner').show();
+            }
+
+            hideLoading() {
+                $('.loading-spinner').hide();
+            }
+
+            showError(message) {
+                $('#error-text').text(message);
+                $('#error-message').show();
+            }
+
+            hideError() {
+                $('#error-message').hide();
+            }
+        }
+
+        // Initialize dashboard when page loads
+        $(document).ready(() => {
+            new SalesDashboard();
+        });
+    </script>
+</body>
+</html>
