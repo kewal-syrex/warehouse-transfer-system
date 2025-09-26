@@ -124,13 +124,23 @@ class SKUAnalytics:
                 'kentucky_qty': (inventory['kentucky_qty'] if inventory else 0) or 0
             }
 
+            # Calculate warehouse-specific performance comparison
+            warehouse_comparison = self._calculate_warehouse_comparison(sales_history, months_back)
+
+            # Add calculated total_revenue per month to sales_history for chart display
+            enhanced_sales_history = []
+            for row in sales_history:
+                enhanced_row = dict(row)
+                enhanced_row['total_revenue'] = (row.get('burnaby_revenue', 0) or 0) + (row.get('kentucky_revenue', 0) or 0)
+                enhanced_sales_history.append(enhanced_row)
+
             return {
                 'sku_info': sku_info,
-                'sales_history': sales_history,
+                'sales_history': enhanced_sales_history,
                 'performance_metrics': {
-                    'total_sales_units': total_sales,
+                    'total_units': total_sales,  # Frontend expects 'total_units'
                     'total_revenue': round(total_revenue, 2),
-                    'avg_monthly_sales': round(avg_monthly_sales, 2),
+                    'avg_monthly_units': round(avg_monthly_sales, 2),  # Frontend expects 'avg_monthly_units'
                     'avg_selling_price': round(avg_selling_price, 2),
                     'months_with_sales': months_with_sales,
                     'months_analyzed': len(sales_history),
@@ -141,6 +151,7 @@ class SKUAnalytics:
                 },
                 'seasonal_patterns': seasonal_patterns,
                 'current_inventory': current_inventory,
+                'warehouse_comparison': warehouse_comparison,
                 'analysis_period': {
                     'months_back': months_back,
                     'start_date': sales_history[0]['year_month'] if sales_history else None,
@@ -333,6 +344,147 @@ class SKUAnalytics:
                 'message': 'Unable to generate insights due to data processing error.',
                 'metric': 0
             }]
+
+    def _calculate_warehouse_comparison(
+        self,
+        sales_history: List[Dict[str, Any]],
+        months_back: int
+    ) -> Dict[str, Any]:
+        """
+        Calculate detailed warehouse performance comparison metrics.
+
+        Args:
+            sales_history: List of monthly sales records with warehouse breakdowns
+            months_back: Number of months analyzed for context
+
+        Returns:
+            Dictionary with Burnaby and Kentucky performance comparisons
+        """
+        try:
+            if not sales_history:
+                return {
+                    'burnaby': self._empty_warehouse_metrics(),
+                    'kentucky': self._empty_warehouse_metrics()
+                }
+
+            # Separate Burnaby and Kentucky data
+            burnaby_data = []
+            kentucky_data = []
+
+            for record in sales_history:
+                burnaby_sales = record.get('burnaby_sales', 0) or 0
+                kentucky_sales = record.get('kentucky_sales', 0) or 0
+                burnaby_revenue = record.get('burnaby_revenue', 0) or 0
+                kentucky_revenue = record.get('kentucky_revenue', 0) or 0
+
+                burnaby_data.append({
+                    'sales': burnaby_sales,
+                    'revenue': burnaby_revenue,
+                    'month': record.get('year_month')
+                })
+
+                kentucky_data.append({
+                    'sales': kentucky_sales,
+                    'revenue': kentucky_revenue,
+                    'month': record.get('year_month')
+                })
+
+            # Calculate metrics for each warehouse
+            burnaby_metrics = self._calculate_individual_warehouse_metrics(burnaby_data, 'Burnaby')
+            kentucky_metrics = self._calculate_individual_warehouse_metrics(kentucky_data, 'Kentucky')
+
+            # Calculate relative performance
+            total_revenue = burnaby_metrics['revenue'] + kentucky_metrics['revenue']
+            total_units = burnaby_metrics['units'] + kentucky_metrics['units']
+
+            if total_revenue > 0:
+                burnaby_metrics['revenue_percentage'] = round((burnaby_metrics['revenue'] / total_revenue) * 100, 1)
+                kentucky_metrics['revenue_percentage'] = round((kentucky_metrics['revenue'] / total_revenue) * 100, 1)
+            else:
+                burnaby_metrics['revenue_percentage'] = 0
+                kentucky_metrics['revenue_percentage'] = 0
+
+            if total_units > 0:
+                burnaby_metrics['units_percentage'] = round((burnaby_metrics['units'] / total_units) * 100, 1)
+                kentucky_metrics['units_percentage'] = round((kentucky_metrics['units'] / total_units) * 100, 1)
+            else:
+                burnaby_metrics['units_percentage'] = 0
+                kentucky_metrics['units_percentage'] = 0
+
+            return {
+                'burnaby': burnaby_metrics,
+                'kentucky': kentucky_metrics
+            }
+
+        except Exception as e:
+            logger.error(f"Error calculating warehouse comparison: {e}")
+            return {
+                'burnaby': self._empty_warehouse_metrics(),
+                'kentucky': self._empty_warehouse_metrics()
+            }
+
+    def _calculate_individual_warehouse_metrics(
+        self,
+        warehouse_data: List[Dict[str, Any]],
+        warehouse_name: str
+    ) -> Dict[str, Any]:
+        """
+        Calculate performance metrics for an individual warehouse.
+
+        Args:
+            warehouse_data: List of monthly data for the warehouse
+            warehouse_name: Name of the warehouse for logging
+
+        Returns:
+            Dictionary with calculated warehouse metrics
+        """
+        try:
+            total_revenue = sum(record['revenue'] for record in warehouse_data)
+            total_units = sum(record['sales'] for record in warehouse_data)
+            active_months = len([record for record in warehouse_data if record['sales'] > 0])
+
+            # Calculate average selling price
+            avg_selling_price = (total_revenue / total_units) if total_units > 0 else 0
+
+            # Calculate growth rate (last 6 months vs previous 6 months)
+            growth_rate = 0
+            if len(warehouse_data) >= 12:
+                recent_revenue = sum(record['revenue'] for record in warehouse_data[-6:])
+                previous_revenue = sum(record['revenue'] for record in warehouse_data[-12:-6])
+                growth_rate = ((recent_revenue - previous_revenue) / previous_revenue * 100) if previous_revenue > 0 else 0
+
+            return {
+                'revenue': round(total_revenue, 2),
+                'units': total_units,
+                'active_months': active_months,
+                'avg_selling_price': round(avg_selling_price, 2),
+                'growth_rate': round(growth_rate, 2),
+                'avg_monthly_revenue': round(total_revenue / len(warehouse_data), 2) if warehouse_data else 0,
+                'avg_monthly_units': round(total_units / len(warehouse_data), 2) if warehouse_data else 0
+            }
+
+        except Exception as e:
+            logger.error(f"Error calculating metrics for {warehouse_name}: {e}")
+            return self._empty_warehouse_metrics()
+
+    def _empty_warehouse_metrics(self) -> Dict[str, Any]:
+        """
+        Return empty warehouse metrics structure for error cases.
+
+        Returns:
+            Dictionary with zero/empty values for all warehouse metrics
+        """
+        return {
+            'revenue': 0,
+            'units': 0,
+            'active_months': 0,
+            'avg_selling_price': 0,
+            'growth_rate': 0,
+            'revenue_percentage': 0,
+            'units_percentage': 0,
+            'avg_monthly_revenue': 0,
+            'avg_monthly_units': 0
+        }
 
 
 def search_skus(search_term: str, limit: int = 10) -> List[Dict[str, Any]]:

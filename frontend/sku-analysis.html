@@ -637,7 +637,7 @@ Completely separate from transfer planning to maintain system stability.
             }
 
             renderAnalysis(data) {
-                const { sku_info, performance_metrics, seasonal_patterns, warehouse_comparison, insights, stockout_analysis } = data;
+                const { sku_info, performance_metrics, seasonal_patterns, warehouse_comparison, insights, stockout_analysis, current_inventory } = data;
 
                 // Update header
                 $('#sku-title').text(`${sku_info.sku_id} Analysis`);
@@ -652,8 +652,8 @@ Completely separate from transfer planning to maintain system stability.
                 `;
                 $('#sku-badges').html(badgesHtml);
 
-                // Render metrics
-                this.renderMetrics(performance_metrics, sku_info);
+                // Render metrics with current inventory data
+                this.renderMetrics(performance_metrics, current_inventory);
 
                 // Render charts
                 this.renderPerformanceChart(data.sales_history);
@@ -672,7 +672,7 @@ Completely separate from transfer planning to maintain system stability.
                 this.renderInsights(insights || []);
             }
 
-            renderMetrics(metrics, skuInfo) {
+            renderMetrics(metrics, currentInventory) {
                 const metricsHtml = `
                     <div class="metric-card">
                         <div class="metric-label">Total Revenue</div>
@@ -683,13 +683,13 @@ Completely separate from transfer planning to maintain system stability.
                     <div class="metric-card">
                         <div class="metric-label">Total Units</div>
                         <h2 class="metric-value">${this.formatNumber(metrics.total_units)}</h2>
-                        <div class="metric-subtitle">Avg: ${metrics.avg_monthly_units}/month</div>
+                        <div class="metric-subtitle">Avg: ${this.formatNumber(metrics.avg_monthly_units)}/month</div>
                     </div>
 
                     <div class="metric-card">
                         <div class="metric-label">Growth Rate</div>
                         <h2 class="metric-value ${metrics.growth_rate_6m >= 0 ? 'text-success' : 'text-danger'}">
-                            ${(metrics.growth_rate_6m || 0) >= 0 ? '+' : ''}${(metrics.growth_rate_6m || 0).toFixed(1)}%
+                            ${(parseFloat(metrics.growth_rate_6m) || 0) >= 0 ? '+' : ''}${(parseFloat(metrics.growth_rate_6m) || 0).toFixed(1)}%
                         </h2>
                         <div class="metric-subtitle">6-month trend</div>
                     </div>
@@ -702,14 +702,14 @@ Completely separate from transfer planning to maintain system stability.
 
                     <div class="metric-card">
                         <div class="metric-label">Current Stock</div>
-                        <h2 class="metric-value">${this.formatNumber((skuInfo.burnaby_qty || 0) + (skuInfo.kentucky_qty || 0))}</h2>
+                        <h2 class="metric-value">${this.formatNumber((currentInventory?.burnaby_qty || 0) + (currentInventory?.kentucky_qty || 0))}</h2>
                         <div class="metric-subtitle">Both warehouses</div>
                     </div>
 
                     <div class="metric-card">
                         <div class="metric-label">Sales Consistency</div>
-                        <h2 class="metric-value ${(metrics.sales_consistency || 0) >= 80 ? 'text-success' : (metrics.sales_consistency || 0) >= 50 ? 'text-warning' : 'text-danger'}">
-                            ${(metrics.sales_consistency || 0).toFixed(0)}%
+                        <h2 class="metric-value ${(parseFloat(metrics.sales_consistency) || 0) >= 80 ? 'text-success' : (parseFloat(metrics.sales_consistency) || 0) >= 50 ? 'text-warning' : 'text-danger'}">
+                            ${(parseFloat(metrics.sales_consistency) || 0).toFixed(0)}%
                         </h2>
                         <div class="metric-subtitle">Predictability score</div>
                     </div>
@@ -898,8 +898,8 @@ Completely separate from transfer planning to maintain system stability.
                     </div>
                     <div class="metric-row">
                         <span class="metric-row-label">Growth:</span>
-                        <span class="metric-row-value ${(comparison.burnaby?.growth_rate || 0) >= 0 ? 'text-success' : 'text-danger'}">
-                            ${(comparison.burnaby?.growth_rate || 0) >= 0 ? '+' : ''}${(comparison.burnaby?.growth_rate || 0).toFixed(1)}%
+                        <span class="metric-row-value ${(parseFloat(comparison.burnaby?.growth_rate) || 0) >= 0 ? 'text-success' : 'text-danger'}">
+                            ${(parseFloat(comparison.burnaby?.growth_rate) || 0) >= 0 ? '+' : ''}${(parseFloat(comparison.burnaby?.growth_rate) || 0).toFixed(1)}%
                         </span>
                     </div>
                 `;
@@ -928,8 +928,8 @@ Completely separate from transfer planning to maintain system stability.
                     </div>
                     <div class="metric-row">
                         <span class="metric-row-label">Growth:</span>
-                        <span class="metric-row-value ${(comparison.kentucky?.growth_rate || 0) >= 0 ? 'text-success' : 'text-danger'}">
-                            ${(comparison.kentucky?.growth_rate || 0) >= 0 ? '+' : ''}${(comparison.kentucky?.growth_rate || 0).toFixed(1)}%
+                        <span class="metric-row-value ${(parseFloat(comparison.kentucky?.growth_rate) || 0) >= 0 ? 'text-success' : 'text-danger'}">
+                            ${(parseFloat(comparison.kentucky?.growth_rate) || 0) >= 0 ? '+' : ''}${(parseFloat(comparison.kentucky?.growth_rate) || 0).toFixed(1)}%
                         </span>
                     </div>
                 `;
