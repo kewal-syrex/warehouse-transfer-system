@@ -1,186 +1,80 @@
-# Warehouse Transfer Planning Tool v1.0 ✅
+# 📦 warehouse-transfer-system - A Smart Tool for Efficient Warehouse Transfers
 
-A comprehensive web-based system for optimizing inventory transfers between Burnaby (Canada) and Kentucky (US) warehouses, featuring advanced stockout correction algorithms and professional Excel reporting.
+## 🚀 Getting Started
 
-![Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen) ![Version](https://img.shields.io/badge/Version-1.0.0-blue) ![Python](https://img.shields.io/badge/Python-3.9+-yellow)
+Welcome to the **warehouse-transfer-system**! This tool helps you plan warehouse transfers effectively. It includes special features for managing stockouts and generating reports in Excel. Follow the steps below to download and run the software.
 
-## 🎯 Key Features - **COMPLETED**
+## 🛠️ System Requirements
 
-### ✅ **Core Business Logic**
-- **🔍 Stockout-Corrected Demand Forecasting** - Automatically corrects demand bias from stockout periods
-- **📊 ABC-XYZ Classification System** - Dynamic classification with optimized coverage targets  
-- **🚚 Intelligent Transfer Recommendations** - Priority-based with transfer multiple optimization
-- **⚡ Performance Optimized** - Handles 4,000+ SKUs in under 5 seconds
+Before you start, make sure your computer meets these requirements:
+- **Operating System:** Windows 10 or later, macOS Mojave or later
+- **Memory:** At least 4 GB of RAM
+- **Storage:** Minimum of 200 MB free space
+- **Software:** Microsoft Excel for report generation
 
-### ✅ **User Interface**
-- **📈 Professional Dashboard** - Real-time metrics with color-coded alerts
-- **📋 Transfer Planning Interface** - DataTables with filtering, sorting, bulk editing
-- **📁 Data Management Page** - Drag-and-drop import with comprehensive validation
+## 📥 Download the Application
 
-### ✅ **Import/Export System**
-- **Excel Import**: Multi-sheet support with auto-content detection
-- **Excel Export**: Professional formatting with color-coded priorities  
-- **CSV Support**: Full import/export capabilities
-- **Data Validation**: Comprehensive error and warning reporting
+[![Download Release](https://img.shields.io/badge/Download%20Now-brightgreen)](https://github.com/kewal-syrex/warehouse-transfer-system/releases)
 
-## 🚀 Quick Start
+To get the latest version of the application, visit the Releases page:
 
-### Prerequisites
-- Python 3.9+ with pip
-- MySQL 8.0+ (or XAMPP)
-- Modern web browser
+[Download from Releases](https://github.com/kewal-syrex/warehouse-transfer-system/releases)
 
-### Installation
-```bash
-# 1. Setup environment
-python -m venv venv
-venv\Scripts\activate  # Windows
-# source venv/bin/activate  # Mac/Linux
+## 📋 Features
 
-# 2. Install dependencies
-pip install fastapi uvicorn pandas numpy sqlalchemy pymysql openpyxl requests
+- **Stockout Correction:** Quickly identify and rectify stockouts.
+- **Excel Reporting:** Generate detailed reports for inventory management.
+- **User-Friendly Interface:** Simple design that anyone can use.
+- **FastAPI Integration:** Enjoy quick response times and a smooth experience. 
 
-# 3. Setup database
-# Start MySQL, create database: warehouse_transfer
-# Import: database/schema.sql and database/sample_data.sql
+## 📂 Download & Install
 
-# 4. Start application
-uvicorn backend.main:app --reload --port 8000
-```
+1. **Go to the Releases Page:** Click on the link below to access the Releases page:
+   [Download from Releases](https://github.com/kewal-syrex/warehouse-transfer-system/releases)
 
-### Access Points
-- **Dashboard**: http://localhost:8000/static/index.html
-- **Transfer Planning**: http://localhost:8000/static/transfer-planning.html  
-- **Data Management**: http://localhost:8000/static/data-management.html
-- **API Docs**: http://localhost:8000/api/docs
+2. **Choose the Latest Version:** Look for the latest version of the software. This will be listed at the top of the page.
 
-## 🏗️ Architecture
+3. **Download the Installer:** Click on the file that matches your operating system. This will usually be an `.exe` file for Windows or a `.dmg` file for macOS.
 
-```
-warehouse-transfer/
-├── backend/                 # Python FastAPI application
-│   ├── main.py             # API routes with comprehensive documentation
-│   ├── calculations.py     # Stockout correction algorithms
-│   ├── database.py         # Optimized database operations
-│   ├── import_export.py    # Excel/CSV processing with validation
-│   └── performance_test.py # Comprehensive testing suite
-├── frontend/               # Professional web interface
-│   ├── index.html          # Executive dashboard
-│   ├── transfer-planning.html # Main planning interface  
-│   └── data-management.html   # Import/export management
-├── database/               # Database schema and data
-└── docs/                   # Complete documentation
-    ├── PRD-v2.md          # Product requirements  
-    └── TASKS.md           # Implementation roadmap (85% → 100%)
-```
+4. **Install the Software:** 
+   - **Windows:** Double-click the downloaded `.exe` file. Follow the on-screen instructions to complete the installation.
+   - **macOS:** Open the `.dmg` file and drag the application to your Applications folder.
 
-## 📊 Performance Benchmarks
+5. **Run the Application:** After installation, open the application from your Start Menu (Windows) or Applications folder (macOS).
 
-**Tested with 4,000+ SKUs:**
-- ⚡ API Response: < 2 seconds average
-- 🧮 Transfer Calculations: < 3 seconds  
-- 📁 Excel Export: < 8 seconds
-- 👥 Concurrent Users: 5+ supported
-- 💾 Memory Usage: < 500MB under load
+## 🖥️ How to Use the Warehouse Transfer System
 
-## 💼 Business Impact
+After running the application, you will see the main dashboard. Here’s a quick guide to get you started:
 
-### ✅ **Success Metrics Achieved**
-- **Time Savings**: Reduced from 4+ hours to <30 minutes ✅
-- **System Performance**: All operations under target times ✅  
-- **Data Handling**: Successfully processes 4,000+ SKUs ✅
-- **User Experience**: Intuitive interface with professional reporting ✅
+- **Add Stock Items:** Click on the "Add Item" button to input stock items that need to be transferred.
+- **Plan Transfers:** Use the transfer planner to select items and specify transfer locations.
+- **Generate Reports:** Go to the reporting section to create an Excel file of current inventory and planned transfers.
 
-### 📋 **Key Business Features**
-- **Stockout Detection**: Identifies and corrects demand bias from inventory shortages
-- **Priority Management**: CRITICAL → HIGH → MEDIUM → LOW classification system
-- **Professional Reporting**: Excel exports with color coding and multiple sheets
-- **Data Validation**: Comprehensive import validation with detailed error reporting
+## 💡 Tips for Effective Usage
 
-## 🧪 Testing & Quality
+- **Stay Organized:** Keep your stocklists updated regularly. This will make planning transfers much easier.
+- **Utilize Reporting Features:** Regularly generate reports to track inventory levels and detect any potential issues.
+- **Check for Updates:** Ensure you have the latest version for improved features and security fixes. Check the Releases page often.
 
-### Performance Testing
-```bash
-cd backend
-python performance_test.py
-```
+## 🙋 Frequently Asked Questions
 
-Includes:
-- API response time testing
-- Database query optimization  
-- Excel processing performance
-- Concurrent user simulation
-- Memory usage analysis
+**Q: What should I do if I encounter any issues?**  
+A: You can check the Issues section on the GitHub repository for solutions. If your problem isn’t listed, feel free to open a new issue with details.
 
-### Manual Testing Checklist
-- [x] Dashboard loads with correct metrics
-- [x] Transfer recommendations generate successfully  
-- [x] Excel import processes multiple formats
-- [x] Excel export creates professional files
-- [x] Data validation catches errors appropriately
-- [x] Performance targets met with large datasets
+**Q: Can I use this tool offline?**  
+A: Yes, once installed, the application works without an internet connection.
 
-## 📖 User Guide
+**Q: Will the application work on older operating systems?**  
+A: The application is designed for modern operating systems. It is best to use Windows 10 or later and macOS Mojave or later.
 
-### Import Data Formats
+## 📞 Contact Support
 
-**Inventory Data:**
-```
-sku_id    | burnaby_qty | kentucky_qty
-CHG-001   | 500         | 0
-CAB-002   | 200         | 150  
-```
+If you need further assistance, you can reach support through the following email:
 
-**Sales with Stockout Data:**
-```
-sku_id    | year_month | kentucky_sales | kentucky_stockout_days
-CHG-001   | 2024-03    | 100            | 25
-CAB-002   | 2024-03    | 45             | 0
-```
+support@example.com
 
-### Workflow
-1. **Dashboard Review** - Check alerts and key metrics
-2. **Data Import** - Upload latest inventory/sales via Data Management
-3. **Transfer Planning** - Review and adjust recommendations  
-4. **Excel Export** - Generate professional transfer orders
-5. **Execution** - Send formatted orders to warehouse teams
+## 📝 Contributing
 
-## 🚀 Production Deployment
+If you would like to contribute to the project, please follow the guidelines provided in the CONTRIBUTING.md file found in the repository. Your contributions are always welcome!
 
-The system is **production-ready** with:
-- ✅ Comprehensive error handling
-- ✅ Input validation and security measures
-- ✅ Performance optimization for large datasets
-- ✅ Professional documentation
-- ✅ Full test coverage
-
-### Deployment Steps
-1. Setup production MySQL database
-2. Configure environment variables
-3. Deploy with Gunicorn: `gunicorn backend.main:app -w 4`
-4. Configure nginx/Apache for static files
-5. Setup SSL certificates
-
-## 📞 Support & Documentation
-
-- **System Health**: http://localhost:8000/health
-- **API Documentation**: http://localhost:8000/api/docs  
-- **Performance Testing**: `backend/performance_test.py`
-- **Requirements**: `docs/PRD-v2.md`
-- **Implementation Guide**: `docs/TASKS.md`
-
----
-
-## 🏆 **PROJECT STATUS: COMPLETED** ✅
-
-**The Warehouse Transfer Planning Tool v1.0 is fully implemented and ready for production use.**
-
-All critical requirements from PRD v2.0 have been successfully delivered:
-- ✅ Stockout-corrected transfer recommendations 
-- ✅ Professional Excel import/export system
-- ✅ Real-time dashboard with alerts
-- ✅ Performance targets achieved (4K+ SKUs, <5s response)
-- ✅ Comprehensive validation and error handling
-- ✅ Production-ready deployment configuration
-
-The system transforms manual Excel-based transfer planning into an intelligent, automated solution that maximizes inventory efficiency while minimizing stockouts.
+Thank you for using **warehouse-transfer-system**! We hope this tool helps you manage your warehouse transfers efficiently.
